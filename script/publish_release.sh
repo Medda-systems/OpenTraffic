@@ -40,6 +40,7 @@ trap 'rm -f "$NOTES"' EXIT
 
 \`\`\`sh
 brew tap medda-systems/tap
+brew trust --cask medda-systems/tap/opentraffic
 brew install --cask opentraffic
 \`\`\`
 
@@ -66,4 +67,4 @@ git -C "$TAP" push -q
 
 echo "Published OpenTraffic $VERSION:"
 echo "  https://github.com/$RELEASES_REPO/releases/tag/$TAG"
-echo "  brew tap medda-systems/tap && brew install --cask opentraffic"
+echo "  brew tap medda-systems/tap && brew trust --cask medda-systems/tap/opentraffic && brew install --cask opentraffic"

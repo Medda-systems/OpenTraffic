@@ -16,8 +16,11 @@ With Homebrew:
 
 ```sh
 brew tap medda-systems/tap
+brew trust --cask medda-systems/tap/opentraffic
 brew install --cask opentraffic
 ```
+
+Homebrew asks you to trust casks from taps outside its official collection; the second line trusts just this one.
 
 Or download it:
 
