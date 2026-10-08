@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1
+
+- **Automatic updates.** OpenTraffic checks for new versions once a day and installs them, verified with Medda Systems' signing key. **Check for Updates…** is in the app menu, and Settings → General has the options.
+- **Homebrew:** `brew install --cask medda-systems/tap/opentraffic`.
+- Stopping a share closes every visitor connection, including ones the tunnel kept open.
+- Webhook signing secrets are kept in the Keychain.
+- The `opentraffic` command checks its arguments and accepts `host:port` without `http://`.
+
 ## 1.0.0
 
 First public release.

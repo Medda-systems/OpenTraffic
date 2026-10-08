@@ -66,6 +66,8 @@ private struct GeneralSettingsView: View {
                 }
             }
 
+            UpdatesSettingsSection()
+
             Section {
                 Picker("Share button uses", selection: $store.defaultShareKind) {
                     Text("Temporary URL (Cloudflare)").tag(TunnelKind.quick)

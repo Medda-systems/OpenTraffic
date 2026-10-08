@@ -10,6 +10,11 @@ struct TunnelCommands: Commands {
 
     var body: some Commands {
         let _ = MainWindowController.shared.registerOpener(openWindow)
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…", action: Updates.checkForUpdates)
+                .disabled(!Updates.isAvailable)
+        }
+
         CommandGroup(replacing: .newItem) {
             Button(Vocabulary.newTunnel) { router.show(sheet: .newTunnel(.quick)) }
                 .keyboardShortcut("n")

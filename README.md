@@ -12,7 +12,15 @@ Quick Tunnel and OpenTunnel shares can also turn on **live collaboration**: ever
 
 ## Install
 
-1. Download `OpenTraffic-<version>.dmg` from the [Releases](../../releases) page and open it.
+With Homebrew:
+
+```sh
+brew install --cask medda-systems/tap/opentraffic
+```
+
+Or download it:
+
+1. Download `OpenTraffic-<version>.dmg` from [OpenTraffic releases](https://github.com/Medda-systems/OpenTraffic-releases/releases/latest) and open it.
 2. Drag **OpenTraffic** onto **Applications**.
 3. Open OpenTraffic from Applications. Release builds are not notarized by Apple, so the first launch is blocked:
    - **macOS 15 or later:** open **System Settings → Privacy & Security**, scroll down to the message about OpenTraffic, and click **Open Anyway**.
@@ -20,6 +28,8 @@ Quick Tunnel and OpenTunnel shares can also turn on **live collaboration**: ever
 4. Install `cloudflared`, either with `brew install cloudflared` or from [Cloudflare's downloads](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/). Tailscale and ngrok are optional.
 
 You can check a download against the `.sha256` file published next to it with `shasum -a 256 -c OpenTraffic-<version>.dmg.sha256`.
+
+OpenTraffic updates itself: it checks once a day, and **Check for Updates…** is in the app menu. Updates are signed with Medda Systems' key and verified before they're installed. Settings → General can turn the checks or background installs off.
 
 ## Overview
 
@@ -76,6 +86,17 @@ This builds a universal (Apple silicon and Intel) release app, signs it, and wri
 - By default the app is signed ad hoc, which is free but Gatekeeper asks users to approve the first launch.
 - With an Apple Developer ID, set `OPENTRAFFIC_SIGNING_IDENTITY="Developer ID Application: …"` to sign with the hardened runtime.
 - Also set `OPENTRAFFIC_NOTARY_PROFILE` to the name of a `xcrun notarytool store-credentials` profile, and the disk image is notarized and stapled too.
+
+It also writes `dist/release/appcast.xml`, the update feed, and signs both the feed and the disk image with the update key. That key is the "Private key for signing Sparkle updates" item (account `medda-systems`) in the release maintainer's Keychain; keep an exported copy somewhere safe, because installed copies only accept updates signed with it.
+
+To publish a version: set `VERSION`, add its section to `CHANGELOG.md`, commit and push, then run:
+
+```sh
+./script/package_dmg.sh
+./script/publish_release.sh
+```
+
+This tags the source, creates the public release in [Medda-systems/OpenTraffic-releases](https://github.com/Medda-systems/OpenTraffic-releases), with the disk image, its checksum, and the update feed, and updates the Homebrew cask in [Medda-systems/homebrew-tap](https://github.com/Medda-systems/homebrew-tap).
 
 Run the test suite with:
 
@@ -273,6 +294,7 @@ OpenTraffic has no analytics, telemetry, or account of its own. It only connects
   - `api.cloudflare.com`, only when you connect a Cloudflare account.
   - `cloudflare-dns.com` (DNS over HTTPS), to see whether a new public hostname resolves yet.
   - Your shares' public URLs, for health checks.
+- **GitHub:** once a day, to check `github.com/Medda-systems/OpenTraffic-releases` for updates (you can turn this off in Settings → General).
 - **The connectors it runs:** `cloudflared`, `tailscale`, `ngrok`, and `opentunnel` each talk to their own service. OpenTunnel keeps its own files in `~/.config/opentunnel`, `~/.local/share/opentunnel`, and `~/.local/state/opentunnel` (OpenTraffic's are the `opentraffic` profile).
 
 Where it keeps things:

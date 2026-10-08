@@ -4,6 +4,10 @@ set -euo pipefail
 MODE="${1:-run}"
 APP_NAME="OpenTraffic"
 BUNDLE_ID="se.medda.opentraffic"
+# Updates (Sparkle): the feed every release publishes, and the public half of the signing key
+# (the private half is in the release maintainer's Keychain; see script/package_dmg.sh).
+UPDATE_FEED_URL="https://github.com/Medda-systems/OpenTraffic-releases/releases/latest/download/appcast.xml"
+UPDATE_PUBLIC_KEY="aTnLSOMC0+XmcukPKUV0UCZeBOJ29DKP+jREbOihW5A="
 MIN_SYSTEM_VERSION="14.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,7 +19,7 @@ ARCH_ARGS=()
 for arch in ${OPENTRAFFIC_ARCHS:-}; do ARCH_ARGS+=(--arch "$arch"); done
 DIST_DIR="${OPENTRAFFIC_DIST_DIR:-$ROOT_DIR/dist}"
 VERSION="$(tr -d '[:space:]' < "$ROOT_DIR/VERSION")"
-BUILD_NUMBER="$(git -C "$ROOT_DIR" rev-list --count HEAD 2>/dev/null || echo 1)"
+BUILD_NUMBER="${OPENTRAFFIC_BUILD_NUMBER:-$(git -C "$ROOT_DIR" rev-list --count HEAD 2>/dev/null || echo 1)}"
 COPYRIGHT_YEAR="$(date +%Y)"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
@@ -52,6 +56,13 @@ chmod +x "$APP_BINARY"
 # The stdio MCP bridge (Integrations/README.md); inside the bundle so it's signed with the app.
 cp "$BUILD_BIN/opentraffic-mcp" "$APP_MACOS/opentraffic-mcp"
 chmod +x "$APP_MACOS/opentraffic-mcp"
+# Sparkle, for updates. The app finds it in Contents/Frameworks, never in the build folder.
+mkdir -p "$APP_CONTENTS/Frameworks"
+ditto "$BUILD_BIN/Sparkle.framework" "$APP_CONTENTS/Frameworks/Sparkle.framework"
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_BINARY"
+while read -r rpath; do
+  install_name_tool -delete_rpath "$rpath" "$APP_BINARY"
+done < <(otool -l "$APP_BINARY" | awk '/LC_RPATH/ { getline; getline; print $2 }' | grep "^$ROOT_DIR/" || true)
 cp "$ROOT_DIR/Assets/OpenTraffic.icns" "$APP_RESOURCES/OpenTraffic.icns"
 cp "$ROOT_DIR/Sources/OpenTraffic/Resources/opentraffic-menu.svg" "$APP_RESOURCES/opentraffic-menu.svg"
 # The opentraffic command-line tool, which drives the app through opentraffic:// links.
@@ -101,6 +112,16 @@ cat >"$INFO_PLIST" <<PLIST
   <string>public.app-category.developer-tools</string>
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_SYSTEM_VERSION</string>
+  <key>SUFeedURL</key>
+  <string>$UPDATE_FEED_URL</string>
+  <key>SUPublicEDKey</key>
+  <string>$UPDATE_PUBLIC_KEY</string>
+  <key>SUEnableAutomaticChecks</key>
+  <true/>
+  <key>SURequireSignedFeed</key>
+  <true/>
+  <key>SUVerifyUpdateBeforeExtraction</key>
+  <true/>
   <key>CFBundleURLTypes</key>
   <array>
     <dict>
@@ -145,6 +166,16 @@ else
   SIGNING_ARGS=(--force --sign -)
 fi
 /usr/bin/codesign "${SIGNING_ARGS[@]}" --identifier "$BUNDLE_ID.mcp" "$APP_MACOS/opentraffic-mcp"
+# Sparkle's helpers inside out, then the framework (the order Sparkle documents for Developer ID).
+SPARKLE="$APP_CONTENTS/Frameworks/Sparkle.framework"
+for helper in "$SPARKLE"/Versions/B/XPCServices/*.xpc "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"; do
+  if [[ "$helper" == *Downloader.xpc ]]; then
+    /usr/bin/codesign "${SIGNING_ARGS[@]}" --preserve-metadata=entitlements "$helper"
+  else
+    /usr/bin/codesign "${SIGNING_ARGS[@]}" "$helper"
+  fi
+done
+/usr/bin/codesign "${SIGNING_ARGS[@]}" "$SPARKLE"
 APP_SIGNING_ARGS=("${SIGNING_ARGS[@]}" --identifier "$BUNDLE_ID")
 if [[ -n "${OPENTRAFFIC_ENTITLEMENTS_PATH:-}" ]]; then
   APP_SIGNING_ARGS+=(--entitlements "$OPENTRAFFIC_ENTITLEMENTS_PATH")

@@ -11,6 +11,8 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
+        // Automatic updates.
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.0"),
     ],
     targets: [
         .target(
@@ -24,7 +26,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "OpenTraffic",
-            dependencies: ["OpenTrafficCore"],
+            dependencies: [
+                "OpenTrafficCore",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
             exclude: ["Resources"]
         ),
         // The stdio MCP bridge bundled in the app; Foundation only, so it stays small.

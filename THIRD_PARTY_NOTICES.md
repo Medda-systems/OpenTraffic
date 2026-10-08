@@ -18,6 +18,13 @@ Their license texts are in [`Licenses/`](Licenses), together with SwiftNIO's `NO
 credits code it derives from Netty, llhttp, and others). The app bundle carries the same files in
 `OpenTraffic.app/Contents/Resources/Licenses`.
 
+## Sparkle (embedded in the app)
+
+[Sparkle](https://sparkle-project.org) 2.10.0, which installs OpenTraffic's updates, is © Andy
+Matuschak and the Sparkle contributors under the MIT License. It includes code under other
+permissive licenses, listed in its license file, `Licenses/Sparkle-LICENSE.txt`. It's embedded as
+`OpenTraffic.app/Contents/Frameworks/Sparkle.framework`.
+
 ## Provider marks
 
 `Sources/OpenTraffic/Resources/provider-cloudflare.svg`, `provider-ngrok.svg`, and

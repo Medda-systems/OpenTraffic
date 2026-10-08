@@ -46,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         source.resume()
         terminationSignalSource = source
         ApplicationsMover.offerIfNeeded()
+        Updates.start()
         #if DEBUG
         DebugSnapshots.runIfRequested(store: AppStore.shared)
         #endif
