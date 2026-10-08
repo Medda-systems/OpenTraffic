@@ -54,7 +54,10 @@ This build isn't notarized yet, so when installed from the disk image or Homebre
 Universal (Apple silicon and Intel), macOS 14 or later.
 TEXT
 } > "$NOTES"
-gh release create "$TAG" "$DMG" "$DMG.sha256" "$OUT_DIR/appcast.xml" "$ROOT_DIR/script/install.sh" \
+# OpenTraffic.dmg is the same file under a fixed name, so …/releases/latest/download/OpenTraffic.dmg
+# always downloads the newest version (opentraffic.dev links to it).
+cp "$DMG" "$OUT_DIR/OpenTraffic.dmg"
+gh release create "$TAG" "$DMG" "$DMG.sha256" "$OUT_DIR/OpenTraffic.dmg" "$OUT_DIR/appcast.xml" "$ROOT_DIR/script/install.sh" \
   --repo "$RELEASES_REPO" --title "OpenTraffic $VERSION" --notes-file "$NOTES" --latest
 
 # 2. The Homebrew cask.

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenTraffic — share localhost, collaborate live</title>
+    <meta name="description" content="A macOS menu bar app that puts the dev server you're running on a public URL in one click — through Cloudflare, Tailscale, ngrok, or OpenTunnel — with live cursors, pinned comments, and feedback your coding agent can act on." />
+    <link rel="canonical" href="https://opentraffic.dev/" />
+    <link rel="icon" href="/favicon-64.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="OpenTraffic" />
+    <meta property="og:url" content="https://opentraffic.dev/" />
+    <meta property="og:title" content="OpenTraffic — share localhost, collaborate live" />
+    <meta property="og:description" content="Put the dev server you're running on a public URL in one click, and let everyone who opens it point, comment, and follow along." />
+    <meta property="og:image" content="https://opentraffic.dev/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Apply the saved or system theme before the first paint.
+      const theme = localStorage.getItem("theme") ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+      document.documentElement.classList.toggle("dark", theme === "dark")
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

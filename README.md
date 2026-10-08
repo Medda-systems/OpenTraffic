@@ -1,21 +1,70 @@
-# OpenTraffic
+<p align="center">
+  <img src="docs/images/app-icon.png" width="128" alt="OpenTraffic icon">
+</p>
 
-OpenTraffic is a native macOS menu bar app for sharing the web servers you run while developing. It publishes them through:
+<h1 align="center">OpenTraffic</h1>
 
-- **Cloudflare Quick Tunnels**: a temporary `trycloudflare.com` URL with no account setup.
-- **Cloudflare custom domains**: tunnels in your Cloudflare account, on your own hostname.
-- **Tailscale**: privately on your tailnet, or publicly with Funnel.
-- **ngrok**: with your ngrok account.
-- **OpenTunnel**: a lasting `opentunnel.xyz` address, encrypted until it reaches your Mac, with no account.
+<p align="center">
+  <b>Share localhost. Collaborate live.</b><br>
+  A macOS menu bar app that puts the dev server you're running on a public URL in one click,<br>
+  then lets everyone who opens it point, comment, and follow along.
+</p>
 
-Quick Tunnel and OpenTunnel shares can also turn on **live collaboration**: everyone who opens the link sees each other's cursors and can pin comments to the page. Coding agents can pick that feedback up over MCP.
+<p align="center">
+  <a href="https://opentraffic.dev"><b>opentraffic.dev</b></a> ·
+  <a href="https://github.com/Medda-systems/OpenTraffic-releases/releases/latest">Download</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#integrations-coding-agents-your-apps-webhooks">Coding agents</a>
+</p>
+
+<p align="center">
+  <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-0b1220?logo=apple&logoColor=white">
+  <img alt="Apple silicon and Intel" src="https://img.shields.io/badge/Apple%20silicon%20%26%20Intel-universal-0b1220">
+  <a href="https://github.com/Medda-systems/OpenTraffic-releases/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Medda-systems/OpenTraffic-releases?color=16a34a&label=release"></a>
+  <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-0b1220">
+</p>
+
+<p align="center">
+  <img src="docs/images/demo.gif" width="880" alt="Sharing a dev server from the menu bar, collaborating with live cursors and pinned comments, and a coding agent fixing the feedback">
+</p>
+
+## Why OpenTraffic
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/share.png" alt="The menu bar popover listing local servers, with a share menu">
+      <h3>One click from localhost to a link</h3>
+      Every web server running on your Mac shows up in the menu bar. Pick one, pick how to publish it — a temporary Cloudflare URL, a lasting OpenTunnel address, your tailnet, ngrok, or your own domain — and the link is on your clipboard.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/collaborate.png" alt="A shared site with two visitors' cursors and a comment pinned to a button">
+      <h3>Live collaboration on the real thing</h3>
+      Everyone who opens the link sees each other's cursors, follows you as you browse, points at things, and pins comments to elements — with a picture, their browser, and the errors they hit.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/agent.png" alt="A coding agent reading a comment over MCP, editing code, replying and resolving it">
+      <h3>Feedback your coding agent can act on</h3>
+      Claude Code, Codex, Cursor, opencode, or any MCP client can share your server, wait for comments, fix what people point at, reply, and resolve — while you watch it happen on the page.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/health.png" alt="The connection path from localhost to the public URL, each stage checked">
+      <h3>Every hop checked</h3>
+      The connection path checks your server, this Mac, the tunnel, and the public URL, and offers the fix when something's off — like the Host header Vite and Next.js insist on.
+    </td>
+  </tr>
+</table>
+
+OpenTraffic has no account, analytics, or telemetry. Credentials stay in your Keychain, and it updates itself with releases signed by Medda Systems.
 
 ## Install
 
 In Terminal:
 
 ```sh
-curl -fsSL https://github.com/Medda-systems/OpenTraffic-releases/releases/latest/download/install.sh | sh
+curl -fsSL https://opentraffic.dev/install | sh
 ```
 
 This downloads the latest release, checks its checksum and signature, and puts OpenTraffic in Applications ([`script/install.sh`](script/install.sh)).
@@ -32,16 +81,16 @@ Homebrew asks you to trust casks from taps outside its official collection; the 
 
 Or download it:
 
-1. Download `OpenTraffic-<version>.dmg` from [OpenTraffic releases](https://github.com/Medda-systems/OpenTraffic-releases/releases/latest) and open it.
+1. Download [`OpenTraffic.dmg`](https://github.com/Medda-systems/OpenTraffic-releases/releases/latest/download/OpenTraffic.dmg) (every version and its checksum are on the [releases page](https://github.com/Medda-systems/OpenTraffic-releases/releases)) and open it.
 2. Drag **OpenTraffic** onto **Applications**.
-3. Open OpenTraffic from Applications. Release builds are not notarized by Apple, so the first launch is blocked:
+3. Open OpenTraffic from Applications. Releases from the disk image or Homebrew aren't notarized by Apple yet, so the first launch is blocked:
    - **macOS 15 or later:** open **System Settings → Privacy & Security**, scroll down to the message about OpenTraffic, and click **Open Anyway**.
    - **macOS 14:** Control-click OpenTraffic in Applications, choose **Open**, then **Open** again.
-4. Install `cloudflared`, either with `brew install cloudflared` or from [Cloudflare's downloads](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/). Tailscale and ngrok are optional.
-
-You can check a download against the `.sha256` file published next to it with `shasum -a 256 -c OpenTraffic-<version>.dmg.sha256`.
+4. Install `cloudflared` for Cloudflare shares, either with `brew install cloudflared` or from [Cloudflare's downloads](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/). Tailscale, ngrok, and OpenTunnel are optional.
 
 OpenTraffic updates itself: it checks once a day, and **Check for Updates…** is in the app menu. Updates are signed with Medda Systems' key and verified before they're installed. Settings → General can turn the checks or background installs off.
+
+The rest of this README covers how each part works in detail.
 
 ## Overview
 

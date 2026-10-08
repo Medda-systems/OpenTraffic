@@ -15,3 +15,8 @@ xcuserdata/
 
 # Private planning notes (kept locally, not published)
 notes/
+
+# Website
+website/node_modules/
+website/dist/
+website/.wrangler/

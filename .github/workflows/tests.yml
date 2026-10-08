@@ -4,9 +4,9 @@ name: Tests
 on:
   push:
     branches: [main]
-    paths-ignore: ["**.md", "Assets/**", "Licenses/**"]
+    paths-ignore: ["**.md", "Assets/**", "Licenses/**", "website/**", "docs/**"]
   pull_request:
-    paths-ignore: ["**.md", "Assets/**", "Licenses/**"]
+    paths-ignore: ["**.md", "Assets/**", "Licenses/**", "website/**", "docs/**"]
 
 concurrency:
   group: tests-${{ github.ref }}
