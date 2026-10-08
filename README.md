@@ -12,6 +12,14 @@ Quick Tunnel and OpenTunnel shares can also turn on **live collaboration**: ever
 
 ## Install
 
+In Terminal:
+
+```sh
+curl -fsSL https://github.com/Medda-systems/OpenTraffic-releases/releases/latest/download/install.sh | sh
+```
+
+This downloads the latest release, checks its checksum and signature, and puts OpenTraffic in Applications ([`script/install.sh`](script/install.sh)).
+
 With Homebrew:
 
 ```sh

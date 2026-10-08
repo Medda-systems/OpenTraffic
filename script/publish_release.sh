@@ -39,6 +39,12 @@ trap 'rm -f "$NOTES"' EXIT
 ## Install
 
 \`\`\`sh
+curl -fsSL https://github.com/$RELEASES_REPO/releases/latest/download/install.sh | sh
+\`\`\`
+
+Or with Homebrew:
+
+\`\`\`sh
 brew tap medda-systems/tap
 brew trust --cask medda-systems/tap/opentraffic
 brew install --cask opentraffic
@@ -46,12 +52,12 @@ brew install --cask opentraffic
 
 Or download \`OpenTraffic-$VERSION.dmg\` below, open it, and drag OpenTraffic into Applications. Installed copies update themselves.
 
-This build isn't notarized yet, so the first launch is blocked: on macOS 15 or later, open **System Settings → Privacy & Security** and click **Open Anyway**; on macOS 14, Control-click the app and choose **Open**. Check the download with \`shasum -a 256 -c OpenTraffic-$VERSION.dmg.sha256\`.
+This build isn't notarized yet, so when installed from the disk image or Homebrew the first launch is blocked: on macOS 15 or later, open **System Settings → Privacy & Security** and click **Open Anyway**; on macOS 14, Control-click the app and choose **Open**. Check the download with \`shasum -a 256 -c OpenTraffic-$VERSION.dmg.sha256\`.
 
 Universal (Apple silicon and Intel), macOS 14 or later.
 TEXT
 } > "$NOTES"
-gh release create "$TAG" "$DMG" "$DMG.sha256" "$OUT_DIR/appcast.xml" \
+gh release create "$TAG" "$DMG" "$DMG.sha256" "$OUT_DIR/appcast.xml" "$ROOT_DIR/script/install.sh" \
   --repo "$RELEASES_REPO" --title "OpenTraffic $VERSION" --notes-file "$NOTES" --latest
 
 # 3. The Homebrew cask.
