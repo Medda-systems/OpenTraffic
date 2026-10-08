@@ -1,0 +1,346 @@
+import AppKit
+import Foundation
+import OpenTrafficCore
+
+/// Answers OpenTraffic's local API (REST, MCP) from the app's state. Calls hop to the main actor.
+final class AppAPIBackend: OpenTrafficAPIBackend {
+    let store: AppStore
+
+    init(store: AppStore) {
+        self.store = store
+    }
+
+    func listShares() async -> [APIShare] {
+        await store.apiShares()
+    }
+
+    func createShare(_ request: APIShareRequest, client: String) async throws -> APIShare {
+        try await store.apiCreateShare(request, client: client)
+    }
+
+    func startShare(_ share: String, client: String) async throws -> APIShare {
+        try await store.apiStartShare(share, client: client)
+    }
+
+    func stopShare(_ share: String) async throws -> APIShare {
+        try await store.apiStopShare(share)
+    }
+
+    func comments(_ share: String, status: APICommentStatus) async throws -> [APIComment] {
+        try await store.apiComments(share, status: status)
+    }
+
+    func screenshot(_ share: String, commentID: String) async throws -> (data: Data, contentType: String) {
+        try await store.apiScreenshot(share, commentID: commentID)
+    }
+
+    func resolveComment(_ share: String, commentID: String, resolved: Bool) async throws -> APIComment {
+        try await store.apiResolve(share, commentID: commentID, resolved: resolved)
+    }
+
+    func reply(_ share: String, commentID: String, text: String, client: String) async throws -> APIComment {
+        try await store.apiReply(share, commentID: commentID, text: text, client: client)
+    }
+
+    func errors(_ share: String) async throws -> [CollabErrorGroup] {
+        try await store.apiErrors(share)
+    }
+
+    func logs(_ share: String, lines: Int) async throws -> [String] {
+        try await store.apiLogs(share, lines: lines)
+    }
+}
+
+enum APIStatus: Equatable {
+    case off
+    case running(port: Int)
+    case failed(String)
+}
+
+extension AppStore {
+    // MARK: Server
+
+    /// Starts, restarts, or stops the local API to match Settings.
+    /// Applies API settings after any earlier apply has finished, so quick changes can't race.
+    func scheduleAPISettings() {
+        let previous = apiSettingsTask
+        apiSettingsTask = Task {
+            await previous?.value
+            await applyAPISettings()
+        }
+    }
+
+    func applyAPISettings() async {
+        if let server = apiServer, !apiEnabled || server.port != apiPort {
+            apiServer = nil
+            await server.stop()
+        }
+        guard apiEnabled, !isTerminating else {
+            apiStatus = .off
+            return
+        }
+        guard apiServer == nil else { return }
+        do {
+            let token = try APIToken.loadOrCreate()
+            let server = LocalAPIServer(port: apiPort, token: token, backend: AppAPIBackend(store: self), events: apiEvents)
+            let port = try await server.start()
+            // Settings may have changed while starting.
+            guard apiEnabled, apiPort == port, !isTerminating else {
+                await server.stop()
+                return await applyAPISettings()
+            }
+            apiServer = server
+            apiStatus = .running(port: port)
+            updateReservedPorts()
+        } catch {
+            apiStatus = .failed("Couldn't start on port \(apiPort): \(error.localizedDescription)")
+        }
+    }
+
+    var apiToken: String? {
+        try? APIToken.loadOrCreate()
+    }
+
+    /// Replaces the token; apps using the old one must be set up again.
+    func regenerateAPIToken() {
+        do {
+            let token = try APIToken.regenerate()
+            apiServer?.setToken(token)
+            notice = AppNotice(.success, "New API token created. Apps using the old one need the new one.")
+        } catch {
+            notice = AppNotice(.error, "Couldn't create a new token: \(error.localizedDescription)")
+        }
+    }
+
+    /// The MCP bridge inside this copy of OpenTraffic.
+    var mcpBridgePath: String {
+        Bundle.main.bundleURL.appending(path: "Contents/MacOS/opentraffic-mcp").path
+    }
+
+    enum MCPSetup: String, CaseIterable, Identifiable {
+        case claudeCode = "Claude Code"
+        case codex = "Codex"
+        case cursor = "Cursor"
+        case opencode = "opencode"
+
+        var id: String { rawValue }
+    }
+
+    func mcpSetupText(_ client: MCPSetup) -> String {
+        let path = mcpBridgePath
+        let port = apiPort == LocalAPIServer.defaultPort ? "" : ", \"OPENTRAFFIC_API_PORT\": \"\(apiPort)\""
+        switch client {
+        case .claudeCode:
+            let portFlag = apiPort == LocalAPIServer.defaultPort ? "" : " --env OPENTRAFFIC_API_PORT=\(apiPort)"
+            return "claude mcp add --scope user opentraffic --env OPENTRAFFIC_CLIENT=\"Claude Code\"\(portFlag) -- \"\(path)\""
+        case .codex:
+            let codexPort = apiPort == LocalAPIServer.defaultPort ? "" : ", OPENTRAFFIC_API_PORT = \"\(apiPort)\""
+            return """
+            [mcp_servers.opentraffic]
+            command = "\(path)"
+            env = { OPENTRAFFIC_CLIENT = "Codex"\(codexPort) }
+            tool_timeout_sec = 330
+            """
+        case .cursor:
+            return """
+            {
+              "mcpServers": {
+                "opentraffic": {
+                  "command": "\(path)",
+                  "env": { "OPENTRAFFIC_CLIENT": "Cursor"\(port) }
+                }
+              }
+            }
+            """
+        case .opencode:
+            return """
+            {
+              "mcp": {
+                "opentraffic": {
+                  "type": "local",
+                  "command": ["\(path)"],
+                  "environment": { "OPENTRAFFIC_CLIENT": "opencode"\(port) },
+                  "enabled": true
+                }
+              }
+            }
+            """
+        }
+    }
+
+    // MARK: Shares
+
+    func apiShares() -> [APIShare] {
+        definitions.map(apiShare)
+    }
+
+    func apiShare(_ definition: TunnelDefinition) -> APIShare {
+        let comments = comments(for: definition.id)
+        return APIShare(
+            id: definition.id,
+            name: definition.name,
+            provider: definition.kind.provider.rawValue,
+            kind: definition.kind.rawValue,
+            state: runtime(for: definition.id).state.rawValue,
+            localURL: definition.localURL,
+            publicURL: publicURL(for: definition),
+            collaboration: definition.collaboration,
+            people: peers(for: definition.id).map(APIPerson.init),
+            openComments: comments.filter { !$0.resolved }.count,
+            comments: comments.count
+        )
+    }
+
+    /// A share by id or (case-insensitive) name.
+    func apiDefinition(_ reference: String) throws -> TunnelDefinition {
+        if let id = UUID(uuidString: reference), let definition = definitions.first(where: { $0.id == id }) { return definition }
+        if let definition = definitions.first(where: { $0.name.caseInsensitiveCompare(reference) == .orderedSame }) { return definition }
+        throw OpenTrafficAPIError.notFound("No share named “\(reference)”.")
+    }
+
+    func apiCreateShare(_ request: APIShareRequest, client: String) async throws -> APIShare {
+        let localURL: String
+        if let port = request.port {
+            guard (1...65_535).contains(port) else { throw OpenTrafficAPIError.badRequest("port must be 1–65535.") }
+            localURL = "http://localhost:\(port)"
+        } else if let url = request.url?.nilIfBlank {
+            guard let components = URLComponents(string: url), ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
+                  components.host != nil, components.user == nil else { throw OpenTrafficAPIError.badRequest("url must be an http(s) address with a host.") }
+            localURL = url
+        } else {
+            throw OpenTrafficAPIError.badRequest("Give a port or a url.")
+        }
+        let kind: TunnelKind
+        switch request.provider?.lowercased() ?? "quick" {
+        case "quick", "cloudflare", "temporary": kind = .quick
+        case "tailscale", "tailnet": kind = .tailscale
+        case "ngrok": kind = .ngrok
+        case "opentunnel": kind = .opentunnel
+        default: throw OpenTrafficAPIError.badRequest("provider must be quick, tailscale, ngrok, or opentunnel.")
+        }
+        let collaboration = (request.collaboration ?? false) && kind.supportsCollaboration
+        let target = AutomationCommand.target(of: localURL)
+        // Another device on the network always needs a yes, whatever the setting says.
+        try confirmAPIPublishing(
+            "share \(target?.display ?? localURL) \(kind == .tailscale ? "on your tailnet" : "publicly") with \(kind.provider.title)\(collaboration ? " and live collaboration" : "")",
+            client: client,
+            offMac: target?.isLoopback != true
+        )
+        await shareLocalURL(localURL, kind: kind, name: request.name?.nilIfBlank, collaboration: collaboration)?.value
+        guard let definition = definitions.first(where: { $0.kind == kind && $0.localURL == localURL }) else {
+            throw OpenTrafficAPIError(status: 500, code: "failed", message: notice?.message ?? "The share couldn't be created.")
+        }
+        return try await apiWaitUntilLive(definition.id)
+    }
+
+    func apiStartShare(_ reference: String, client: String) async throws -> APIShare {
+        let definition = try apiDefinition(reference)
+        if !isActive(definition.id) {
+            try confirmAPIPublishing("start “\(definition.name)”", client: client)
+            startSharing(definition)
+        }
+        return try await apiWaitUntilLive(definition.id)
+    }
+
+    func apiStopShare(_ reference: String) async throws -> APIShare {
+        let definition = try apiDefinition(reference)
+        stop(definition.id)
+        return apiShare(definitions.first { $0.id == definition.id } ?? definition)
+    }
+
+    /// Waits up to 30 seconds for a public URL (or a failure).
+    private func apiWaitUntilLive(_ id: UUID) async throws -> APIShare {
+        for _ in 0..<120 {
+            guard let definition = definitions.first(where: { $0.id == id }) else { throw OpenTrafficAPIError.notFound("The share was removed.") }
+            let runtime = runtime(for: id)
+            if runtime.state == .failed {
+                throw OpenTrafficAPIError(status: 502, code: "start_failed", message: runtime.lastError ?? "The share failed to start.")
+            }
+            if runtime.state == .running, publicURL(for: definition) != nil { return apiShare(definition) }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        guard let definition = definitions.first(where: { $0.id == id }) else { throw OpenTrafficAPIError.notFound("The share was removed.") }
+        return apiShare(definition)
+    }
+
+    /// Publishing asks first, like opentraffic:// links, unless apps are allowed to publish without asking.
+    /// `offMac`: the address is another device on the network, which always asks.
+    private func confirmAPIPublishing(_ description: String, client: String, offMac: Bool = false) throws {
+        guard !apiAllowsPublishingWithoutAsking || offMac else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Allow \(client) to \(description)?"
+        alert.informativeText = offMac
+            ? "An app on this Mac asked OpenTraffic to do this through its local API. This address is not on this Mac — it's another device on your network, which would become reachable from outside it."
+            : "An app on this Mac asked OpenTraffic to do this through its local API. You can let apps publish without asking in Settings → Integrations."
+        let allow = alert.addButton(withTitle: "Allow")
+        let cancel = alert.addButton(withTitle: "Cancel")
+        allow.keyEquivalent = ""
+        cancel.keyEquivalent = "\r"
+        alert.alertStyle = .warning
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            throw OpenTrafficAPIError.denied("The user declined in OpenTraffic.")
+        }
+    }
+
+    func apiComments(_ reference: String, status: APICommentStatus) throws -> [APIComment] {
+        let definition = try apiDefinition(reference)
+        loadComments(for: definition.id)
+        return comments(for: definition.id)
+            .filter { status == .all || (status == .open) != $0.resolved }
+            .map { APIComment($0, shareID: definition.id) }
+    }
+
+    private func apiComment(_ definition: TunnelDefinition, _ commentID: String) throws -> CollabComment {
+        guard let comment = comments(for: definition.id).first(where: { $0.id == commentID }) else {
+            throw OpenTrafficAPIError.notFound("No comment \(commentID) on “\(definition.name)”.")
+        }
+        return comment
+    }
+
+    func apiScreenshot(_ reference: String, commentID: String) throws -> (data: Data, contentType: String) {
+        let definition = try apiDefinition(reference)
+        let comment = try apiComment(definition, commentID)
+        guard let url = screenshotURL(for: comment, in: definition.id), let data = try? Data(contentsOf: url) else {
+            throw OpenTrafficAPIError.notFound("This comment has no screenshot.")
+        }
+        let type = switch url.pathExtension {
+        case "webp": "image/webp"
+        case "png": "image/png"
+        default: "image/jpeg"
+        }
+        return (data, type)
+    }
+
+    func apiResolve(_ reference: String, commentID: String, resolved: Bool) async throws -> APIComment {
+        let definition = try apiDefinition(reference)
+        _ = try apiComment(definition, commentID)
+        await resolveComment(commentID, resolved: resolved, for: definition.id)
+        return APIComment(try apiComment(definition, commentID), shareID: definition.id)
+    }
+
+    func apiReply(_ reference: String, commentID: String, text: String, client: String) async throws -> APIComment {
+        let definition = try apiDefinition(reference)
+        _ = try apiComment(definition, commentID)
+        guard let text = text.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank, text.count <= CollabRoom.maximumCommentLength else {
+            throw OpenTrafficAPIError.badRequest("text must be 1–\(CollabRoom.maximumCommentLength) characters.")
+        }
+        guard let updated = await replyToComment(commentID, text: text, for: definition.id, agent: client) else {
+            throw OpenTrafficAPIError.conflict("The reply couldn't be added.")
+        }
+        return APIComment(updated, shareID: definition.id)
+    }
+
+    func apiErrors(_ reference: String) throws -> [CollabErrorGroup] {
+        let definition = try apiDefinition(reference)
+        return collabErrors[definition.id] ?? []
+    }
+
+    func apiLogs(_ reference: String, lines: Int) throws -> [String] {
+        let definition = try apiDefinition(reference)
+        let formatter = ISO8601DateFormatter()
+        return logEntries(for: definition.id).suffix(max(1, min(lines, 2000))).map {
+            "\(formatter.string(from: $0.timestamp)) [\($0.level)] \($0.rawLine ?? $0.message)"
+        }
+    }
+}

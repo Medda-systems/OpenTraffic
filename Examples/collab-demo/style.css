@@ -1,0 +1,51 @@
+:root {
+  --bg: #fbfaf8; --ink: #1d1b19; --muted: #6b665f; --card: #ffffff; --line: #ebe7e1;
+  --accent: #f38020; --accent-ink: #ffffff; --soft: #fff3e8;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #151413; --ink: #f3f1ee; --muted: #a39d95; --card: #1e1c1a; --line: #2e2b28; --soft: #2a1d12; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.55; }
+a { color: inherit; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+header { position: sticky; top: 0; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); z-index: 10; }
+nav { display: flex; align-items: center; gap: 22px; height: 60px; }
+.logo { font-weight: 800; letter-spacing: -0.02em; text-decoration: none; display: flex; gap: 8px; align-items: center; }
+.logo span { width: 22px; height: 22px; border-radius: 7px; background: var(--accent); display: inline-block; }
+nav .links { display: flex; gap: 18px; margin-left: auto; }
+nav .links a { text-decoration: none; color: var(--muted); font-weight: 500; }
+nav .links a[aria-current="page"] { color: var(--ink); }
+.btn { display: inline-block; padding: 10px 18px; border-radius: 10px; background: var(--accent); color: var(--accent-ink); text-decoration: none; font-weight: 600; border: 0; cursor: pointer; font-size: 15px; }
+.btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.hero { padding: 96px 0 72px; }
+.hero h1 { font-size: clamp(38px, 6vw, 64px); line-height: 1.05; letter-spacing: -0.035em; margin: 0 0 18px; }
+.hero p { font-size: 20px; color: var(--muted); max-width: 620px; margin: 0 0 28px; }
+.eyebrow { display: inline-block; background: var(--soft); color: var(--accent); font-weight: 600; font-size: 13px; padding: 4px 10px; border-radius: 99px; margin-bottom: 18px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px; }
+.card h3 { margin: 6px 0 6px; }
+.card p { margin: 0; color: var(--muted); }
+.icon { width: 38px; height: 38px; border-radius: 10px; background: var(--soft); display: grid; place-items: center; font-size: 20px; }
+section { padding: 56px 0; }
+section h2 { font-size: 32px; letter-spacing: -0.02em; margin: 0 0 8px; }
+.lead { color: var(--muted); margin: 0 0 28px; max-width: 640px; }
+.tall { min-height: 70vh; display: flex; align-items: center; justify-content: center; border-radius: 20px; background: linear-gradient(135deg, var(--soft), var(--card)); border: 1px solid var(--line); font-size: 22px; color: var(--muted); text-align: center; padding: 24px; }
+.price { font-size: 40px; font-weight: 800; letter-spacing: -0.03em; margin: 10px 0; }
+.price small { font-size: 15px; color: var(--muted); font-weight: 500; }
+.featured { border: 2px solid var(--accent); }
+ul.ticks { padding: 0; list-style: none; margin: 16px 0 22px; }
+ul.ticks li { padding: 4px 0; } ul.ticks li::before { content: "✓  "; color: var(--accent); font-weight: 700; }
+table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 14px; overflow: hidden; border: 1px solid var(--line); }
+th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--line); }
+.docs { display: grid; grid-template-columns: 220px 1fr; gap: 32px; padding: 40px 0; }
+.docs aside a { display: block; padding: 8px 12px; border-radius: 8px; text-decoration: none; color: var(--muted); }
+.docs aside a.active { background: var(--soft); color: var(--accent); font-weight: 600; }
+.docs article { min-height: 120vh; }
+pre { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow-x: auto; }
+form { display: grid; gap: 12px; max-width: 480px; }
+input, textarea { font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+footer { border-top: 1px solid var(--line); padding: 32px 0 60px; color: var(--muted); font-size: 14px; }
+.tip { background: var(--soft); border-radius: 12px; padding: 14px 16px; margin: 0 0 24px; font-size: 15px; }
+@media (max-width: 720px) { .docs { grid-template-columns: 1fr; } nav .links { gap: 12px; font-size: 14px; } }

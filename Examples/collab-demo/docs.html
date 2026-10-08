@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs · Orbit</title><link rel="stylesheet" href="/style.css"></head>
+<body><header><div class="wrap"><nav>
+  <a class="logo" href="/"><span></span>Orbit</a>
+  <div class="links">
+    <a href="/" >Home</a>
+    <a href="/features.html" >Features</a>
+    <a href="/pricing.html" >Pricing</a>
+    <a href="/docs.html" aria-current="page">Docs</a>
+  </div>
+  <a class="btn" href="/pricing.html" id="nav-cta">Start free</a>
+</nav></div></header>
+<main class="wrap">
+<div class="docs">
+  <aside id="docs-nav">
+    <a href="/docs.html?section=install" data-section="install">Install</a>
+    <a href="/docs.html?section=deploy" data-section="deploy">Deploy</a>
+    <a href="/docs.html?section=domains" data-section="domains">Domains</a>
+    <a href="/docs.html?section=contact" data-section="contact">Contact us</a>
+  </aside>
+  <article id="docs-content"></article>
+</div>
+<script>
+// A tiny single-page app: the sidebar changes the URL with history.pushState instead of
+// loading a new page, like React/Vue routers do. Collaboration should still track the page.
+const sections = {
+  install: `<h2>Install</h2><p class="tip"><b>Try here:</b> this page is a mini single-page app. Click through the sidebar as host while leading — followers follow even though the page never reloads.</p><pre>npm install -g orbit-cli
+orbit login</pre><p>Then run <code>orbit init</code> in your project folder.</p>`,
+  deploy: `<h2>Deploy</h2><p>Run <code>orbit deploy</code>. Every deploy gets a preview link; promote it when you're happy.</p><pre>orbit deploy --prod</pre>`,
+  domains: `<h2>Domains</h2><p>Add a domain in the dashboard and point a CNAME at <code>edge.orbit.example</code>. HTTPS is automatic.</p>`,
+  contact: `<h2>Contact us</h2><p class="tip"><b>Try here:</b> type in the form. What you type is never sent to the other people — they only see your cursor.</p>
+    <form onsubmit="event.preventDefault(); this.querySelector('button').textContent = 'Sent (not really)';">
+      <input id="contact-name" placeholder="Your name"><input id="contact-email" type="email" placeholder="you@example.com">
+      <textarea id="contact-message" rows="5" placeholder="What are you building?"></textarea>
+      <button class="btn" id="contact-send">Send</button></form>`,
+};
+function render() {
+  const section = new URLSearchParams(location.search).get("section") || "install";
+  document.getElementById("docs-content").innerHTML = sections[section] || sections.install;
+  document.querySelectorAll("#docs-nav a").forEach(a => a.classList.toggle("active", a.dataset.section === section));
+}
+document.getElementById("docs-nav").addEventListener("click", event => {
+  const link = event.target.closest("a[data-section]");
+  if (!link) return;
+  event.preventDefault();
+  history.pushState(null, "", link.getAttribute("href"));
+  render();
+});
+addEventListener("popstate", render);
+render();
+</script>
+</main>
+<footer><div class="wrap">Orbit is a fake product — a test site for OpenTraffic's live collaboration. Nothing here is real.</div></footer></body></html>

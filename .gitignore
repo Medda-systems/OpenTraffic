@@ -1,0 +1,17 @@
+.build/
+dist/
+.DS_Store
+*.xcuserstate
+.claude/
+.swiftpm/
+DerivedData/
+xcuserdata/
+.env*
+*.p12
+*.cer
+*.provisionprofile
+*.mobileprovision
+*.dmg
+
+# Private planning notes (kept locally, not published)
+notes/

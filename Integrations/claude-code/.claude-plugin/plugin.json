@@ -1,0 +1,8 @@
+{
+  "name": "opentraffic",
+  "description": "Share local dev servers through OpenTraffic with live collaboration, and act on the feedback people pin to the page.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Medda Systems"
+  }
+}

@@ -1,0 +1,121 @@
+#!/bin/bash
+# opentraffic — control OpenTraffic from the terminal. Commands are sent as opentraffic:// links.
+#
+#   opentraffic share <port|url> [--via quick|tailscale|ngrok|opentunnel] [--name NAME] [--collab]
+#   opentraffic start NAME          opentraffic stop NAME | --all
+#   opentraffic copy NAME           opentraffic show [NAME]
+#   opentraffic project start|stop NAME
+#
+# Sharing and starting ask for confirmation in OpenTraffic unless "Allow automation without
+# confirmation" is on in Settings → General.
+set -euo pipefail
+
+usage() {
+  # Asked for: stdout. Shown because of a mistake: stderr, with a non-zero status.
+  if [[ "${1:-0}" == 0 ]]; then
+    sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  else
+    sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2
+  fi
+  exit "${1:-0}"
+}
+
+fail() {
+  echo "opentraffic: $1" >&2
+  exit 2
+}
+
+# The value after an option such as --via, or an error when there isn't one.
+value_of() {
+  [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || fail "$1 needs a value"
+  printf '%s' "$2"
+}
+
+encode() {
+  # Byte-wise in the C locale, so non-ASCII names are percent-encoded as UTF-8.
+  local LC_ALL=C
+  local string="$1" out="" i c
+  for (( i = 0; i < ${#string}; i++ )); do
+    c="${string:i:1}"
+    case "$c" in
+      [a-zA-Z0-9.~_-]) out+="$c" ;;
+      # printf "'c" yields a negative value for bytes ≥ 0x80 in bash 3.2; mask to one byte.
+      *) out+=$(printf '%%%02X' "$(( $(printf '%d' "'$c") & 255 ))") ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+clipboard_change_count() {
+  osascript -l JavaScript -e 'ObjC.import("AppKit"); $.NSPasteboard.generalPasteboard.changeCount' 2>/dev/null || echo 0
+}
+
+send() {
+  open -g "opentraffic://$1"
+}
+
+[[ $# -ge 1 ]] || usage 1
+command="$1"; shift
+
+case "$command" in
+  share)
+    [[ $# -ge 1 ]] || usage 1
+    target="$1"; shift
+    via="quick"; name=""; collab=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --via) via=$(value_of "$@"); shift 2 ;;
+        --name) name=$(value_of "$@"); shift 2 ;;
+        --collab) collab="1"; shift ;;
+        *) fail "unknown option $1 (see opentraffic --help)" ;;
+      esac
+    done
+    case "$via" in
+      quick|cloudflare|temporary|tailscale|tailnet|ngrok|opentunnel) ;;
+      *) fail "--via must be quick, tailscale, ngrok, or opentunnel" ;;
+    esac
+    # A port, a URL, or host:port (http:// is assumed).
+    if [[ "$target" =~ ^[0-9]+$ ]]; then
+      (( target >= 1 && target <= 65535 )) || fail "$target isn't a port (1–65535)"
+      query="port=$target"
+    else
+      [[ "$target" =~ ^[A-Za-z0-9.-]+:[0-9]+(/.*)?$ ]] && target="http://$target"
+      [[ "$target" =~ ^https?://[^/]+ ]] || fail "share a port (3000), host:port (localhost:3000), or URL (http://localhost:3000)"
+      query="url=$(encode "$target")"
+    fi
+    query+="&via=$(encode "$via")"
+    [[ -n "$name" ]] && query+="&name=$(encode "$name")"
+    [[ -n "$collab" ]] && query+="&collab=1"
+    send "share?$query"
+    ;;
+  start)
+    [[ $# -ge 1 ]] || usage 1
+    send "start?name=$(encode "$1")"
+    ;;
+  copy)
+    [[ $# -ge 1 ]] || usage 1
+    # Print the URL only once OpenTraffic has actually put something new on the clipboard.
+    before=$(clipboard_change_count)
+    send "copy?name=$(encode "$1")"
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      sleep 0.2
+      if [[ "$(clipboard_change_count)" != "$before" ]]; then pbpaste; echo; exit 0; fi
+    done
+    echo "opentraffic: nothing copied — is there a running tunnel named \"$1\" with a public URL?" >&2
+    exit 1
+    ;;
+  stop)
+    [[ $# -ge 1 ]] || usage 1
+    if [[ "$1" == "--all" ]]; then send "stop?all"; else send "stop?name=$(encode "$1")"; fi
+    ;;
+  show)
+    if [[ $# -ge 1 ]]; then send "show?name=$(encode "$1")"; else send "show"; fi
+    ;;
+  project)
+    [[ $# -ge 2 ]] || usage 1
+    [[ "$1" == "start" || "$1" == "stop" ]] || fail "project takes start or stop, then a name"
+    send "project?name=$(encode "$2")&action=$(encode "$1")"
+    ;;
+  -h|--help|help) usage 0 ;;
+  *) usage 1 ;;
+esac

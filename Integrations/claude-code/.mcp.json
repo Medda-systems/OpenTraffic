@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "opentraffic": {
+      "command": "/Applications/OpenTraffic.app/Contents/MacOS/opentraffic-mcp",
+      "env": {
+        "OPENTRAFFIC_CLIENT": "Claude Code"
+      }
+    }
+  }
+}

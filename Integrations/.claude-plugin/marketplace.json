@@ -1,0 +1,14 @@
+{
+  "name": "opentraffic",
+  "description": "OpenTraffic's Claude Code plugin.",
+  "owner": {
+    "name": "Medda Systems"
+  },
+  "plugins": [
+    {
+      "name": "opentraffic",
+      "source": "./claude-code",
+      "description": "Share local dev servers through OpenTraffic with live collaboration, and act on the feedback people pin to the page."
+    }
+  ]
+}
