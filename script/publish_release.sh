@@ -39,7 +39,8 @@ trap 'rm -f "$NOTES"' EXIT
 ## Install
 
 \`\`\`sh
-brew install --cask medda-systems/tap/opentraffic
+brew tap medda-systems/tap
+brew install --cask opentraffic
 \`\`\`
 
 Or download \`OpenTraffic-$VERSION.dmg\` below, open it, and drag OpenTraffic into Applications. Installed copies update themselves.
@@ -65,4 +66,4 @@ git -C "$TAP" push -q
 
 echo "Published OpenTraffic $VERSION:"
 echo "  https://github.com/$RELEASES_REPO/releases/tag/$TAG"
-echo "  brew install --cask medda-systems/tap/opentraffic"
+echo "  brew tap medda-systems/tap && brew install --cask opentraffic"

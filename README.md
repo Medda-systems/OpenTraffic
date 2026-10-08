@@ -15,7 +15,8 @@ Quick Tunnel and OpenTunnel shares can also turn on **live collaboration**: ever
 With Homebrew:
 
 ```sh
-brew install --cask medda-systems/tap/opentraffic
+brew tap medda-systems/tap
+brew install --cask opentraffic
 ```
 
 Or download it:
