@@ -11,6 +11,9 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # A dry run from the Actions tab: builds and signs main without publishing, and keeps the disk
+  # image and feed as a workflow artifact.
+  workflow_dispatch:
 
 concurrency:
   group: release
@@ -21,11 +24,12 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # The build number is the commit count.
           fetch-depth: 0
       - name: Check the tag matches VERSION
+        if: github.event_name == 'push'
         run: |
           version="$(tr -d '[:space:]' < VERSION)"
           [[ "${GITHUB_REF_NAME}" == "v${version}" ]] || { echo "Tag ${GITHUB_REF_NAME} doesn't match VERSION ${version}" >&2; exit 1; }
@@ -39,7 +43,18 @@ jobs:
           printf '%s' "${SPARKLE_PRIVATE_KEY}" > "${OPENTRAFFIC_UPDATE_KEY_FILE}"
           trap 'rm -f "${OPENTRAFFIC_UPDATE_KEY_FILE}"' EXIT
           ./script/package_dmg.sh
+      - name: Keep the dry run's build
+        if: github.event_name != 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenTraffic-dry-run
+          path: |
+            dist/release/*.dmg
+            dist/release/*.sha256
+            dist/release/appcast.xml
+          retention-days: 7
       - name: Publish
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: |
