@@ -1,0 +1,30 @@
+# Builds OpenTraffic and runs the test suite on every push to main and every pull request.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "Assets/**", "Licenses/**"]
+  pull_request:
+    paths-ignore: ["**.md", "Assets/**", "Licenses/**"]
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # The app uses macOS 26 APIs (behind availability checks), so it needs the macOS 26 SDK.
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+      - name: Toolchain
+        run: swift --version
+      - name: Test
+        run: swift test

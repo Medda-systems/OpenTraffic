@@ -1,0 +1,48 @@
+# Pushing a v<version> tag builds the universal release, signs the update with Medda Systems'
+# update key, and publishes it: the GitHub Release in Medda-systems/OpenTraffic-releases (disk image,
+# checksum, update feed, installer) and the Homebrew cask in Medda-systems/homebrew-tap.
+#
+# Secrets:
+#   SPARKLE_PRIVATE_KEY  the update signing key (generate_keys --account medda-systems -x <file>)
+#   RELEASES_TOKEN       fine-grained token with Contents read/write on OpenTraffic-releases and
+#                        homebrew-tap
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The build number is the commit count.
+          fetch-depth: 0
+      - name: Check the tag matches VERSION
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          [[ "${GITHUB_REF_NAME}" == "v${version}" ]] || { echo "Tag ${GITHUB_REF_NAME} doesn't match VERSION ${version}" >&2; exit 1; }
+          grep -q "^## ${version}$" CHANGELOG.md || { echo "CHANGELOG.md has no section for ${version}" >&2; exit 1; }
+      - name: Build and sign
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          [[ -n "${SPARKLE_PRIVATE_KEY}" ]] || { echo "The SPARKLE_PRIVATE_KEY secret isn't set" >&2; exit 1; }
+          export OPENTRAFFIC_UPDATE_KEY_FILE="${RUNNER_TEMP}/update-key"
+          printf '%s' "${SPARKLE_PRIVATE_KEY}" > "${OPENTRAFFIC_UPDATE_KEY_FILE}"
+          trap 'rm -f "${OPENTRAFFIC_UPDATE_KEY_FILE}"' EXIT
+          ./script/package_dmg.sh
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          [[ -n "${GH_TOKEN}" ]] || { echo "The RELEASES_TOKEN secret isn't set" >&2; exit 1; }
+          gh auth setup-git
+          ./script/publish_release.sh

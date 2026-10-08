@@ -53,7 +53,12 @@ OpenTraffic lives in the menu bar. It uses cloudflared (brew install cloudflared
 ngrok or Tailscale, which you install separately.
 TEXT
 
-/usr/bin/hdiutil create -quiet -volname "OpenTraffic $VERSION" -srcfolder "$STAGING" -fs HFS+ -format UDZO -ov "$DMG"
+# hdiutil sometimes reports "Resource busy" on build machines; it succeeds on a retry.
+for attempt in 1 2 3; do
+  /usr/bin/hdiutil create -quiet -volname "OpenTraffic $VERSION" -srcfolder "$STAGING" -fs HFS+ -format UDZO -ov "$DMG" && break
+  [[ $attempt == 3 ]] && exit 1
+  sleep 5
+done
 
 if [[ -n "${OPENTRAFFIC_NOTARY_PROFILE:-}" ]]; then
   /usr/bin/codesign --force --sign "$OPENTRAFFIC_SIGNING_IDENTITY" "$DMG"
