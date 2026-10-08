@@ -248,9 +248,9 @@ public struct LocalServiceScanner: Sendable {
                 byPort[socket.port] = socket
             }
         }
-        byPort = byPort.filter { !probeMemo.contains($0.value) }
         let transport = self.transport
         let probeMemo = self.probeMemo
+        byPort = byPort.filter { !probeMemo.contains($0.value) }
         let starts = await startTimes(byPort.values.compactMap(\.pid))
         var found: [DiscoveredLocalService] = []
         await withTaskGroup(of: DiscoveredLocalService?.self) { group in
