@@ -7,23 +7,25 @@ import { CopyCommand } from "./CopyCommand"
 import { useCalm } from "./Reveal"
 import { ThemeToggle } from "./ThemeToggle"
 
-export function Nav() {
+export function Nav({ docs = false }: { docs?: boolean }) {
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-md">
-      <div className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-6">
-        <a href="#top" className="flex items-center gap-2.5">
+      <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4 sm:gap-6 sm:px-6">
+        <a href="/#top" className="flex shrink-0 items-center gap-2 sm:gap-2.5">
           <img src="/brand/app-icon.png" alt="" className="size-11 shrink-0" />
-          <span className="font-heading text-xl">OpenTraffic</span>
+          <span className="font-heading text-lg sm:text-xl">OpenTraffic</span>
         </a>
-        <nav className="ml-auto hidden items-center gap-7 text-sm font-medium text-foreground/80 md:flex">
-          <a href="#features" className="hover:text-foreground">Features</a>
-          <a href="#agents" className="hover:text-foreground">Coding agents</a>
-          <a href="#install" className="hover:text-foreground">Install</a>
+        <nav className="ml-auto hidden items-center gap-7 text-sm font-medium text-foreground/80 lg:flex">
+          <a href="/#features" className="hover:text-foreground">Features</a>
+          <a href="/#agents" className="hover:text-foreground">Coding agents</a>
+          <a href="/#install" className="hover:text-foreground">Install</a>
+          <a href="/docs" aria-current={docs ? "page" : undefined} className={docs ? "text-foreground underline underline-offset-8" : "hover:text-foreground"}>Docs</a>
           <a href={links.releases} className="hover:text-foreground">Releases</a>
         </nav>
-        <div className="ml-auto flex items-center gap-3 md:ml-0">
-          <Button asChild size="sm" className="rounded-full px-4">
-            <a href="#install">Download</a>
+        <div className="ml-auto flex items-center gap-2 sm:gap-3 lg:ml-0">
+          <a href="/docs" aria-current={docs ? "page" : undefined} className="text-sm font-medium lg:hidden">Docs</a>
+          <Button asChild size="sm" className="hidden rounded-full px-4 sm:inline-flex">
+            <a href="/#install">Download</a>
           </Button>
           <ThemeToggle />
         </div>

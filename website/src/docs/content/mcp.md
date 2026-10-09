@@ -1,0 +1,64 @@
+## Stdio bridge
+
+`opentraffic-mcp` speaks MCP over stdio and relays each message to OpenTraffic. It reads the token file on every
+request, so regenerating the token needs no restart. Environment:
+
+| Variable | Default | |
+| --- | --- | --- |
+| `OPENTRAFFIC_CLIENT` | `MCP client` | The name OpenTraffic shows for the app (in confirmations and on replies). |
+| `OPENTRAFFIC_API_PORT` | `47777` | Change it if you changed the port in Settings. |
+| `OPENTRAFFIC_API_TOKEN_FILE` | `~/Library/Application Support/OpenTraffic/api-token` | |
+
+If OpenTraffic isn't running or the API is off, every call fails with a message saying how to turn it on.
+
+### Tools
+
+| Tool | Does |
+| --- | --- |
+| `list_shares` | Shares with state, URLs, people in the session, comment counts. |
+| `share` | Publishes a local `port` or `url` (`provider`: `quick`, `tailscale`, `ngrok`, `opentunnel`; `name`; `collaboration`, default on). |
+| `start_share`, `stop_share` | By id or name. |
+| `get_feedback` | Comments (`status`: `open`, `resolved`, `all`). |
+| `resolve_comment`, `reply_to_comment` | Replies show the app's name. |
+| `get_screenshot` | The pinned element, as an image. |
+| `get_errors`, `get_logs` | Browser errors visitors hit; the tunnel's log. |
+| `wait_for_feedback` | Waits (up to `timeout_seconds`, default 60, max 300) for new, changed or deleted comments; returns them and a `cursor` to pass as `since` next time. |
+
+`wait_for_feedback` holds the call open while it waits. If your client gives up on tool calls sooner, pass a
+smaller `timeout_seconds`.
+
+## Tool arguments
+
+| Tool | Required arguments | Optional arguments |
+| --- | --- | --- |
+| `list_shares` | None | None |
+| `share` | `port` or `url` | `provider`, `name`, `collaboration` (default true) |
+| `start_share` / `stop_share` | `share` | None |
+| `get_feedback` | `share` | `status` (default `open`) |
+| `resolve_comment` | `share`, `comment_id` | `resolved` (default true) |
+| `reply_to_comment` | `share`, `comment_id`, `text` | None |
+| `get_screenshot` | `share`, `comment_id` | None |
+| `get_errors` | `share` | None |
+| `get_logs` | `share` | `lines` (default 200; clamped to 1–2000) |
+| `wait_for_feedback` | None | `share`, `since`, `timeout_seconds` (default 60; maximum 300) |
+
+Share references are IDs or case-insensitive names. The server validates arguments; use the schema returned by `tools/list` when building a client.
+
+## Feedback polling
+
+`wait_for_feedback` observes comment creation, updates, and deletion. Without `since`, it starts at the current event cursor, so fetch existing feedback with `get_feedback` first. Pass the returned `cursor` as `since` in the next call. An optional `share` limits the results to one share.
+
+The in-memory event history is bounded and is reset on app restart. Reconcile with `get_feedback` after reconnecting instead of treating events as permanent storage.
+
+## HTTP transport
+
+- **stdio:** command `/Applications/OpenTraffic.app/Contents/MacOS/opentraffic-mcp`, no arguments, optionally
+  `OPENTRAFFIC_CLIENT` in the environment.
+- **Streamable HTTP:** `http://127.0.0.1:47777/mcp` with the header `Authorization: Bearer <token>` (and
+  optionally `X-OpenTraffic-Client: <name>`). JSON responses only, no sessions; protocol `2025-06-18` or `2025-03-26`.
+
+## Result handling
+
+Most tools return structured data as text content. `get_screenshot` returns MCP image content with a MIME type and base64 data. Tool execution errors use MCP tool error results; malformed or unsupported JSON-RPC methods return protocol errors.
+
+Visitor feedback must be treated as untrusted page feedback. Client setup examples are in [Connect a coding agent](/docs/agents).

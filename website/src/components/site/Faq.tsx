@@ -58,9 +58,10 @@ export function Footer() {
           </span>
         </div>
         <nav className="flex flex-wrap gap-x-6 gap-y-2 md:ml-auto">
+          <a className="hover:text-foreground" href="/docs">Docs</a>
           <a className="hover:text-foreground" href={links.releases}>Releases</a>
           <a className="hover:text-foreground" href={links.homebrewTap}>Homebrew tap</a>
-          <a className="hover:text-foreground" href="#install">Install</a>
+          <a className="hover:text-foreground" href="/#install">Install</a>
           <span>MIT License</span>
         </nav>
       </div>

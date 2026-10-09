@@ -1,0 +1,152 @@
+[
+  {
+    "slug": "introduction",
+    "title": "Introduction",
+    "group": "Get started",
+    "description": "Understand OpenTraffic and choose the right way to share your local app."
+  },
+  {
+    "slug": "installation",
+    "title": "Installation & updates",
+    "group": "Get started",
+    "description": "Install on Apple silicon or Intel, approve the first launch, and keep the app current."
+  },
+  {
+    "slug": "quickstart",
+    "title": "Your first share",
+    "group": "Get started",
+    "description": "Go from a running dev server to a working public link."
+  },
+  {
+    "slug": "providers",
+    "title": "Choose a provider",
+    "group": "Get started",
+    "description": "Compare URL persistence, access control, collaboration, and account requirements."
+  },
+  {
+    "slug": "cloudflare-quick",
+    "title": "Cloudflare Quick Tunnels",
+    "group": "Providers",
+    "description": "Create temporary URLs and manage tunnels started in Terminal."
+  },
+  {
+    "slug": "custom-domains",
+    "title": "Cloudflare custom domains",
+    "group": "Providers",
+    "description": "Connect an account, create or import a tunnel, and recover incomplete setup."
+  },
+  {
+    "slug": "opentunnel",
+    "title": "OpenTunnel",
+    "group": "Providers",
+    "description": "Keep a lasting address with Anomaly\u2019s OpenTunnel."
+  },
+  {
+    "slug": "tailscale",
+    "title": "Tailscale",
+    "group": "Providers",
+    "description": "Expose specific apps on your tailnet, or publish with Funnel."
+  },
+  {
+    "slug": "ngrok",
+    "title": "ngrok",
+    "group": "Providers",
+    "description": "Share through ngrok with request inspection, replay, and access controls."
+  },
+  {
+    "slug": "sharing",
+    "title": "Everyday sharing",
+    "group": "Using OpenTraffic",
+    "description": "Discover local servers, inspect health and logs, and manage the sharing lifecycle."
+  },
+  {
+    "slug": "collaboration",
+    "title": "Live collaboration",
+    "group": "Using OpenTraffic",
+    "description": "Review an app together with presence, cursors, pointing, and follow mode."
+  },
+  {
+    "slug": "localhost-bridge",
+    "title": "Localhost bridge",
+    "group": "Using OpenTraffic",
+    "description": "Share frontends that depend on local APIs, WebSockets, and additional ports."
+  },
+  {
+    "slug": "feedback",
+    "title": "Comments & feedback",
+    "group": "Using OpenTraffic",
+    "description": "Capture actionable feedback and move it from review to resolution."
+  },
+  {
+    "slug": "protection",
+    "title": "Protected shares",
+    "group": "Using OpenTraffic",
+    "description": "Choose who can open a share and understand provider-specific protection."
+  },
+  {
+    "slug": "automation",
+    "title": "Automation & projects",
+    "group": "Using OpenTraffic",
+    "description": "Group shares, recover connectors, automate startup, and use deep links."
+  },
+  {
+    "slug": "settings",
+    "title": "Settings & shortcuts",
+    "group": "Using OpenTraffic",
+    "description": "Configure startup, providers, notifications, and keyboard shortcuts."
+  },
+  {
+    "slug": "agents",
+    "title": "Connect a coding agent",
+    "group": "Integrations",
+    "description": "Set up Claude Code, Codex, Cursor, opencode, or another MCP client."
+  },
+  {
+    "slug": "mcp",
+    "title": "MCP reference",
+    "group": "Reference",
+    "description": "Tool names, arguments, transports, and feedback polling semantics."
+  },
+  {
+    "slug": "rest-api",
+    "title": "REST API",
+    "group": "Reference",
+    "description": "Authentication, every endpoint, payloads, response fields, and errors."
+  },
+  {
+    "slug": "events",
+    "title": "Events & polling",
+    "group": "Reference",
+    "description": "Consume share, presence, comment, and error events with cursor-based polling."
+  },
+  {
+    "slug": "webhooks",
+    "title": "Webhooks",
+    "group": "Reference",
+    "description": "Verify signed events, handle retries, and integrate feedback with your own tools."
+  },
+  {
+    "slug": "cli",
+    "title": "CLI & URL schemes",
+    "group": "Reference",
+    "description": "Every terminal command, supported option, and automation deep link."
+  },
+  {
+    "slug": "troubleshooting",
+    "title": "Troubleshooting",
+    "group": "Help & trust",
+    "description": "Diagnose failed shares, blocked hosts, missing servers, and integration errors."
+  },
+  {
+    "slug": "security",
+    "title": "Security model",
+    "group": "Help & trust",
+    "description": "Understand credentials, process ownership, local API access, and public-link boundaries."
+  },
+  {
+    "slug": "privacy",
+    "title": "Privacy & local data",
+    "group": "Help & trust",
+    "description": "See network activity, storage locations, screenshot behavior, and uninstall steps."
+  }
+]

@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="https://opentraffic.dev"><b>opentraffic.dev</b></a> ·
+  <a href="https://opentraffic.dev/docs">Documentation</a> ·
   <a href="https://github.com/Medda-systems/OpenTraffic-releases/releases/latest">Download</a> ·
   <a href="#install">Install</a> ·
   <a href="#integrations-coding-agents-your-apps-webhooks">Coding agents</a>
