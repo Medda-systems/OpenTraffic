@@ -235,7 +235,8 @@ private struct ReplyRow: View {
                 HStack(spacing: Spacing.xs) {
                     Text(reply.author).font(.callout.weight(.semibold))
                     if let agent = reply.agent {
-                        Text(agent == reply.author ? "App" : agent)
+                        // As in the page overlay.
+                        Text(agent == reply.author ? "Agent" : "Agent · \(agent)")
                             .font(.caption2.weight(.semibold))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)

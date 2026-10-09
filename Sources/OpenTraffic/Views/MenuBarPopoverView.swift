@@ -212,7 +212,9 @@ struct MenuBarPopoverView: View {
             }
             Menu {
                 ForEach(NewTunnelKind.allCases) { kind in
-                    Button(kind.title, systemImage: kind.systemImage) { router.show(sheet: .newTunnel(kind)) }
+                    Button { router.show(sheet: .newTunnel(kind)) } label: {
+                        Label { Text(kind.title) } icon: { Image(nsImage: BrandAssets.logo(kind.provider, style: .menu)) }
+                    }
                 }
             } label: {
                 Label("New", systemImage: "plus")

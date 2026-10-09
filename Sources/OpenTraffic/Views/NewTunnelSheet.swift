@@ -337,6 +337,7 @@ private struct CustomDomainPane: View {
     @State private var pendingDraft: CreateDraft?
     @State private var localURLCheck = LocalURLCheck.idle
     @State private var dnsCheck = DNSCheck.idle
+    @State private var replaceDNS = false
     @State private var createdTunnel: TunnelDefinition?
 
     private enum LocalURLCheck: Equatable {
@@ -356,6 +357,7 @@ private struct CustomDomainPane: View {
         let hostname: String
         let localURL: String
         let zoneID: String
+        let replaceDNS: Bool
     }
 
     var body: some View {
@@ -468,7 +470,7 @@ private struct CustomDomainPane: View {
             Section {
                 TextField("Name", text: $name, prompt: Text(hostname.isEmpty ? "My app" : hostname))
             } footer: {
-                Text("OpenTraffic creates a remotely managed tunnel, routes the hostname to your local service, and adds a proxied DNS record. Existing DNS records are never overwritten.")
+                Text("OpenTraffic creates a remotely managed tunnel, routes the hostname to your local service, and adds a proxied DNS record. An existing DNS record is only replaced if you choose to.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -498,8 +500,23 @@ private struct CustomDomainPane: View {
         case .absent:
             InlineMessage(severity: .success, message: "Hostname is available. OpenTraffic will create its DNS record.")
         case .present(let content):
-            InlineMessage(severity: .warning, message: "A DNS record already exists and points to \(content). OpenTraffic won't overwrite it — choose another subdomain.")
+            VStack(alignment: .leading, spacing: Spacing.s) {
+                InlineMessage(severity: .warning, message: "This hostname already has a DNS record, pointing to \(Self.describe(target: content)).")
+                Toggle("Replace it with this tunnel's record", isOn: $replaceDNS)
+                Text(replaceDNS
+                    ? "Whatever it points to now stops receiving traffic at this hostname. Other records there, like TXT or MX, are left alone."
+                    : "Or choose another subdomain.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+    }
+
+    /// What an existing record points to, in words: a leftover Cloudflare tunnel is the usual case.
+    private static func describe(target: String) -> String {
+        target.lowercased().hasSuffix(".cfargotunnel.com")
+            ? "another Cloudflare tunnel (often one that was removed)"
+            : target
     }
 
     private var localURLValidation: LocalOriginPicker.InlineValidation? {
@@ -555,7 +572,7 @@ private struct CustomDomainPane: View {
         if zoneID.isEmpty || zoneName == nil { return "Choose a zone." }
         if !useApex && subdomain.nilIfBlank == nil { return "Enter a subdomain, or use the zone apex." }
         if localURL.nilIfBlank == nil { return "Choose a local service." }
-        if case .present = dnsCheck { return "That hostname already has a DNS record." }
+        if case .present = dnsCheck, !replaceDNS { return "That hostname already has a DNS record." }
         return nil
     }
 
@@ -586,6 +603,7 @@ private struct CustomDomainPane: View {
     }
 
     private func checkDNS() async {
+        replaceDNS = false
         guard !zoneID.isEmpty, !hostname.isEmpty, subdomainError == nil else { dnsCheck = .idle; return }
         dnsCheck = .checking
         try? await Task.sleep(for: .milliseconds(500))
@@ -602,7 +620,7 @@ private struct CustomDomainPane: View {
     }
 
     private func create(draft: CreateDraft? = nil, skipPreflight: Bool = false) {
-        let draft = draft ?? CreateDraft(name: name, hostname: hostname, localURL: localURL, zoneID: zoneID)
+        let draft = draft ?? CreateDraft(name: name, hostname: hostname, localURL: localURL, zoneID: zoneID, replaceDNS: replaceDNS)
         isCreating = true
         Task {
             if !skipPreflight {
@@ -626,7 +644,8 @@ private struct CustomDomainPane: View {
                 name: draft.name,
                 hostname: draft.hostname,
                 localURL: draft.localURL,
-                zoneID: draft.zoneID
+                zoneID: draft.zoneID,
+                replacingDNS: draft.replaceDNS
             )
             isCreating = false
             if store.accountError == nil, let created { createdTunnel = created }

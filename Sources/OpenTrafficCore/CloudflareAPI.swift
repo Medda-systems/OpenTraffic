@@ -222,30 +222,43 @@ public struct CloudflareClient: Sendable {
         }
     }
 
-    public func ensureDNSRoute(zoneID: String, hostname: String, tunnelID: String) async throws {
+    /// Points `hostname` at the tunnel with a proxied CNAME. A record that already points elsewhere is an
+    /// error, unless `replacing` is set: then an existing CNAME is pointed at the tunnel, and A and AAAA
+    /// records are swapped for the CNAME. Other records at the name (TXT, MX, …) are never removed.
+    public func ensureDNSRoute(zoneID: String, hostname: String, tunnelID: String, replacing: Bool = false) async throws {
         let target = "\(tunnelID).cfargotunnel.com"
         let existing = try await dnsRecords(zoneID: zoneID, name: hostname)
+        if existing.contains(where: { ($0.content ?? "").caseInsensitiveCompare(target) == .orderedSame }) {
+            return
+        }
+        let body = DNSRecordRequest(type: "CNAME", name: hostname, content: target, proxied: true, comment: "Managed by OpenTraffic")
         if let record = existing.first {
-            let content = record.content ?? ""
-            if content.caseInsensitiveCompare(target) == .orderedSame {
+            guard replacing else {
+                throw OpenTrafficError.api("A DNS record for \(hostname) already exists and points to \(record.content?.nilIfBlank ?? "another target").")
+            }
+            let addresses = existing.filter { Self.replaceableTypes.contains(($0.type ?? "").uppercased()) }
+            let others = Set(existing.map { ($0.type ?? "?").uppercased() }).subtracting(Self.replaceableTypes)
+            guard others.isEmpty else {
+                throw OpenTrafficError.api("\(hostname) also has \(others.sorted().joined(separator: ", ")) records, which OpenTraffic won't remove. Remove them in Cloudflare, or choose another hostname.")
+            }
+            if let cname = addresses.first(where: { $0.type?.uppercased() == "CNAME" }), let id = cname.id {
+                let _: APIEnvelope<CloudflareDNSRecord> = try await send(path: "/zones/\(zoneID)/dns_records/\(id)", method: "PATCH", body: body)
                 return
             }
-            let current = content.nilIfBlank ?? "another target"
-            throw OpenTrafficError.api("A DNS record for \(hostname) already exists and points to \(current). Cloudflare does not allow OpenTraffic to overwrite it.")
+            for record in addresses {
+                guard let id = record.id else { continue }
+                let _: APIEnvelope<CloudflareDNSRecord?> = try await send(path: "/zones/\(zoneID)/dns_records/\(id)", method: "DELETE")
+            }
         }
-        let body = DNSRecordRequest(
-            type: "CNAME",
-            name: hostname,
-            content: target,
-            proxied: true,
-            comment: "Managed by OpenTraffic"
-        )
         let _: APIEnvelope<CloudflareDNSRecord> = try await send(
             path: "/zones/\(zoneID)/dns_records",
             method: "POST",
             body: body
         )
     }
+
+    /// The records a tunnel's CNAME can stand in for.
+    private static let replaceableTypes: Set<String> = ["A", "AAAA", "CNAME"]
 
     public func dnsRecord(zoneID: String, hostname: String) async throws -> CloudflareDNSRecord? {
         try await dnsRecords(zoneID: zoneID, name: hostname).first

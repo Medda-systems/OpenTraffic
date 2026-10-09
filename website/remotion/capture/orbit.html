@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit</title>
+<link rel="icon" href="/favicon.ico">
+<style>
+  :root { --ink:#1f1147; --muted:#6b6489; --brand:#6d28d9; --line:#ece8f6; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:17px/1.55 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; color:var(--ink); background:linear-gradient(180deg,#f7f3ff 0%,#fff 46%); }
+  nav { display:flex; align-items:center; gap:34px; padding:22px 72px; font-size:15px; color:var(--muted); }
+  nav b { color:var(--brand); font-size:20px; margin-right:18px; }
+  nav .cta { margin-left:auto; color:#fff; background:var(--ink); padding:9px 16px; border-radius:10px; font-weight:600; }
+  header { padding:64px 72px 40px; max-width:980px; }
+  .eyebrow { display:inline-block; font-size:13px; font-weight:600; color:var(--brand); background:#efe7ff; padding:5px 12px; border-radius:99px; }
+  h1 { font-size:68px; line-height:1.04; letter-spacing:-0.035em; margin:22px 0 18px; }
+  header p { font-size:21px; color:var(--muted); max-width:620px; margin:0 0 34px; }
+  .actions { display:flex; gap:12px; align-items:center; }
+  .primary { background:var(--brand); color:#fff; border:0; border-radius:11px; padding:11px 18px; font:600 15px system-ui; box-shadow:0 8px 22px rgba(109,40,217,.28); }
+  .secondary { color:var(--ink); padding:11px 18px; font-weight:600; font-size:15px; }
+  .cards { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; padding:24px 72px 80px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:18px; padding:24px; box-shadow:0 1px 2px rgba(31,17,71,.04); }
+  .card h3 { margin:14px 0 6px; font-size:18px; }
+  .card p { margin:0; color:var(--muted); font-size:15px; }
+  .dot { width:38px; height:38px; border-radius:11px; display:grid; place-items:center; font-size:18px; }
+</style>
+</head>
+<body>
+  <nav><b>◆ Orbit</b><span>Product</span><span>Pricing</span><span>Customers</span><span>Docs</span><span class="cta">Sign in</span></nav>
+  <header>
+    <span class="eyebrow">New · Launch calendar</span>
+    <h1>Plan launches with your whole team.</h1>
+    <p>Roadmaps, launch checklists, and a calendar everyone actually reads — in one place.</p>
+    <div class="actions"><button class="primary" id="start">Start free trial</button><span class="secondary">Book a demo →</span></div>
+  </header>
+  <section class="cards">
+    <div class="card"><div class="dot" style="background:#efe7ff">🗺️</div><h3>Roadmaps</h3><p>Drag launches across quarters and see what moves with them.</p></div>
+    <div class="card"><div class="dot" style="background:#e7f6ee">✅</div><h3>Launch checklists</h3><p>Every launch gets the same steps, owners, and due dates.</p></div>
+    <div class="card"><div class="dot" style="background:#fff1e6">📅</div><h3>Shared calendar</h3><p>One calendar for marketing, product, and support.</p></div>
+  </section>
+</body>
+</html>

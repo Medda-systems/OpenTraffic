@@ -469,7 +469,8 @@ final class AppStore {
             localServiceScanInFlight = false
             if showsProgress { isScanningLocalServices = false }
         }
-        let scan = await LocalServiceScanner().scan()
+        var scan = await LocalServiceScanner().scan()
+        if let ports = DemoCapture.demoPorts { scan = scan.filter { ports.contains($0.port) } }
         let services = localServiceTracker.update(with: scan)
         lastLocalServiceScan = Date()
         if services != detectedLocalServices { detectedLocalServices = services }
@@ -1172,6 +1173,8 @@ final class AppStore {
     }
 
     func refreshDiscoveredTunnels() async {
+        // Demo captures show only the demo's own shares.
+        guard DemoCapture.demoPorts == nil else { return }
         let external = await externalDiscovery.scan(excludingProcessIDs: processSupervisor.ownedProcessIDs)
         let currentlyOwned = processSupervisor.ownedProcessIDs
         let filtered = external.filter {
@@ -1522,7 +1525,9 @@ final class AppStore {
     }
 
     @discardableResult
-    func createRemote(name: String, hostname: String, localURL: String, zoneID: String) async -> TunnelDefinition? {
+    /// Creates a remotely managed tunnel for `hostname`. `replacingDNS` lets it take over a hostname that
+    /// already has a DNS record (see `CloudflareClient.ensureDNSRoute`); otherwise that's an error.
+    func createRemote(name: String, hostname: String, localURL: String, zoneID: String, replacingDNS: Bool = false) async -> TunnelDefinition? {
         let requestedAccount = accountID
         accountError = nil
         setupProgressSteps = SetupProgressStep.tunnelSteps()
@@ -1543,9 +1548,10 @@ final class AppStore {
                 throw OpenTrafficError.api("The hostname must belong to the selected \(zone.name) zone.")
             }
             let client = try await client(for: requestedAccount)
-            if let existing = try? await client.dnsRecord(zoneID: zoneID, hostname: normalizedHostname),
+            if !replacingDNS,
+               let existing = try? await client.dnsRecord(zoneID: zoneID, hostname: normalizedHostname),
                existing.content?.nilIfBlank != nil {
-                throw OpenTrafficError.api("A DNS record for \(normalizedHostname) already exists and points to \(existing.content ?? "another target"). OpenTraffic will not overwrite it.")
+                throw OpenTrafficError.api("A DNS record for \(normalizedHostname) already exists and points to \(existing.content ?? "another target"). Choose to replace it, or pick another hostname.")
             }
             setSetupStep("create", to: .active)
             let remote = try await client.createRemoteTunnel(name: name.nilIfBlank ?? normalizedHostname)
@@ -1573,7 +1579,7 @@ final class AppStore {
                 try await client.applyHostnameConfiguration(tunnelID: remote.id, hostname: normalizedHostname, service: service)
                 setSetupStep("ingress", to: .done)
                 setSetupStep("dns", to: .active)
-                try await client.ensureDNSRoute(zoneID: zoneID, hostname: normalizedHostname, tunnelID: remote.id)
+                try await client.ensureDNSRoute(zoneID: zoneID, hostname: normalizedHostname, tunnelID: remote.id, replacing: replacingDNS)
                 setSetupStep("dns", to: .done)
                 if let index = definitions.firstIndex(where: { $0.id == definition.id }) {
                     definitions[index].setupIncomplete = false

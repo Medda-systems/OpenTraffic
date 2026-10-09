@@ -1,11 +1,12 @@
-import { Activity, Bell, Globe, Lock, MessageSquareText, MousePointer2, Network, RefreshCw, Sparkles } from "lucide-react"
+import { Activity, Bell, Lock, MessageSquareText, MousePointer2, Network, RefreshCw, Sparkles, Terminal } from "lucide-react"
 import type { ReactNode } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Reveal } from "./Reveal"
 
 const providers = [
   { name: "Cloudflare", logo: "/brand/provider-cloudflare.svg", what: "A temporary trycloudflare.com URL with no account, or a lasting hostname on your own domain." },
-  { name: "OpenTunnel", logo: null, what: "A lasting opentunnel.xyz address, encrypted until it reaches your Mac. No account." },
+  // OpenTunnel is made by Anomaly, whose mark stands for it here as in the app.
+  { name: "OpenTunnel", logo: "/brand/provider-opentunnel.svg", what: "A lasting opentunnel.xyz address, encrypted until it reaches your Mac. No account." },
   { name: "Tailscale", logo: "/brand/provider-tailscale.svg", what: "Private to the devices on your tailnet, or public through Funnel." },
   { name: "ngrok", logo: "/brand/provider-ngrok.svg", what: "Your ngrok domain, with a request inspector, replay, and password or sign-in protection." },
 ]
@@ -22,12 +23,8 @@ export function Providers() {
             <Reveal key={provider.name} delay={i * 0.06}>
               <div className="h-full rounded-2xl border bg-card p-5">
                 <div className="flex h-8 items-center gap-2.5">
-                  {provider.logo ? (
-                    // ngrok's mark is a wordmark in the middle of a square, so it needs more height.
-                    <img src={provider.logo} alt="" className={provider.name === "ngrok" ? "-my-3 h-12 w-auto dark:invert" : "h-6 w-auto dark:invert"} />
-                  ) : (
-                    <Globe className="size-6" strokeWidth={1.75} />
-                  )}
+                  {/* ngrok's mark is a wordmark in the middle of a square, so it needs more height. */}
+                  <img src={provider.logo} alt="" className={provider.name === "ngrok" ? "-my-3 h-12 w-auto dark:invert" : provider.name === "OpenTunnel" ? "h-7 w-auto dark:invert" : "h-6 w-auto dark:invert"} />
                   {/* ngrok's mark already spells its name. */}
                   {provider.name === "ngrok" ? <span className="sr-only">ngrok</span> : <span className="font-semibold">{provider.name}</span>}
                 </div>
@@ -83,7 +80,7 @@ export function Features() {
             Your frontend calls an API on another port? The localhost bridge routes those calls through the same share, so the whole app works for visitors.
           </Feature>
           <Feature delay={0.1} icon={<Lock className={icon} />} title="Private by default">
-            No account, no analytics, no telemetry. Credentials stay in your Keychain, and you decide what goes public.
+            No account, no analytics, no telemetry. Credentials stay in your Keychain, and an ngrok share can ask for a password or a Google or GitHub sign-in.
           </Feature>
           <Feature delay={0} icon={<Bell className={icon} />} title="Stays out of your way">
             Notifications when a link is ready or someone joins, auto-stop timers, projects that start together, and global shortcuts.
@@ -91,8 +88,8 @@ export function Features() {
           <Feature delay={0.05} icon={<RefreshCw className={icon} />} title="Updates itself">
             New versions arrive in the background, signed by Medda Systems and verified before they're installed.
           </Feature>
-          <Feature delay={0.1} icon={<Globe className={icon} />} title="Scriptable">
-            A command-line tool, opentraffic:// links for Shortcuts and Raycast, a local REST API, and signed webhooks.
+          <Feature delay={0.1} icon={<Terminal className={icon} />} title="At home in the terminal">
+            <span className="font-mono text-[0.92em] text-foreground">opentraffic share 3000</span> from any shell, plus opentraffic:// links for Shortcuts and Raycast, a local REST API, and signed webhooks.
           </Feature>
         </div>
       </div>

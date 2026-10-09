@@ -20,8 +20,8 @@ enum BrandAssets {
         return image
     }
 
-    /// The provider's mark at an even visual weight for `style` (see `LogoFitting`). Providers
-    /// without a bundled mark (OpenTunnel), or runs outside the app bundle, use their SF Symbol.
+    /// The provider's mark at an even visual weight for `style` (see `LogoFitting`); OpenTunnel uses
+    /// its maker's, Anomaly's. Runs outside the app bundle use the provider's SF Symbol.
     static func logo(_ provider: TunnelProvider, style: LogoFitting.Style) -> NSImage {
         let key = "\(provider.rawValue)-\(style.canvas.width)x\(style.canvas.height)"
         if let cached = fittedLogos[key] { return cached }

@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/demo.gif" width="880" alt="Sharing a dev server from the menu bar, collaborating with live cursors and pinned comments, and a coding agent fixing the feedback">
+  <img src="docs/images/demo.gif" width="800" alt="Sharing a dev server from the menu bar, collaborating with live cursors and pinned comments, and a coding agent fixing the feedback">
 </p>
 
 ## Why OpenTraffic
@@ -33,24 +33,24 @@
 <table>
   <tr>
     <td width="50%" valign="top">
-      <img src="docs/images/share.png" alt="The menu bar popover listing local servers, with a share menu">
+      <img src="docs/images/share.png" alt="The menu bar popover with Orbit shared and two more local servers ready to share">
       <h3>One click from localhost to a link</h3>
       Every web server running on your Mac shows up in the menu bar. Pick one, pick how to publish it — a temporary Cloudflare URL, a lasting OpenTunnel address, your tailnet, ngrok, or your own domain — and the link is on your clipboard.
     </td>
     <td width="50%" valign="top">
-      <img src="docs/images/collaborate.png" alt="A shared site with two visitors' cursors and a comment pinned to a button">
+      <img src="docs/images/collaborate.png" alt="Lea picking an element to comment on, with Ava's and Sam's cursors on the page">
       <h3>Live collaboration on the real thing</h3>
       Everyone who opens the link sees each other's cursors, follows you as you browse, points at things, and pins comments to elements — with a picture, their browser, and the errors they hit.
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <img src="docs/images/agent.png" alt="A coding agent reading a comment over MCP, editing code, replying and resolving it">
+      <img src="docs/images/agent.png" alt="A comment thread on the shared page with a reply from Claude Code">
       <h3>Feedback your coding agent can act on</h3>
       Claude Code, Codex, Cursor, opencode, or any MCP client can share your server, wait for comments, fix what people point at, reply, and resolve — while you watch it happen on the page.
     </td>
     <td width="50%" valign="top">
-      <img src="docs/images/health.png" alt="The connection path from localhost to the public URL, each stage checked">
+      <img src="docs/images/health.png" alt="The connection path in OpenTraffic, from localhost to the public URL, each stage checked">
       <h3>Every hop checked</h3>
       The connection path checks your server, this Mac, the tunnel, and the public URL, and offers the fix when something's off — like the Host header Vite and Next.js insist on.
     </td>

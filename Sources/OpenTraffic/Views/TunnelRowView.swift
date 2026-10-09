@@ -115,7 +115,11 @@ struct ManagedTunnelRow: View {
             )
         } else {
             let endpoint = TunnelRowPresentation.localEndpoint(origin) ?? origin
-            base = "\(endpoint) · \(tunnel.tailscalePublic ? "public via Funnel" : "tailnet only")"
+            let reach = switch tunnel.kind {
+            case .tailscale: tunnel.tailscalePublic ? "public via Funnel" : "tailnet only"
+            default: "anyone with the link"
+            }
+            base = "\(endpoint) · \(reach)"
         }
         guard let deadline = store.autoStopDeadlines[tunnel.id], state.isActive else { return base }
         return base + " · stops in " + Countdown.text(until: deadline)

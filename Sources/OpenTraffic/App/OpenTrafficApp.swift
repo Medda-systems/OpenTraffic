@@ -35,7 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerURLHandler()
         // Menu-bar-only users start without a Dock icon; the main window adds it when it opens.
         NSApp.setActivationPolicy(AppStore.shared.dockVisibility == .always ? .regular : .accessory)
-        NSApp.activate(ignoringOtherApps: true)
+        // A capture run works off-screen and must never take focus.
+        if !DemoCapture.isActive { NSApp.activate(ignoringOtherApps: true) }
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         source.setEventHandler {
@@ -49,12 +50,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Updates.start()
         #if DEBUG
         DebugSnapshots.runIfRequested(store: AppStore.shared)
+        DemoCapture.start(store: AppStore.shared)
         #endif
         let store = AppStore.shared
         if store.globalHotKeysEnabled { GlobalHotKeys.shared.setEnabled(true) }
         if store.hasCompletedOnboarding, store.notifyWhenReady || store.notifyOnFailure {
             TunnelNotifications.requestAuthorizationIfNeeded()
         }
+    }
+
+    /// A menu bar app keeps running with no windows open.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -85,7 +92,8 @@ struct OpenTrafficApp: App {
             TunnelCommands(store: store)
         }
 
-        MenuBarExtra {
+        // Capture runs (debug builds) stay out of the menu bar.
+        MenuBarExtra(isInserted: .constant(!DemoCapture.isActive)) {
             MenuBarPopoverView(store: store)
                 .tint(Brand.accent)
                 .pausesAnimationsWhenHidden()

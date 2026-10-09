@@ -81,7 +81,7 @@ struct ProviderLogo: View {
 }
 
 extension TunnelProvider {
-    /// The SF Symbol shown when the provider has no bundled mark (OpenTunnel) or outside the app bundle.
+    /// The SF Symbol shown in place of the provider's mark when running outside the app bundle.
     var fallbackSymbol: String {
         switch self {
         case .cloudflare: "cloud.fill"

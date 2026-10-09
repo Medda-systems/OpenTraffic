@@ -6,7 +6,14 @@ import Foundation
 /// by the `opentunnel` CLI keeps it connected. OpenTraffic uses its own profile so it never touches
 /// routes or the service someone runs by hand.
 public enum OpenTunnel {
-    public static let profile = "opentraffic"
+    /// Debug builds can use another profile (`OPENTRAFFIC_OPENTUNNEL_PROFILE`), e.g. a throwaway
+    /// one for demo captures.
+    public static let profile: String = {
+        #if DEBUG
+        if let profile = ProcessInfo.processInfo.environment["OPENTRAFFIC_OPENTUNNEL_PROFILE"], !profile.isEmpty { return profile }
+        #endif
+        return "opentraffic"
+    }()
 
     /// `brew install` command shown when the CLI is missing.
     public static let installCommand = "brew install anomalyco/tap/opentunnel"

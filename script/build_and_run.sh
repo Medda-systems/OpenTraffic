@@ -3,7 +3,8 @@ set -euo pipefail
 
 MODE="${1:-run}"
 APP_NAME="OpenTraffic"
-BUNDLE_ID="se.medda.opentraffic"
+# OPENTRAFFIC_BUNDLE_ID gives a test build its own preferences and Keychain (e.g. demo captures).
+BUNDLE_ID="${OPENTRAFFIC_BUNDLE_ID:-se.medda.opentraffic}"
 # Updates (Sparkle): the feed every release publishes, and the public half of the signing key
 # (the private half is in the release maintainer's Keychain; see script/package_dmg.sh).
 UPDATE_FEED_URL="https://github.com/Medda-systems/OpenTraffic-releases/releases/latest/download/appcast.xml"
@@ -70,8 +71,9 @@ cp "$ROOT_DIR/Sources/OpenTraffic/Resources/opentraffic" "$APP_RESOURCES/opentra
 cp "$ROOT_DIR/Sources/OpenTraffic/Resources/collab.js" "$APP_RESOURCES/collab.js"
 cp "$ROOT_DIR/Sources/OpenTraffic/Resources/bridge.js" "$APP_RESOURCES/bridge.js"
 chmod +x "$APP_RESOURCES/opentraffic"
-# Provider marks from Simple Icons (CC0); trademarks belong to their owners.
-for provider in cloudflare ngrok tailscale; do
+# Provider marks: Cloudflare, ngrok, and Tailscale from Simple Icons (CC0); OpenTunnel's is its maker
+# Anomaly's wordmark, from opentunnel.xyz. Trademarks belong to their owners.
+for provider in cloudflare ngrok tailscale opentunnel; do
   cp "$ROOT_DIR/Sources/OpenTraffic/Resources/provider-$provider.svg" "$APP_RESOURCES/provider-$provider.svg"
 done
 # OpenTraffic's license and those of the libraries it includes travel with the app.

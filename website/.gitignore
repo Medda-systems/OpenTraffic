@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Real-app captures for the demo video (made with remotion/capture/)
+remotion/public/capture
+out
+remotion/public/promo

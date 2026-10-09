@@ -65,7 +65,7 @@ export function Footer() {
         </nav>
       </div>
       <p className="mx-auto max-w-6xl px-6 pb-10 text-xs text-muted-foreground/80">
-        Cloudflare, Tailscale, ngrok, and OpenTunnel are trademarks of their respective owners. OpenTraffic is an
+        Cloudflare, Tailscale, ngrok, OpenTunnel, and Anomaly are trademarks of their respective owners. OpenTraffic is an
         independent app and isn't affiliated with or endorsed by them.
       </p>
     </footer>

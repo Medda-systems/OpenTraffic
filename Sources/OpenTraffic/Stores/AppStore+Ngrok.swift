@@ -139,6 +139,7 @@ extension AppStore {
 
     /// Traffic and captured requests from each running agent's private API, plus agents started elsewhere.
     func refreshNgrokAgents() async {
+        guard DemoCapture.demoPorts == nil else { return }
         var ownPorts = Set<UInt16>()
         for definition in definitions where definition.kind == .ngrok {
             let runtime = runtime(for: definition.id)

@@ -63,6 +63,10 @@ private actor MutationTransport: HTTPTransport {
             body = #"{"success":true,"errors":[],"result":{"account_id":"account-id","tunnel_id":"created-id","version":1}}"#
         } else if path.hasSuffix("/configurations") {
             body = #"{"success":true,"errors":[],"result":{"config":\#(configurationJSON)}}"#
+        } else if path.contains("/dns_records/") && method == "DELETE" {
+            body = #"{"success":true,"errors":[],"result":{"id":"deleted"}}"#
+        } else if path.contains("/dns_records/") && method == "PATCH" {
+            body = #"{"success":true,"errors":[],"result":{"id":"dns-id","name":"dev.example.com","type":"CNAME","content":"created-id.cfargotunnel.com","proxied":true}}"#
         } else if path.hasSuffix("/dns_records") && method == "POST" {
             body = #"{"success":true,"errors":[],"result":{"id":"dns-id","name":"dev.example.com","type":"CNAME","content":"created-id.cfargotunnel.com","proxied":true}}"#
         } else if path.hasSuffix("/dns_records") {
@@ -318,6 +322,54 @@ private struct FixedTransport: HTTPTransport {
     } catch {
         #expect(error.localizedDescription.contains("already exists"))
         #expect(error.localizedDescription.contains("203.0.113.10"))
+    }
+    let requests = await transport.requests()
+    #expect(requests.map(\.method) == ["GET"])
+}
+
+private func dnsClient(_ transport: MutationTransport) -> CloudflareClient {
+    CloudflareClient(
+        accountID: "account-id",
+        token: "api-secret",
+        baseURL: URL(string: "https://example.test/client/v4")!,
+        transport: transport
+    )
+}
+
+@Test func pointsAnExistingCNAMEAtTheTunnelWhenAskedToReplace() async throws {
+    let transport = MutationTransport()
+    await transport.setDNSRecordsJSON(#"[{"id":"old-id","name":"dev.example.com","type":"CNAME","content":"removed-id.cfargotunnel.com","proxied":true}]"#)
+
+    try await dnsClient(transport).ensureDNSRoute(zoneID: "zone-id", hostname: "dev.example.com", tunnelID: "created-id", replacing: true)
+
+    let requests = await transport.requests()
+    #expect(requests.map(\.method) == ["GET", "PATCH"])
+    #expect(requests.last?.path.hasSuffix("/dns_records/old-id") == true)
+    let body = try #require(requests.last?.body.flatMap { String(data: $0, encoding: .utf8) })
+    #expect(body.contains("created-id.cfargotunnel.com"))
+}
+
+@Test func swapsAddressRecordsForTheTunnelWhenAskedToReplace() async throws {
+    let transport = MutationTransport()
+    await transport.setDNSRecordsJSON(#"[{"id":"a-id","name":"dev.example.com","type":"A","content":"203.0.113.10"},{"id":"aaaa-id","name":"dev.example.com","type":"AAAA","content":"2001:db8::1"}]"#)
+
+    try await dnsClient(transport).ensureDNSRoute(zoneID: "zone-id", hostname: "dev.example.com", tunnelID: "created-id", replacing: true)
+
+    let requests = await transport.requests()
+    #expect(requests.map(\.method) == ["GET", "DELETE", "DELETE", "POST"])
+    #expect(requests[1].path.hasSuffix("/dns_records/a-id"))
+    #expect(requests[2].path.hasSuffix("/dns_records/aaaa-id"))
+}
+
+@Test func neverRemovesOtherRecordTypesWhenReplacing() async throws {
+    let transport = MutationTransport()
+    await transport.setDNSRecordsJSON(#"[{"id":"a-id","name":"dev.example.com","type":"A","content":"203.0.113.10"},{"id":"txt-id","name":"dev.example.com","type":"TXT","content":"verification"}]"#)
+
+    do {
+        try await dnsClient(transport).ensureDNSRoute(zoneID: "zone-id", hostname: "dev.example.com", tunnelID: "created-id", replacing: true)
+        Issue.record("Expected the TXT record to block the replacement")
+    } catch {
+        #expect(error.localizedDescription.contains("TXT"))
     }
     let requests = await transport.requests()
     #expect(requests.map(\.method) == ["GET"])

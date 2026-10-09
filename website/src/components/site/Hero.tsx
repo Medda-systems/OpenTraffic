@@ -1,5 +1,6 @@
-import { Download } from "lucide-react"
+import { Download, Volume2, VolumeX } from "lucide-react"
 import { motion } from "motion/react"
+import { useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { links } from "@/lib/site"
 import { CopyCommand } from "./CopyCommand"
@@ -36,7 +37,7 @@ export function Hero({ version }: { version: string | null }) {
   return (
     <section id="top" className="relative overflow-hidden">
       <div className="bg-dots pointer-events-none absolute inset-0 [mask-image:linear-gradient(to_bottom,black,transparent_85%)]" />
-      <div className="relative mx-auto max-w-6xl px-6 pt-20 pb-16 md:pt-28">
+      <div className="relative mx-auto max-w-6xl px-6 pt-10 pb-16 md:pt-14">
         <motion.div
           initial={calm ? false : { opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -69,20 +70,54 @@ export function Hero({ version }: { version: string | null }) {
           initial={calm ? false : { opacity: 0, y: 28 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
-          className="mx-auto mt-16 max-w-5xl overflow-hidden rounded-2xl border bg-card shadow-[0_1px_2px_rgba(15,23,42,.06),0_24px_64px_rgba(15,23,42,.12)]"
+          className="mx-auto mt-14 max-w-5xl"
         >
-          <video
-            className="block aspect-video w-full"
-            src="/media/demo.mp4"
-            poster="/media/demo-poster.jpg"
-            autoPlay
-            muted
-            loop
-            playsInline
-            aria-label="Demo: share a dev server from the menu bar, collaborate with live cursors and comments, and let a coding agent fix the feedback"
-          />
+          <PromoVideo />
+          <p className="mt-4 text-center text-sm text-muted-foreground">
+            Prefer it slower?{" "}
+            <a href="/media/demo.mp4" className="underline underline-offset-4 hover:text-foreground">
+              Watch the walkthrough with captions
+            </a>
+          </p>
         </motion.div>
       </div>
     </section>
+  )
+}
+
+/** The promo: plays muted (as browsers require), with a button to start it over with sound. */
+function PromoVideo() {
+  const video = useRef<HTMLVideoElement>(null)
+  const [muted, setMuted] = useState(true)
+  const toggle = () => {
+    const v = video.current
+    if (!v) return
+    if (v.muted) v.currentTime = 0
+    v.muted = !v.muted
+    setMuted(v.muted)
+    void v.play()
+  }
+  return (
+    <div className="relative overflow-hidden rounded-2xl border bg-black shadow-[0_1px_2px_rgba(15,23,42,.06),0_24px_64px_rgba(15,23,42,.18)]">
+      <video
+        ref={video}
+        className="block aspect-video w-full"
+        src="/media/promo.mp4"
+        poster="/media/promo-poster.jpg"
+        autoPlay
+        muted
+        loop
+        playsInline
+        aria-label="OpenTraffic in 46 seconds: it finds your dev servers, shares one in a click, checks every hop, and lets your team point, pick elements, and comment while your coding agent replies"
+      />
+      <button
+        type="button"
+        onClick={toggle}
+        className="absolute right-3 bottom-3 inline-flex items-center gap-1.5 rounded-full bg-white/90 px-2.5 py-1.5 text-xs font-medium text-black shadow-sm backdrop-blur transition hover:bg-white sm:right-4 sm:bottom-4 sm:gap-2 sm:px-3.5 sm:py-2 sm:text-sm"
+      >
+        {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+        {muted ? "Sound on" : "Sound off"}
+      </button>
+    </div>
   )
 }

@@ -120,17 +120,6 @@ enum NewTunnelKind: String, CaseIterable, Identifiable, Sendable {
         case .importExisting: .existing
         }
     }
-
-    var systemImage: String {
-        switch self {
-        case .quick: "bolt.fill"
-        case .tailscale: "lock.shield"
-        case .ngrok: "arrow.left.arrow.right.circle"
-        case .opentunnel: "network"
-        case .customDomain: "globe"
-        case .importExisting: "square.and.arrow.down"
-        }
-    }
 }
 
 /// Every sheet the main window can present. Only one is visible at a time.

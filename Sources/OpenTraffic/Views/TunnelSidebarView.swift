@@ -46,7 +46,9 @@ struct TunnelSidebarView: View {
             HStack {
                 Menu {
                     ForEach(NewTunnelKind.allCases) { kind in
-                        Button(kind.title, systemImage: kind.systemImage) { store.present(.newTunnel(kind)) }
+                        Button { store.present(.newTunnel(kind)) } label: {
+                        Label { Text(kind.title) } icon: { Image(nsImage: BrandAssets.logo(kind.provider, style: .menu)) }
+                    }
                     }
                 } label: {
                     Label("New Tunnel", systemImage: "plus")
