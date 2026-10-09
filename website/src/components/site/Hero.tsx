@@ -37,25 +37,21 @@ export function Hero({ version }: { version: string | null }) {
   return (
     <section id="top" className="relative overflow-hidden">
       <div className="bg-dots pointer-events-none absolute inset-0 [mask-image:linear-gradient(to_bottom,black,transparent_85%)]" />
-      <div className="relative mx-auto max-w-6xl px-6 pt-10 pb-16 md:pt-14">
+      <div className="relative mx-auto max-w-6xl px-6 pt-7 pb-16 md:pt-8">
         <motion.div
           initial={calm ? false : { opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
           className="mx-auto max-w-3xl text-center"
         >
-          <a href={links.latestRelease} className="inline-flex items-center gap-2 rounded-full border bg-background/70 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur hover:text-foreground">
-            <span className="size-1.5 rounded-full bg-green-500" />
-            {version ? `Version ${version} — updates itself` : "Free for macOS"} →
-          </a>
-          <h1 className="mt-6 text-5xl leading-[1.05] text-balance md:text-7xl">
+          <h1 className="text-5xl leading-[1.05] text-balance md:text-7xl">
             Share localhost. <br className="hidden sm:block" />Collaborate live.
           </h1>
-          <p className="mx-auto mt-6 max-w-2xl text-lg text-pretty text-muted-foreground md:text-xl">
+          <p className="mx-auto mt-5 max-w-2xl text-lg text-pretty text-muted-foreground md:text-xl">
             OpenTraffic lives in your Mac's menu bar. Put the dev server you're running on a public URL in one click,
             then watch your team point, comment, and follow along — and let your coding agent fix what they find.
           </p>
-          <div className="mx-auto mt-9 flex max-w-xl flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+          <div className="mx-auto mt-6 flex max-w-xl flex-col items-stretch gap-3 sm:flex-row sm:items-center">
             <CopyCommand command={links.installCommand} className="flex-1" />
             <Button asChild size="lg" variant="outline" className="h-12 rounded-full px-5">
               <a href={links.dmg}>
@@ -63,14 +59,22 @@ export function Hero({ version }: { version: string | null }) {
               </a>
             </Button>
           </div>
-          <p className="mt-4 text-xs text-muted-foreground">macOS 14 or later · Apple silicon and Intel · Free, MIT licensed</p>
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
+            <p>macOS 14 or later · Apple silicon and Intel · Free, MIT licensed</p>
+            {version && (
+              <a href={links.latestRelease} className="inline-flex items-center gap-1.5 rounded-full border bg-background/70 px-2.5 py-1 font-medium hover:text-foreground">
+                <span className="size-1.5 rounded-full bg-green-500" />
+                v{version} →
+              </a>
+            )}
+          </div>
         </motion.div>
 
         <motion.div
           initial={calm ? false : { opacity: 0, y: 28 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
-          className="mx-auto mt-14 max-w-5xl"
+          className="mx-auto mt-8 max-w-5xl"
         >
           <PromoVideo />
           <p className="mt-4 text-center text-sm text-muted-foreground">
