@@ -71,7 +71,7 @@ export default function Docs({ slug = 'introduction' }: { slug?: string }) {
     <Nav docs />
     <div className="docs-toolbar"><div><a href="/docs" className="docs-label"><BookOpen size={16} />Documentation</a><button type="button" onClick={openSearch} className="docs-search-trigger"><Search size={15} /><span>Search docs</span><kbd>⌘ K</kbd></button></div></div>
     <div className="docs-layout">
-      <aside className="docs-sidebar"><div className="docs-sidebar-version"><span className="size-1.5 rounded-full bg-green-500" />OpenTraffic 1.0.2</div><Navigation slug={slug} /><a className="docs-back" href="/">← Back to website</a></aside>
+      <aside className="docs-sidebar"><div className="docs-sidebar-version"><span className="size-1.5 rounded-full bg-green-500" />OpenTraffic 1.0.3</div><Navigation slug={slug} /><a className="docs-back" href="/">← Back to website</a></aside>
       <div className="docs-mobile-nav"><details><summary>Browse documentation <ChevronDown size={16} /></summary><Navigation slug={slug} /></details></div>
       <main id="docs-content" className="docs-main">
         {page ? <>

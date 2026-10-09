@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.3
+
+- **OpenTunnel branding:** Anomaly’s logo now appears throughout the app, including both New Tunnel menus, Settings, the sidebar, and connection details.
+- **Custom-domain DNS replacement:** explicitly choose to replace an existing hostname’s DNS route when creating a Cloudflare tunnel. CNAMEs are updated in place; A/AAAA records are replaced with the new tunnel’s CNAME. Replacement is refused when unrelated record types such as TXT or MX are present.
+- **Clearer labels:** OpenTunnel shares show “anyone with the link”, and coding-agent replies are labeled “Agent” in the Feedback view.
+- **Documentation:** installation, providers, collaboration, CLI, REST API, MCP, and troubleshooting guides are now available at https://opentraffic.dev/docs.
+
 ## 1.0.2
 
 - **One-line install:** `curl -fsSL https://github.com/Medda-systems/OpenTraffic-releases/releases/latest/download/install.sh | sh` downloads the latest release, checks its checksum and signature, and puts OpenTraffic in Applications.

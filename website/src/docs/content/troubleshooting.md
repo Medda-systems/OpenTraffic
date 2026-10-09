@@ -24,9 +24,9 @@ Vite, Next.js, Django, and Rails can reject unfamiliar public hostnames. Use the
 
 ## Duplicate custom domain
 
-In 1.0.2, creation is blocked when the hostname already points elsewhere. Choose another hostname, import the appropriate existing tunnel, or review and change the conflicting record in Cloudflare. Do not delete mail or verification records just to clear a warning.
+In 1.0.3 and later, choose **Replace it with this tunnel’s record** to take over an existing CNAME or A/AAAA route. Otherwise choose another hostname or import the appropriate existing tunnel. Replacement is refused if TXT, MX, or other unsupported records are present; review those records in Cloudflare rather than deleting mail or verification records just to clear a warning.
 
-The next release adds an explicit DNS replacement option. See [Custom domains](/docs/custom-domains#dns-replacement-unreleased).
+Version 1.0.2 does not offer replacement in the app; update first. See [Custom domains](/docs/custom-domains#dns-replacement).
 
 ## A Cloudflare tunnel was only partly created
 

@@ -34,6 +34,6 @@ With collaboration enabled, a local proxy adds presence and feedback tools to HT
 
 ## Documentation scope
 
-These guides cover OpenTraffic 1.0.2. Features implemented after that release are explicitly marked **Unreleased**. Provider accounts, limits, and availability are controlled by their respective services; check the linked provider documentation when configuring an account.
+These guides cover OpenTraffic 1.0.3. Features implemented after that release are explicitly marked **Unreleased**. Provider accounts, limits, and availability are controlled by their respective services; check the linked provider documentation when configuring an account.
 
 For a task-focused guide, use the sidebar. For exact commands and request fields, use the Reference section. Search all guides with **⌘K** or **Ctrl+K**.

@@ -43,14 +43,13 @@ OpenTraffic $VERSION
 1. Drag OpenTraffic into Applications.
 2. Open OpenTraffic from Applications.
 
-OpenTraffic is open source and isn't signed with a paid Apple Developer ID, so the first time
-macOS says it can't verify the developer:
+This build is not notarized by Apple. If macOS says it can't verify the developer:
   - Open System Settings → Privacy & Security.
   - Scroll to "OpenTraffic was blocked…" and click Open Anyway, then confirm.
 You only need to do this once.
 
 OpenTraffic lives in the menu bar. It uses cloudflared (brew install cloudflared), and optionally
-ngrok or Tailscale, which you install separately.
+ngrok, Tailscale, or OpenTunnel, which you install separately.
 TEXT
 
 # hdiutil sometimes reports "Resource busy" on build machines; it succeeds on a retry.
