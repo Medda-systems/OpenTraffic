@@ -12,7 +12,7 @@ export function Nav() {
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-6">
         <a href="#top" className="flex items-center gap-2.5">
-          <img src="/brand/app-icon.png" alt="" className="size-8" />
+          <img src="/brand/app-icon.png" alt="" className="size-11 shrink-0" />
           <span className="font-heading text-xl">OpenTraffic</span>
         </a>
         <nav className="ml-auto hidden items-center gap-7 text-sm font-medium text-foreground/80 md:flex">
