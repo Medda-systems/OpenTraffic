@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "OpenTrafficCore", targets: ["OpenTrafficCore"]),
         .executable(name: "OpenTraffic", targets: ["OpenTraffic"]),
         .executable(name: "opentraffic-mcp", targets: ["opentraffic-mcp"]),
+        .executable(name: "opentraffic-cli", targets: ["opentraffic-cli"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
@@ -34,6 +35,9 @@ let package = Package(
         ),
         // The stdio MCP bridge bundled in the app; Foundation only, so it stays small.
         .executableTarget(name: "opentraffic-mcp"),
+        // The `opentraffic` command, a client of the local API bundled in the app; Foundation only too.
+        .executableTarget(name: "opentraffic-cli"),
+        .testTarget(name: "OpenTrafficCLITests", dependencies: ["opentraffic-cli"]),
         .testTarget(
             name: "OpenTrafficCoreTests",
             dependencies: [

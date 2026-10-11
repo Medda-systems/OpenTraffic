@@ -118,7 +118,25 @@ extension AppStore {
             startProject(name)
         case .stopProject(let name):
             stopProject(name)
+        case .enableAPI:
+            enableAPIIfConfirmed()
         }
+    }
+
+    /// The command-line tool's setup: turning on the local API lets apps on this Mac control OpenTraffic,
+    /// so it always asks, whatever the automation setting says.
+    private func enableAPIIfConfirmed() {
+        guard !apiEnabled else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Let the opentraffic command and other apps on this Mac use OpenTraffic?"
+        alert.informativeText = "They can list, start, and stop shares and read feedback through OpenTraffic's local API. Publishing still asks first unless you allow it in Settings → Integrations. You can turn this off there too."
+        let allow = alert.addButton(withTitle: "Allow")
+        let cancel = alert.addButton(withTitle: "Cancel")
+        allow.keyEquivalent = ""
+        cancel.keyEquivalent = "\r"
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        apiEnabled = true
     }
 
     /// Shares a local URL with an existing tunnel of that kind for the same address, or a new one.

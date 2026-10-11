@@ -35,8 +35,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerURLHandler()
         // Menu-bar-only users start without a Dock icon; the main window adds it when it opens.
         NSApp.setActivationPolicy(AppStore.shared.dockVisibility == .always ? .regular : .accessory)
-        // A capture run works off-screen and must never take focus.
-        if !DemoCapture.isActive { NSApp.activate(ignoringOtherApps: true) }
+        // A capture run works off-screen and must never take focus; neither does a launch by the
+        // command-line tool, which only needs the app running in the menu bar.
+        if Self.launchedInBackground {
+            DispatchQueue.main.async {
+                for window in NSApp.windows where window.isVisible && !(window is NSPanel) && window.styleMask.contains(.titled) {
+                    window.close()
+                }
+            }
+        } else if !DemoCapture.isActive {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         source.setEventHandler {
@@ -47,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         source.resume()
         terminationSignalSource = source
         ApplicationsMover.offerIfNeeded()
+        OpenTrafficCommandLink.installIfNeeded()
         Updates.start()
         #if DEBUG
         DebugSnapshots.runIfRequested(store: AppStore.shared)
@@ -58,6 +68,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             TunnelNotifications.requestAuthorizationIfNeeded()
         }
     }
+
+    /// Started by `opentraffic` (`--background`): no window, no focus.
+    static let launchedInBackground = ProcessInfo.processInfo.arguments.contains("--background")
 
     /// A menu bar app keeps running with no windows open.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

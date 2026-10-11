@@ -12,13 +12,15 @@ public enum AutomationCommand: Equatable, Sendable {
     case show(name: String?)
     case startProject(String)
     case stopProject(String)
+    /// Turn on the local API, which the command-line tool uses. Always asks first.
+    case enableAPI
 
     /// Actions that put something on the internet need the user's confirmation unless they opted out,
     /// because any app or web page can open a `opentraffic://` link.
     public var exposesService: Bool {
         switch self {
         case .share, .start, .startProject: true
-        case .stop, .stopAll, .copy, .show, .stopProject: false
+        case .stop, .stopAll, .copy, .show, .stopProject, .enableAPI: false
         }
     }
 
@@ -91,6 +93,7 @@ public enum AutomationCommand: Equatable, Sendable {
             return query("name").map { .stop(name: $0) }
         case "copy": return query("name").map { .copy(name: $0) }
         case "show", "open": return .show(name: query("name"))
+        case "enable-api": return .enableAPI
         case "project":
             guard let name = query("name") else { return nil }
             switch query("action")?.lowercased() {

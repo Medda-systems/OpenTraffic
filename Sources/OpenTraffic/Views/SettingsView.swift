@@ -220,72 +220,43 @@ struct CloudflaredSettingsSection: View {
     }
 }
 
-/// Installs the bundled `opentraffic` script on the PATH as a symlink, so it follows app updates.
+/// The `opentraffic` command on the PATH, which OpenTraffic keeps linked (see `OpenTrafficCommandLink`).
 private struct CommandLineToolRow: View {
-    @State private var message: (severity: Severity, text: String)?
-
-    private var bundled: URL? { Bundle.main.url(forResource: "opentraffic", withExtension: nil) }
-
-    private static let candidates = ["/opt/homebrew/bin", "/usr/local/bin", NSString(string: "~/.local/bin").expandingTildeInPath]
+    @State private var installs = OpenTrafficCommandLink.installsAutomatically
+    @State private var installedPath = OpenTrafficCommandLink.installedPath
+    @State private var problem: String?
 
     var body: some View {
-        LabeledContent("Command-line tool") {
-            if bundled == nil {
-                Text("Available in the app bundle").foregroundStyle(.secondary)
-            } else if let installed = installedPath {
-                Label(installed, systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+        Toggle("Install the opentraffic command", isOn: $installs)
+            .disabled(!OpenTrafficCommandLink.isInstalledCopy && installedPath == nil)
+            .onChange(of: installs) { _, on in apply(on) }
+        Group {
+            if let problem {
+                InlineMessage(severity: .warning, message: problem)
+            } else if let installedPath {
+                Text("Linked at \(installedPath). Run `opentraffic setup` once, then `opentraffic help`.")
+            } else if !OpenTrafficCommandLink.isInstalledCopy {
+                Text("Available once OpenTraffic is in the Applications folder.")
             } else {
-                Button("Install opentraffic…", action: install)
+                Text("Share, inspect, and answer feedback from a terminal or script.")
             }
         }
-        if let message {
-            InlineMessage(severity: message.severity, message: message.text)
-        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .textSelection(.enabled)
     }
 
-    private var installedPath: String? {
-        guard let bundled else { return nil }
-        return Self.candidates
-            .map { "\($0)/opentraffic" }
-            .first { (try? FileManager.default.destinationOfSymbolicLink(atPath: $0)) == bundled.path }
-    }
-
-    private func install() {
-        guard let bundled else { return }
-        let fileManager = FileManager.default
-        for directory in Self.candidates {
-            if directory.hasSuffix(".local/bin") {
-                try? fileManager.createDirectory(atPath: directory, withIntermediateDirectories: true)
+    private func apply(_ on: Bool) {
+        OpenTrafficCommandLink.installsAutomatically = on
+        problem = nil
+        if on {
+            switch OpenTrafficCommandLink.install() {
+            case .installed: break
+            case .blocked(let message), .failed(let message): problem = message
             }
-            guard fileManager.isWritableFile(atPath: directory) else { continue }
-            let link = "\(directory)/opentraffic"
-            // `attributesOfItem` doesn't follow links (unlike `fileExists`), so a broken link counts as there:
-            // any symlink is replaced, a real file is left alone.
-            if let type = (try? fileManager.attributesOfItem(atPath: link))?[.type] as? FileAttributeType {
-                guard type == .typeSymbolicLink else {
-                    message = (.warning, "\(link) already exists and isn't OpenTraffic's. Remove it first.")
-                    return
-                }
-                do {
-                    try fileManager.removeItem(atPath: link)
-                } catch {
-                    message = (.error, error.localizedDescription)
-                    return
-                }
-            }
-            do {
-                try fileManager.createSymbolicLink(atPath: link, withDestinationPath: bundled.path)
-                let onPath = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").contains { String($0) == directory }
-                message = (.success, "Installed at \(link)." + (onPath || !directory.hasSuffix(".local/bin") ? " Try: opentraffic share 3000" : " Add \(directory) to your PATH."))
-                return
-            } catch {
-                message = (.error, error.localizedDescription)
-                return
-            }
+        } else {
+            OpenTrafficCommandLink.uninstall()
         }
-        message = (.error, "None of /opt/homebrew/bin, /usr/local/bin, or ~/.local/bin is writable.")
+        installedPath = OpenTrafficCommandLink.installedPath
     }
 }

@@ -84,6 +84,31 @@ struct APIRouter: Sendable {
             let result = await events.wait(since: since, timeout: min(max(TimeInterval(wait), 0), Self.maximumWait))
             return .json(EventsBody(events: result.events, next: result.next))
         }
+        if segments == ["v1", "status"] {
+            try allow("GET")
+            guard let status = await backend.status() else { throw OpenTrafficAPIError(status: 501, code: "not_supported", message: "This version of OpenTraffic doesn't report its status.") }
+            return .json(status)
+        }
+        if segments == ["v1", "services"] {
+            try allow("GET")
+            return .json(ServicesBody(services: await backend.localServices()))
+        }
+        if segments == ["v1", "zones"] {
+            try allow("GET")
+            return .json(ZonesBody(zones: try await backend.zones()))
+        }
+        if segments == ["v1", "projects"] {
+            try allow("GET")
+            return .json(ProjectsBody(projects: await backend.projects()))
+        }
+        if segments.count == 4, segments[0] == "v1", segments[1] == "projects" {
+            try allow("POST")
+            switch segments[3] {
+            case "start": return .json(try await backend.startProject(segments[2], client: client))
+            case "stop": return .json(try await backend.stopProject(segments[2]))
+            default: throw OpenTrafficAPIError.routeNotFound
+            }
+        }
         if segments == ["v1", "shares"] {
             if method == "GET" { return .json(SharesBody(shares: await backend.listShares())) }
             try allow("POST")
@@ -96,6 +121,27 @@ struct APIRouter: Sendable {
         let rest = Array(segments.dropFirst(3))
 
         switch rest {
+        case []:
+            switch method {
+            case "GET": return .json(try await backend.share(share))
+            case "PATCH": return .json(try await backend.updateShare(share, try Self.decode(APIShareUpdate.self, from: body), client: client))
+            case "DELETE":
+                try await backend.deleteShare(share)
+                return .json(DeletedBody(deleted: true))
+            default: throw OpenTrafficAPIError.methodNotAllowed(method)
+            }
+        case ["restart"]:
+            try allow("POST")
+            return .json(try await backend.restartShare(share, client: client))
+        case ["protection"]:
+            switch method {
+            case "GET": return .json(try await backend.protection(share))
+            case "PUT": return .json(try await backend.setProtection(share, try Self.decode(APIProtectionRequest.self, from: body)))
+            default: throw OpenTrafficAPIError.methodNotAllowed(method)
+            }
+        case ["password"]:
+            try allow("POST")
+            return .json(try await backend.regeneratePassword(share))
         case ["start"]:
             try allow("POST")
             return .json(try await backend.startShare(share, client: client))
@@ -126,9 +172,16 @@ struct APIRouter: Sendable {
         let comment = rest[1]
         switch Array(rest.dropFirst(2)) {
         case []:
-            try allow("PATCH")
-            let update = try Self.decode(ResolveBody.self, from: body)
-            return .json(try await backend.resolveComment(share, commentID: comment, resolved: update.resolved))
+            switch method {
+            case "PATCH":
+                let update = try Self.decode(ResolveBody.self, from: body)
+                return .json(try await backend.resolveComment(share, commentID: comment, resolved: update.resolved))
+            case "DELETE":
+                try await backend.deleteComment(share, commentID: comment)
+                return .json(DeletedBody(deleted: true))
+            default:
+                throw OpenTrafficAPIError.methodNotAllowed(method)
+            }
         case ["replies"]:
             try allow("POST")
             let reply = try Self.decode(ReplyBody.self, from: body)
@@ -154,6 +207,10 @@ struct APIRouter: Sendable {
         let next: Int
     }
     private struct ResolveBody: Decodable { let resolved: Bool }
+    private struct ServicesBody: Encodable { let services: [APILocalService] }
+    private struct ZonesBody: Encodable { let zones: [APIZone] }
+    private struct ProjectsBody: Encodable { let projects: [APIProject] }
+    private struct DeletedBody: Encodable { let deleted: Bool }
     private struct ReplyBody: Decodable { let text: String }
 
     // MARK: Helpers
@@ -191,8 +248,11 @@ struct APIRouter: Sendable {
         if let port = request.port, !(1...65535).contains(port) { throw OpenTrafficAPIError.badRequest("port must be between 1 and 65535") }
         // The names and aliases the app's share handler maps, in any case.
         if let provider = request.provider,
-           !["quick", "cloudflare", "temporary", "tailscale", "tailnet", "ngrok", "opentunnel"].contains(provider.lowercased()) {
-            throw OpenTrafficAPIError.badRequest("provider must be quick, tailscale, ngrok, or opentunnel")
+           !["quick", "cloudflare", "temporary", "tailscale", "tailnet", "ngrok", "opentunnel", "domain"].contains(provider.lowercased()) {
+            throw OpenTrafficAPIError.badRequest("provider must be quick, opentunnel, tailscale, ngrok, or domain")
+        }
+        if request.provider?.lowercased() == "domain", request.hostname?.trimmingCharacters(in: .whitespaces).isEmpty ?? true {
+            throw OpenTrafficAPIError.badRequest("A domain share needs a hostname")
         }
     }
 

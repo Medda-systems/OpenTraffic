@@ -35,6 +35,8 @@ Or download it:
    - **macOS 14:** Control-click OpenTraffic in Applications, choose **Open**, then **Open** again.
 4. Install `cloudflared` for Cloudflare shares, either with `brew install cloudflared` or from [Cloudflare's downloads](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/). Tailscale, ngrok, and OpenTunnel are optional.
 
+Every way of installing also gives you the [`opentraffic` command](/docs/cli): the installer links it right away, and OpenTraffic links it whenever it runs from Applications (in `/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin`). Run `opentraffic setup` once to start using it. Settings → General → **Install the opentraffic command** turns this off.
+
 OpenTraffic updates itself: it checks once a day, and **Check for Updates…** is in the app menu. Updates are signed with Medda Systems' key and verified before they're installed. Settings → General can turn the checks or background installs off.
 
 Continue with the [quickstart](/docs/quickstart).

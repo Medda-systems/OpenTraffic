@@ -57,6 +57,9 @@ chmod +x "$APP_BINARY"
 # The stdio MCP bridge (Integrations/README.md); inside the bundle so it's signed with the app.
 cp "$BUILD_BIN/opentraffic-mcp" "$APP_MACOS/opentraffic-mcp"
 chmod +x "$APP_MACOS/opentraffic-mcp"
+# The opentraffic command-line tool, a client of the local API (Sources/opentraffic-cli).
+cp "$BUILD_BIN/opentraffic-cli" "$APP_MACOS/opentraffic-cli"
+chmod +x "$APP_MACOS/opentraffic-cli"
 # Sparkle, for updates. The app finds it in Contents/Frameworks, never in the build folder.
 mkdir -p "$APP_CONTENTS/Frameworks"
 ditto "$BUILD_BIN/Sparkle.framework" "$APP_CONTENTS/Frameworks/Sparkle.framework"
@@ -66,7 +69,7 @@ while read -r rpath; do
 done < <(otool -l "$APP_BINARY" | awk '/LC_RPATH/ { getline; getline; print $2 }' | grep "^$ROOT_DIR/" || true)
 cp "$ROOT_DIR/Assets/OpenTraffic.icns" "$APP_RESOURCES/OpenTraffic.icns"
 cp "$ROOT_DIR/Sources/OpenTraffic/Resources/opentraffic-menu.svg" "$APP_RESOURCES/opentraffic-menu.svg"
-# The opentraffic command-line tool, which drives the app through opentraffic:// links.
+# What Settings links as `opentraffic`: runs Contents/MacOS/opentraffic-cli, so existing links keep working.
 cp "$ROOT_DIR/Sources/OpenTraffic/Resources/opentraffic" "$APP_RESOURCES/opentraffic"
 cp "$ROOT_DIR/Sources/OpenTraffic/Resources/collab.js" "$APP_RESOURCES/collab.js"
 cp "$ROOT_DIR/Sources/OpenTraffic/Resources/bridge.js" "$APP_RESOURCES/bridge.js"
@@ -159,7 +162,8 @@ if [[ "${OPENTRAFFIC_SIGNING_IDENTITY:-}" == "-" ]]; then
   OPENTRAFFIC_SIGNING_IDENTITY=""
 fi
 
-# The MCP helper is signed on its own (with its own identifier) before the app that contains it.
+# The MCP helper and the command-line tool are signed on their own (with their own identifiers)
+# before the app that contains them.
 if [[ -n "${OPENTRAFFIC_SIGNING_IDENTITY:-}" ]]; then
   SIGNING_ARGS=(--force --options runtime --sign "$OPENTRAFFIC_SIGNING_IDENTITY")
   # Notarization requires a secure timestamp on Developer ID signatures.
@@ -168,6 +172,7 @@ else
   SIGNING_ARGS=(--force --sign -)
 fi
 /usr/bin/codesign "${SIGNING_ARGS[@]}" --identifier "$BUNDLE_ID.mcp" "$APP_MACOS/opentraffic-mcp"
+/usr/bin/codesign "${SIGNING_ARGS[@]}" --identifier "$BUNDLE_ID.cli" "$APP_MACOS/opentraffic-cli"
 # Sparkle's helpers inside out, then the framework (the order Sparkle documents for Developer ID).
 SPARKLE="$APP_CONTENTS/Frameworks/Sparkle.framework"
 for helper in "$SPARKLE"/Versions/B/XPCServices/*.xpc "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"; do

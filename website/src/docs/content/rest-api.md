@@ -31,16 +31,27 @@ Shares are named by id or by name (case-insensitive); percent-encode names with 
 
 | Method | Path | Body / query | Returns |
 | --- | --- | --- | --- |
+| GET | `/v1/status` | | `{version, shares, running, providers: [{name, ready, detail}], publishesWithoutAsking}` |
+| GET | `/v1/services` | | `{services: [{port, url, title, process, statusCode, upSince, sharedAs}]}` |
 | GET | `/v1/shares` | | `{shares: [Share]}` |
-| POST | `/v1/shares` | `{port?, url?, provider?, name?, collaboration?}` | `Share` (waits ≤ 30 s for the URL) |
-| POST | `/v1/shares/{ref}/start`, `/stop` | | `Share` |
+| POST | `/v1/shares` | see below | `Share` (waits ≤ 30 s for the URL) |
+| GET | `/v1/shares/{ref}` | | `Share` |
+| PATCH | `/v1/shares/{ref}` | `{name?, url?, collaboration?, captureErrors?, autoStart?, project?, rewriteHostHeader?, autoStop?}` | `Share` |
+| DELETE | `/v1/shares/{ref}` | | `{deleted: true}` |
+| POST | `/v1/shares/{ref}/start`, `/stop`, `/restart` | | `Share` |
+| GET, PUT | `/v1/shares/{ref}/protection` | PUT: `{mode, username?, emails?}` | `{mode, username, password, emails}` |
+| POST | `/v1/shares/{ref}/password` | | a new password: `{mode, username, password, emails}` |
 | GET | `/v1/shares/{ref}/comments` | `?status=open\|resolved\|all` (default `open`) | `{comments: [Comment]}` |
 | PATCH | `/v1/shares/{ref}/comments/{id}` | `{resolved}` | `Comment` |
+| DELETE | `/v1/shares/{ref}/comments/{id}` | | `{deleted: true}` |
 | POST | `/v1/shares/{ref}/comments/{id}/replies` | `{text}` (1–1000 characters) | `Comment` |
 | GET | `/v1/shares/{ref}/comments/{id}/screenshot` | | image bytes |
 | GET | `/v1/shares/{ref}/errors` | | `{errors: [ErrorGroup]}` |
 | GET | `/v1/shares/{ref}/logs` | `?lines=200` | `{lines: [String]}` |
 | GET | `/v1/events` | `?since=<seq>&wait=<seconds ≤ 60>` | `{events: [Event], next: <seq>}` |
+| GET | `/v1/projects` | | `{projects: [{name, shares, running}]}` |
+| POST | `/v1/projects/{name}/start`, `/stop` | | `{name, shares, running}` |
+| GET | `/v1/zones` | | `{zones: [{id, name}]}`: domains in the connected Cloudflare account |
 | POST | `/mcp` | MCP JSON-RPC | MCP |
 
 Dates are ISO 8601. Errors are `{"error": {"code": "...", "message": "..."}}` with status 400, 401, 403, 404,
@@ -54,15 +65,21 @@ Dates are ISO 8601. Errors are `{"error": {"code": "...", "message": "..."}}` wi
 | --- | --- | --- |
 | `port` | integer | Local port, 1–65535. Use this when you are not supplying `url`. |
 | `url` | string | HTTP or HTTPS local service URL. Provider and collaboration restrictions still apply. |
-| `provider` | string | `quick`, `tailscale`, `ngrok`, or `opentunnel`; defaults to `quick`. |
-| `name` | string | Optional display name. |
+| `provider` | string | `quick`, `opentunnel`, `tailscale`, `ngrok`, or `domain`; defaults to `quick`. |
+| `name` | string | Optional display name; must not belong to another share. |
 | `collaboration` | boolean | Enable collaboration where supported; defaults to false in REST (true in the MCP `share` tool). |
+| `hostname` | string | `domain`: the hostname to serve, in your Cloudflare account (required). `ngrok`: a domain reserved in your ngrok account. |
+| `replaceDNS` | boolean | `domain`: take over a hostname that already has a DNS record. An existing CNAME is pointed at the new tunnel and A/AAAA records are replaced; other records are never removed. |
+| `funnel` | boolean | `tailscale`: public on the internet through Funnel instead of tailnet only. |
+| `start` | boolean | `false` saves the share without starting it. |
+
+A share for a way of sharing that isn't set up yet is refused with 409 (`not_ready`) and the reason, and nothing is created; `GET /v1/status` lists what's ready. Creating a custom-domain share always asks for confirmation, because it creates a tunnel and a DNS record in your Cloudflare account.
 
 A create request waits up to 30 seconds for a URL. The returned share may still be starting and `publicURL` may be absent; use `GET /v1/shares` to check progress rather than creating a duplicate.
 
 ## Share response
 
-A `Share` contains `id`, `name`, `provider`, `kind`, `state`, `localURL`, optional `publicURL`, `collaboration`, `people`, `openComments`, and `comments`. Each person has a name, path, and `isHost` flag. State is one of `stopped`, `starting`, `running`, `stopping`, or `failed`.
+A `Share` contains `id`, `name`, `provider`, `kind`, `state`, `localURL`, optional `publicURL`, `collaboration`, `people`, `openComments`, and `comments`. It also has what the share's detail view shows: `hostname`, `lastError` (when failed), `protection` (`none`, `password`, `google`, `github`, or `email`), `project`, `autoStart`, `captureErrors`, `rewriteHostHeader`, `funnel` (Tailscale), `stopsAt`, and `health`, the connection path's latest checks (`kind`, `title`, `state` of `ok`, `working`, `failed`, or `skipped`, and `detail`). Each person has a name, path, and `isHost` flag. State is one of `stopped`, `starting`, `running`, `stopping`, or `failed`.
 
 ## Comment response
 

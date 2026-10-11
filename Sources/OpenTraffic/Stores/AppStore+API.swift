@@ -49,6 +49,62 @@ final class AppAPIBackend: OpenTrafficAPIBackend {
     func logs(_ share: String, lines: Int) async throws -> [String] {
         try await store.apiLogs(share, lines: lines)
     }
+
+    func status() async -> APIAppStatus? {
+        await store.apiAppStatus()
+    }
+
+    func share(_ share: String) async throws -> APIShare {
+        try await MainActor.run { try store.apiShare(store.apiDefinition(share)) }
+    }
+
+    func updateShare(_ share: String, _ update: APIShareUpdate, client: String) async throws -> APIShare {
+        try await store.apiUpdateShare(share, update, client: client)
+    }
+
+    func restartShare(_ share: String, client: String) async throws -> APIShare {
+        try await store.apiRestartShare(share, client: client)
+    }
+
+    func deleteShare(_ share: String) async throws {
+        try await store.apiDeleteShare(share)
+    }
+
+    func protection(_ share: String) async throws -> APIProtection {
+        try await store.apiProtection(share)
+    }
+
+    func setProtection(_ share: String, _ request: APIProtectionRequest) async throws -> APIProtection {
+        try await store.apiSetProtection(share, request)
+    }
+
+    func regeneratePassword(_ share: String) async throws -> APIProtection {
+        try await store.apiRegeneratePassword(share)
+    }
+
+    func deleteComment(_ share: String, commentID: String) async throws {
+        try await store.apiDeleteComment(share, commentID: commentID)
+    }
+
+    func localServices() async -> [APILocalService] {
+        await store.apiLocalServices()
+    }
+
+    func projects() async -> [APIProject] {
+        await store.apiProjects()
+    }
+
+    func startProject(_ name: String, client: String) async throws -> APIProject {
+        try await store.apiStartProject(name, client: client)
+    }
+
+    func stopProject(_ name: String) async throws -> APIProject {
+        try await store.apiStopProject(name)
+    }
+
+    func zones() async throws -> [APIZone] {
+        try await store.apiZones()
+    }
 }
 
 enum APIStatus: Equatable {
@@ -187,7 +243,19 @@ extension AppStore {
             collaboration: definition.collaboration,
             people: peers(for: definition.id).map(APIPerson.init),
             openComments: comments.filter { !$0.resolved }.count,
-            comments: comments.count
+            comments: comments.count,
+            hostname: definition.hostname?.nilIfBlank,
+            lastError: runtime(for: definition.id).state == .failed ? runtime(for: definition.id).lastError : nil,
+            protection: Self.apiProtectionMode(definition.protection),
+            project: definition.project,
+            autoStart: definition.autoStart,
+            captureErrors: definition.kind.supportsCollaboration ? definition.captureErrors : nil,
+            rewriteHostHeader: definition.rewriteHostHeader,
+            funnel: definition.kind == .tailscale ? definition.tailscalePublic : nil,
+            stopsAt: autoStopDeadlines[definition.id],
+            health: health(for: definition.id)?.checks.map {
+                APIHealthCheck(kind: $0.kind.rawValue, title: $0.kind.title(for: definition.kind.provider), state: "\($0.state)", detail: $0.detail)
+            }
         )
     }
 
@@ -196,41 +264,6 @@ extension AppStore {
         if let id = UUID(uuidString: reference), let definition = definitions.first(where: { $0.id == id }) { return definition }
         if let definition = definitions.first(where: { $0.name.caseInsensitiveCompare(reference) == .orderedSame }) { return definition }
         throw OpenTrafficAPIError.notFound("No share named “\(reference)”.")
-    }
-
-    func apiCreateShare(_ request: APIShareRequest, client: String) async throws -> APIShare {
-        let localURL: String
-        if let port = request.port {
-            guard (1...65_535).contains(port) else { throw OpenTrafficAPIError.badRequest("port must be 1–65535.") }
-            localURL = "http://localhost:\(port)"
-        } else if let url = request.url?.nilIfBlank {
-            guard let components = URLComponents(string: url), ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
-                  components.host != nil, components.user == nil else { throw OpenTrafficAPIError.badRequest("url must be an http(s) address with a host.") }
-            localURL = url
-        } else {
-            throw OpenTrafficAPIError.badRequest("Give a port or a url.")
-        }
-        let kind: TunnelKind
-        switch request.provider?.lowercased() ?? "quick" {
-        case "quick", "cloudflare", "temporary": kind = .quick
-        case "tailscale", "tailnet": kind = .tailscale
-        case "ngrok": kind = .ngrok
-        case "opentunnel": kind = .opentunnel
-        default: throw OpenTrafficAPIError.badRequest("provider must be quick, tailscale, ngrok, or opentunnel.")
-        }
-        let collaboration = (request.collaboration ?? false) && kind.supportsCollaboration
-        let target = AutomationCommand.target(of: localURL)
-        // Another device on the network always needs a yes, whatever the setting says.
-        try confirmAPIPublishing(
-            "share \(target?.display ?? localURL) \(kind == .tailscale ? "on your tailnet" : "publicly") with \(kind.provider.title)\(collaboration ? " and live collaboration" : "")",
-            client: client,
-            offMac: target?.isLoopback != true
-        )
-        await shareLocalURL(localURL, kind: kind, name: request.name?.nilIfBlank, collaboration: collaboration)?.value
-        guard let definition = definitions.first(where: { $0.kind == kind && $0.localURL == localURL }) else {
-            throw OpenTrafficAPIError(status: 500, code: "failed", message: notice?.message ?? "The share couldn't be created.")
-        }
-        return try await apiWaitUntilLive(definition.id)
     }
 
     func apiStartShare(_ reference: String, client: String) async throws -> APIShare {
@@ -249,7 +282,7 @@ extension AppStore {
     }
 
     /// Waits up to 30 seconds for a public URL (or a failure).
-    private func apiWaitUntilLive(_ id: UUID) async throws -> APIShare {
+    func apiWaitUntilLive(_ id: UUID) async throws -> APIShare {
         for _ in 0..<120 {
             guard let definition = definitions.first(where: { $0.id == id }) else { throw OpenTrafficAPIError.notFound("The share was removed.") }
             let runtime = runtime(for: id)
@@ -265,7 +298,7 @@ extension AppStore {
 
     /// Publishing asks first, like opentraffic:// links, unless apps are allowed to publish without asking.
     /// `offMac`: the address is another device on the network, which always asks.
-    private func confirmAPIPublishing(_ description: String, client: String, offMac: Bool = false) throws {
+    func confirmAPIPublishing(_ description: String, client: String, offMac: Bool = false) throws {
         guard !apiAllowsPublishingWithoutAsking || offMac else { return }
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()

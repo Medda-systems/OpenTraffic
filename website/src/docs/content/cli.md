@@ -1,58 +1,128 @@
-## Install the command
+## Install and set up
 
-Use **Settings → General** to install the bundled `opentraffic` command as a symlink. The default path is `/usr/local/bin/opentraffic`. Ensure that directory is on your shell’s PATH.
+The `opentraffic` command comes with the app. The [installer](/docs/installation) links it into your PATH, and OpenTraffic itself keeps it linked whenever it runs from Applications, whichever way you installed it, in the first of `/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin` that can take it. The link points into the app, so updates update the command too. An `opentraffic` that isn't OpenTraffic's is never replaced, and removing OpenTraffic with Homebrew removes the link. **Settings → General → Install the opentraffic command** turns it off (and removes the link).
 
-The CLI sends `opentraffic://` links to the macOS application. It is not an independent headless tunnel server. macOS opens the app as needed; sharing still runs in the app.
-
-## Command reference
+Then run, once:
 
 ```sh
-opentraffic share <port|url> [--via quick|tailscale|ngrok|opentunnel] [--name NAME] [--collab]
-opentraffic start NAME
-opentraffic stop NAME
+opentraffic setup
+```
+
+This turns on OpenTraffic's local API, which the command uses; OpenTraffic asks you to confirm. Check everything with `opentraffic doctor`.
+
+The command talks to OpenTraffic over its local API. If OpenTraffic isn't running, the command starts it in the background: in the menu bar, without opening its window or taking focus. Shares still run in the app, so the menu bar and the app's windows always show what the command did, and the other way around.
+
+## Everyday use
+
+```sh
+opentraffic services                          # what's running on this Mac, and for how long
+opentraffic share 5173 --collab               # a temporary public URL with live collaboration
+opentraffic share 5173 --via opentunnel       # a lasting OpenTunnel address
+opentraffic share 3000 --via domain --hostname app.example.com
+opentraffic                                   # your shares (same as `opentraffic list`)
+opentraffic status Orbit                      # URL, connection path, who's there, protection
+opentraffic comments Orbit                    # what visitors pinned to the page
+opentraffic reply Orbit 015ec043 "Fixed in the header"
+opentraffic resolve Orbit 015ec043
 opentraffic stop --all
-opentraffic copy NAME
-opentraffic show [NAME]
-opentraffic project start NAME
-opentraffic project stop NAME
-opentraffic --help
 ```
 
-Quote names with spaces. A numeric target is a port between 1 and 65535; `localhost:3000` and full HTTP(S) URLs are also accepted.
+`share` and `start` wait until the share is live and print its public URL. Sharing an address that already has a share starts that share instead of making another.
 
-## Examples
+## Commands
+
+### Shares
+
+| Command | Does |
+| --- | --- |
+| `list` (`ls`) | Your shares, their state, public URL, people, and open comments. The default command. |
+| `status <share>` | One share in detail: public and local URL, way of sharing, who can open it, collaboration and who's there, project, schedule, health of each hop, last error. |
+| `share <port\|host:port\|url> [options]` | Share a local server. See below. |
+| `start <share>` / `stop <share>` / `stop --all` / `restart <share>` | Start, stop, restart. |
+| `remove <share> [--yes]` (`rm`) | Remove a share with its settings and comments. Asks first on a terminal; scripts pass `--yes`. |
+| `rename <share> <new name>` | Rename. |
+| `set <share> [options]` | `--url PORT\|URL` (stop it first), `--collab on\|off`, `--errors on\|off`, `--autostart on\|off`, `--project NAME` / `--no-project`, `--host-header on\|off`, `--stop-after never\|15m\|1h\|4h`. |
+| `protect <share> password [--user NAME]` | Protect an ngrok share with a generated password; prints it. |
+| `protect <share> google\|github [email …]` | Sign in with Google or GitHub (ngrok), optionally only for these emails. |
+| `protect <share> email <email …>` | One-time email codes for a custom domain (Cloudflare Access). |
+| `protect <share> off` | Anyone with the link. |
+| `password <share> [--new]` | Show the username and password, or make a new password. |
+
+`share` options:
+
+| Option | Meaning |
+| --- | --- |
+| `--via quick` | A temporary trycloudflare.com URL, new each start. The default. |
+| `--via opentunnel` | A lasting opentunnel.xyz address, encrypted end to end. |
+| `--via tailscale [--funnel]` | Your tailnet only, or public on the internet with `--funnel`. |
+| `--via ngrok [--hostname DOMAIN] [--password [--user NAME]]` | Your ngrok domain, or a reserved one; optionally password protected. |
+| `--via domain --hostname HOST [--replace-dns]` | A hostname in your Cloudflare account (`opentraffic domains` lists them). `--replace-dns` takes over a hostname that already has a DNS record, as in the New Tunnel sheet. |
+| `--name NAME` | What to call it. |
+| `--collab` | Live collaboration (temporary URLs and OpenTunnel). |
+| `--save` | Save without starting. |
+| `--copy` | Copy the public URL to the clipboard. |
+
+### Links
+
+| Command | Does |
+| --- | --- |
+| `url <share> [path]` | Print the public URL. |
+| `copy <share> [path]` | Copy it to the clipboard. |
+| `open <share> [path]` | Open it in your browser. |
+| `qr <share> [path]` | Show a QR code in the terminal, to open it on a phone. |
+
+### Feedback
+
+| Command | Does |
+| --- | --- |
+| `comments <share> [--resolved \| --all]` | Comments with their element, browser, picture, and replies. |
+| `reply <share> <comment> <text>` | Reply. |
+| `resolve <share> <comment> [--reopen]` | Resolve, or reopen. |
+| `delete-comment <share> <comment> [--yes]` | Delete. |
+| `screenshot <share> <comment> [-o FILE]` | Save the picture of what the comment points at. |
+| `errors <share>` | Browser errors visitors ran into. |
+| `logs <share> [-n LINES] [-f]` | The share's log; `-f` keeps following it. |
+| `watch [share]` | Follow events as they happen: shares starting and stopping, people joining, comments, errors. |
+
+### This Mac and OpenTraffic
+
+| Command | Does |
+| --- | --- |
+| `services` | Web servers running on this Mac, their page title, process, how long they've been up, and which share publishes them. |
+| `projects` / `project start\|stop <name>` | Projects: shares that start and stop together. |
+| `domains` | Domains in your Cloudflare account. |
+| `doctor` | Checks OpenTraffic, its API, and whether each way of sharing is ready (and why not). |
+| `setup` | Turns on the local API. |
+| `show [share]` | Opens OpenTraffic's window. |
+| `help [command]`, `version` | Help and version. |
+
+Shares are named by name (case-insensitive) or id; quote names with spaces.
+
+## Scripts and automation
+
+Every command takes `--json` and then prints the API's JSON. Exit status is `0` when it worked, `1` when OpenTraffic refused or something failed (the message says why), `2` for a wrong command line, and `3` when OpenTraffic isn't reachable or set up.
 
 ```sh
-opentraffic share 5173 --name "My app" --collab
-opentraffic share 3000 --via tailscale
-opentraffic share http://localhost:8080 --via ngrok --name API
-opentraffic share 5173 --via opentunnel --collab --name Orbit
-opentraffic copy Orbit
-opentraffic stop Orbit
-opentraffic project start "Demo day"
+url=$(opentraffic share 5173 --json | jq -r .publicURL)
+opentraffic watch --json | while read -r event; do …; done
 ```
 
-## Output and completion
+Anything that puts something on the internet asks for confirmation in OpenTraffic first, unless you turn on **Settings → Integrations → Apps can share without asking**. Turn that on for unattended use. Sharing an address on another device always asks.
 
-`share` dispatches the request and prints no URL; dispatch success does not mean a tunnel is already online. `copy` waits for the app to update the clipboard, then prints the URL. If nothing is copied within its short polling window, it exits with an error. It also changes your clipboard.
+The command reads `OPENTRAFFIC_API_PORT` and `OPENTRAFFIC_API_TOKEN_FILE` if you've moved the API; otherwise it uses OpenTraffic's settings.
 
-For reliable scripting with structured responses and share state, use the [REST API](/docs/rest-api).
+## Links (`opentraffic://`)
 
-## URL schemes
+Shortcuts, Raycast, and other apps can also use links. They don't print anything back; use the command for that.
 
 | Link | Action |
 | --- | --- |
 | `opentraffic://share?port=3000&via=tailscale` | Share a local port |
 | `opentraffic://share?port=5173&collab=1&name=Orbit` | Share with collaboration |
-| `opentraffic://start?name=Orbit` | Start a saved share |
-| `opentraffic://stop?name=Orbit` | Stop one share |
-| `opentraffic://stop?all` | Stop managed shares |
+| `opentraffic://start?name=Orbit` / `stop?name=Orbit` / `stop?all` | Start or stop |
 | `opentraffic://copy?name=Orbit` | Copy the public URL |
 | `opentraffic://show` | Open the app window |
 | `opentraffic://project?name=Demo&action=start` | Start a project |
+| `opentraffic://enable-api` | Turn on the local API (always asks) |
 
-Percent-encode query values containing spaces or special characters. macOS Shortcuts can call these through **Open URLs**.
-
-## Approval behavior
-
-Sharing and starting ask for confirmation unless **Allow automation without confirmation** is enabled in General Settings. Any app or web page can attempt to open an app URL, so enable that preference only if it fits your workflow.
+Percent-encode values with spaces or special characters. Links that share or start something ask for confirmation unless **Allow automation without confirmation** is on in General settings; any app or web page can open a link, so turn that on only if it fits how you work.

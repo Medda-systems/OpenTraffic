@@ -124,6 +124,81 @@ final class FakeAPIBackend: OpenTrafficAPIBackend, @unchecked Sendable {
         _ = try find(share)
         return Array((1...500).map { "line \($0)" }.suffix(lines))
     }
+
+    // What the app's windows can do.
+    private var protectionMode = "none"
+
+    func status() async -> APIAppStatus? {
+        APIAppStatus(version: "9.9.9", shares: lock.withLock { shares.count }, running: 1,
+                     providers: [APIProviderStatus(name: "quick", ready: true, detail: nil), APIProviderStatus(name: "ngrok", ready: false, detail: "ngrok isn't installed.")],
+                     publishesWithoutAsking: false)
+    }
+
+    func updateShare(_ share: String, _ update: APIShareUpdate, client: String) async throws -> APIShare {
+        let found = try find(share)
+        let renamed = APIShare(id: found.id, name: update.name ?? found.name, provider: found.provider, kind: found.kind, state: found.state,
+                               localURL: update.url ?? found.localURL, publicURL: found.publicURL, collaboration: update.collaboration ?? found.collaboration,
+                               people: found.people, openComments: found.openComments, comments: found.comments, project: update.project?.isEmpty == true ? nil : update.project)
+        lock.withLock { shares = shares.map { $0.id == found.id ? renamed : $0 } }
+        return renamed
+    }
+
+    func restartShare(_ share: String, client: String) async throws -> APIShare {
+        record(client)
+        return try find(share)
+    }
+
+    func deleteShare(_ share: String) async throws {
+        let found = try find(share)
+        lock.withLock { shares.removeAll { $0.id == found.id } }
+    }
+
+    func protection(_ share: String) async throws -> APIProtection {
+        _ = try find(share)
+        let mode = lock.withLock { protectionMode }
+        return APIProtection(mode: mode, username: mode == "password" ? "guest" : nil, password: mode == "password" ? "s3cret" : nil, emails: [])
+    }
+
+    func setProtection(_ share: String, _ request: APIProtectionRequest) async throws -> APIProtection {
+        guard ["none", "password"].contains(request.mode) else { throw OpenTrafficAPIError.badRequest("This share can be protected with: password.") }
+        lock.withLock { protectionMode = request.mode }
+        return try await protection(share)
+    }
+
+    func regeneratePassword(_ share: String) async throws -> APIProtection {
+        _ = try find(share)
+        return APIProtection(mode: "password", username: "guest", password: "n3w", emails: [])
+    }
+
+    func deleteComment(_ share: String, commentID: String) async throws {
+        _ = try find(share)
+        try lock.withLock {
+            guard comments.contains(where: { $0.id == commentID }) else { throw OpenTrafficAPIError.notFound("No comment \(commentID)") }
+            comments.removeAll { $0.id == commentID }
+        }
+    }
+
+    func localServices() async -> [APILocalService] {
+        [APILocalService(port: 5173, url: "http://localhost:5173", title: "Orbit", process: "node", statusCode: 200, upSince: Date(timeIntervalSince1970: 1_760_000_000), sharedAs: "Orbit")]
+    }
+
+    func projects() async -> [APIProject] {
+        [APIProject(name: "Demo", shares: ["Orbit"], running: 1)]
+    }
+
+    func startProject(_ name: String, client: String) async throws -> APIProject {
+        record(client)
+        guard name.caseInsensitiveCompare("Demo") == .orderedSame else { throw OpenTrafficAPIError.notFound("No project named “\(name)”.") }
+        return APIProject(name: "Demo", shares: ["Orbit"], running: 1)
+    }
+
+    func stopProject(_ name: String) async throws -> APIProject {
+        APIProject(name: "Demo", shares: ["Orbit"], running: 0)
+    }
+
+    func zones() async throws -> [APIZone] {
+        [APIZone(id: "z1", name: "example.com")]
+    }
 }
 
 /// A running API server with a fake backend.

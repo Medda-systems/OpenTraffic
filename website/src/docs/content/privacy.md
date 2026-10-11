@@ -22,7 +22,7 @@ Where it keeps things:
 1. Quit OpenTraffic and delete it from Applications.
 2. Delete `~/Library/Application Support/OpenTraffic` and `~/Library/Preferences/se.medda.opentraffic.plist`.
 3. Remove the Keychain items above with Keychain Access.
-4. If you installed the `opentraffic` command, delete `/usr/local/bin/opentraffic`.
+4. Delete the `opentraffic` command's link from `/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin` (or first turn off **Settings → General → Install the opentraffic command**, which removes it). `brew uninstall --cask opentraffic` removes it for you.
 
 ## Site previews
 

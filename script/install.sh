@@ -3,11 +3,12 @@
 #   curl -fsSL https://github.com/Medda-systems/OpenTraffic-releases/releases/latest/download/install.sh | sh
 #
 # Downloads the newest release, checks its SHA-256 checksum and code signature, quits a running
-# OpenTraffic, puts the app in /Applications (or ~/Applications when that isn't writable), and opens
-# it. After that, OpenTraffic updates itself.
+# OpenTraffic, puts the app in /Applications (or ~/Applications when that isn't writable), links the
+# `opentraffic` command into your PATH, and opens the app. After that, OpenTraffic updates itself.
 #
 # OPENTRAFFIC_INSTALL_DIR  install somewhere else
 # OPENTRAFFIC_NO_OPEN=1    don't open the app afterwards
+# OPENTRAFFIC_NO_CLI=1     don't link the opentraffic command
 set -eu
 
 RELEASES="https://github.com/Medda-systems/OpenTraffic-releases/releases"
@@ -71,6 +72,41 @@ fi
 rm -rf "${app}"
 ditto "${mounted}/OpenTraffic.app" "${app}"
 say "Installed OpenTraffic ${version} in ${destination}."
+
+# The opentraffic command: a link to the script in the app, so it follows updates. Like the app does
+# at launch, an earlier link of OpenTraffic's is updated, and an `opentraffic` that isn't OpenTraffic's
+# is left alone.
+link_command() {
+  target="${app}/Contents/Resources/opentraffic"
+  [ -x "${target}" ] || return 0
+  directories="/opt/homebrew/bin /usr/local/bin ${HOME}/.local/bin"
+  link=""
+  for dir in ${directories}; do
+    case "$(readlink "${dir}/opentraffic" 2>/dev/null)" in
+      *.app/Contents/Resources/opentraffic) link="${dir}/opentraffic"; break ;;
+    esac
+  done
+  if [ -z "${link}" ]; then
+    mkdir -p "${HOME}/.local/bin" 2>/dev/null || true
+    for dir in ${directories}; do
+      [ -d "${dir}" ] && [ -w "${dir}" ] || continue
+      if [ -e "${dir}/opentraffic" ] || [ -L "${dir}/opentraffic" ]; then
+        say "Left ${dir}/opentraffic alone: it isn't OpenTraffic's."
+        continue
+      fi
+      link="${dir}/opentraffic"
+      break
+    done
+  fi
+  [ -n "${link}" ] || { say "Couldn't link the opentraffic command; turn it on in OpenTraffic → Settings → General."; return 0; }
+  ln -sfn "${target}" "${link}" || return 0
+  dir="$(dirname "${link}")"
+  case ":${PATH}:" in
+    *":${dir}:"*) say "Linked the opentraffic command. Run \`opentraffic setup\` once, then \`opentraffic help\`." ;;
+    *) say "Linked the opentraffic command at ${link}. Add ${dir} to your PATH to use it." ;;
+  esac
+}
+[ "${OPENTRAFFIC_NO_CLI:-}" = "1" ] || link_command
 
 if [ "${OPENTRAFFIC_NO_OPEN:-}" != "1" ]; then
   open "${app}"

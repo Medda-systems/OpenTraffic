@@ -18,9 +18,9 @@ public struct APIPerson: Codable, Equatable, Sendable {
 public struct APIShare: Codable, Equatable, Sendable {
     public let id: UUID
     public let name: String
-    /// "cloudflare", "tailscale", or "ngrok".
+    /// "cloudflare", "tailscale", "ngrok", or "opentunnel".
     public let provider: String
-    /// "quick", "remote", "tailscale", or "ngrok".
+    /// "quick", "remote", "tailscale", "ngrok", or "opentunnel".
     public let kind: String
     /// "stopped", "starting", "running", "stopping", or "failed".
     public let state: String
@@ -30,8 +30,34 @@ public struct APIShare: Codable, Equatable, Sendable {
     public let people: [APIPerson]
     public let openComments: Int
     public let comments: Int
+    // What the share's detail view shows. Optional, so older clients and servers still decode.
+    /// The fixed hostname: a custom domain, an ngrok domain, or nil for addresses the provider picks.
+    public let hostname: String?
+    /// Why the share last failed, while it's in the failed state.
+    public let lastError: String?
+    /// Who can open it: "none", "password", "google", "github", or "email".
+    public let protection: String?
+    public let project: String?
+    /// Starts by itself whenever its local service is running.
+    public let autoStart: Bool?
+    /// Visitors' browser errors are collected (collaboration only).
+    public let captureErrors: Bool?
+    /// The local service sees its own address in the Host header instead of the public one.
+    public let rewriteHostHeader: Bool?
+    /// Tailscale only: reachable from the internet through Funnel, not just the tailnet.
+    public let funnel: Bool?
+    /// When the share stops by itself, if it's set to.
+    public let stopsAt: Date?
+    /// The connection path's latest checks, from the local service to the public URL.
+    public let health: [APIHealthCheck]?
 
-    public init(id: UUID, name: String, provider: String, kind: String, state: String, localURL: String, publicURL: String?, collaboration: Bool, people: [APIPerson], openComments: Int, comments: Int) {
+    public init(
+        id: UUID, name: String, provider: String, kind: String, state: String, localURL: String, publicURL: String?,
+        collaboration: Bool, people: [APIPerson], openComments: Int, comments: Int,
+        hostname: String? = nil, lastError: String? = nil, protection: String? = nil, project: String? = nil,
+        autoStart: Bool? = nil, captureErrors: Bool? = nil, rewriteHostHeader: Bool? = nil, funnel: Bool? = nil,
+        stopsAt: Date? = nil, health: [APIHealthCheck]? = nil
+    ) {
         self.id = id
         self.name = name
         self.provider = provider
@@ -43,6 +69,170 @@ public struct APIShare: Codable, Equatable, Sendable {
         self.people = people
         self.openComments = openComments
         self.comments = comments
+        self.hostname = hostname
+        self.lastError = lastError
+        self.protection = protection
+        self.project = project
+        self.autoStart = autoStart
+        self.captureErrors = captureErrors
+        self.rewriteHostHeader = rewriteHostHeader
+        self.funnel = funnel
+        self.stopsAt = stopsAt
+        self.health = health
+    }
+}
+
+/// One stop on a share's connection path.
+public struct APIHealthCheck: Codable, Equatable, Sendable {
+    /// "localOrigin", "connector", "edge", "dns", or "publicSite".
+    public let kind: String
+    public let title: String
+    /// "ok", "working", "failed", or "skipped".
+    public let state: String
+    public let detail: String?
+
+    public init(kind: String, title: String, state: String, detail: String?) {
+        self.kind = kind
+        self.title = title
+        self.state = state
+        self.detail = detail
+    }
+}
+
+/// A web server OpenTraffic found running on this Mac (the menu bar's Ready to Share list).
+public struct APILocalService: Codable, Equatable, Sendable {
+    public let port: Int
+    public let url: String
+    /// The page title, when the server answered with one.
+    public let title: String?
+    public let process: String?
+    public let statusCode: Int?
+    /// Since when it has been answering without interruption.
+    public let upSince: Date?
+    /// The share that already publishes it, if one does.
+    public let sharedAs: String?
+
+    public init(port: Int, url: String, title: String?, process: String?, statusCode: Int?, upSince: Date?, sharedAs: String?) {
+        self.port = port
+        self.url = url
+        self.title = title
+        self.process = process
+        self.statusCode = statusCode
+        self.upSince = upSince
+        self.sharedAs = sharedAs
+    }
+}
+
+/// Shares grouped to start and stop together.
+public struct APIProject: Codable, Equatable, Sendable {
+    public let name: String
+    public let shares: [String]
+    public let running: Int
+
+    public init(name: String, shares: [String], running: Int) {
+        self.name = name
+        self.shares = shares
+        self.running = running
+    }
+}
+
+/// A domain in the connected Cloudflare account, for custom-domain shares.
+public struct APIZone: Codable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
+/// Whether a way of sharing can be used right now, and why not.
+public struct APIProviderStatus: Codable, Equatable, Sendable {
+    /// "quick", "domain", "opentunnel", "tailscale", or "ngrok".
+    public let name: String
+    public let ready: Bool
+    public let detail: String?
+
+    public init(name: String, ready: Bool, detail: String?) {
+        self.name = name
+        self.ready = ready
+        self.detail = detail
+    }
+}
+
+public struct APIAppStatus: Codable, Equatable, Sendable {
+    public let version: String
+    public let shares: Int
+    public let running: Int
+    public let providers: [APIProviderStatus]
+    /// Apps on this Mac can publish without OpenTraffic asking first.
+    public let publishesWithoutAsking: Bool
+
+    public init(version: String, shares: Int, running: Int, providers: [APIProviderStatus], publishesWithoutAsking: Bool) {
+        self.version = version
+        self.shares = shares
+        self.running = running
+        self.providers = providers
+        self.publishesWithoutAsking = publishesWithoutAsking
+    }
+}
+
+/// Changes to a share's settings; absent fields are left as they are.
+public struct APIShareUpdate: Codable, Equatable, Sendable {
+    public var name: String?
+    /// A port or an http(s) URL for the local service.
+    public var url: String?
+    public var collaboration: Bool?
+    public var captureErrors: Bool?
+    public var autoStart: Bool?
+    /// An empty string removes the share from its project.
+    public var project: String?
+    public var rewriteHostHeader: Bool?
+    /// "never", "15m", "1h", or "4h": stop by itself after that long.
+    public var autoStop: String?
+
+    public init(name: String? = nil, url: String? = nil, collaboration: Bool? = nil, captureErrors: Bool? = nil, autoStart: Bool? = nil, project: String? = nil, rewriteHostHeader: Bool? = nil, autoStop: String? = nil) {
+        self.name = name
+        self.url = url
+        self.collaboration = collaboration
+        self.captureErrors = captureErrors
+        self.autoStart = autoStart
+        self.project = project
+        self.rewriteHostHeader = rewriteHostHeader
+        self.autoStop = autoStop
+    }
+}
+
+/// Who can open a share. ngrok shares take a password or a Google or GitHub sign-in; custom domains
+/// take email codes (Cloudflare Access).
+public struct APIProtectionRequest: Codable, Equatable, Sendable {
+    /// "none", "password", "google", "github", or "email".
+    public var mode: String
+    /// For "password" (default "guest").
+    public var username: String?
+    /// For sign-ins: who may sign in (empty: anyone with an account, except for "email").
+    public var emails: [String]?
+
+    public init(mode: String, username: String? = nil, emails: [String]? = nil) {
+        self.mode = mode
+        self.username = username
+        self.emails = emails
+    }
+}
+
+public struct APIProtection: Codable, Equatable, Sendable {
+    public let mode: String
+    public let username: String?
+    /// The generated password, for "password".
+    public let password: String?
+    public let emails: [String]
+
+    public init(mode: String, username: String?, password: String?, emails: [String]) {
+        self.mode = mode
+        self.username = username
+        self.password = password
+        self.emails = emails
     }
 }
 
@@ -61,17 +251,29 @@ public struct APIShareRef: Codable, Equatable, Sendable {
 public struct APIShareRequest: Codable, Equatable, Sendable {
     public var port: Int?
     public var url: String?
-    /// "quick" (default), "tailscale", or "ngrok".
+    /// "quick" (default), "opentunnel", "tailscale", "ngrok", or "domain" (a hostname in your Cloudflare account).
     public var provider: String?
     public var name: String?
     public var collaboration: Bool?
+    /// "domain": the hostname to serve (required). "ngrok": a domain reserved in your ngrok account.
+    public var hostname: String?
+    /// "domain": take over a hostname that already has a DNS record (see the New Tunnel sheet).
+    public var replaceDNS: Bool?
+    /// "tailscale": public on the internet through Funnel, not just your tailnet.
+    public var funnel: Bool?
+    /// False saves the share without starting it.
+    public var start: Bool?
 
-    public init(port: Int? = nil, url: String? = nil, provider: String? = nil, name: String? = nil, collaboration: Bool? = nil) {
+    public init(port: Int? = nil, url: String? = nil, provider: String? = nil, name: String? = nil, collaboration: Bool? = nil, hostname: String? = nil, replaceDNS: Bool? = nil, funnel: Bool? = nil, start: Bool? = nil) {
         self.port = port
         self.url = url
         self.provider = provider
         self.name = name
         self.collaboration = collaboration
+        self.hostname = hostname
+        self.replaceDNS = replaceDNS
+        self.funnel = funnel
+        self.start = start
     }
 }
 
@@ -146,6 +348,45 @@ public protocol OpenTrafficAPIBackend: Sendable {
     func reply(_ share: String, commentID: String, text: String, client: String) async throws -> APIComment
     func errors(_ share: String) async throws -> [CollabErrorGroup]
     func logs(_ share: String, lines: Int) async throws -> [String]
+
+    // What the app's windows can do, for the command-line tool. Default implementations answer 501.
+    func status() async -> APIAppStatus?
+    func share(_ share: String) async throws -> APIShare
+    func updateShare(_ share: String, _ update: APIShareUpdate, client: String) async throws -> APIShare
+    func restartShare(_ share: String, client: String) async throws -> APIShare
+    func deleteShare(_ share: String) async throws
+    func protection(_ share: String) async throws -> APIProtection
+    func setProtection(_ share: String, _ request: APIProtectionRequest) async throws -> APIProtection
+    func regeneratePassword(_ share: String) async throws -> APIProtection
+    func deleteComment(_ share: String, commentID: String) async throws
+    func localServices() async -> [APILocalService]
+    func projects() async -> [APIProject]
+    func startProject(_ name: String, client: String) async throws -> APIProject
+    func stopProject(_ name: String) async throws -> APIProject
+    func zones() async throws -> [APIZone]
+}
+
+extension OpenTrafficAPIBackend {
+    private var unsupported: OpenTrafficAPIError { OpenTrafficAPIError(status: 501, code: "not_supported", message: "This version of OpenTraffic doesn't support that.") }
+    public func status() async -> APIAppStatus? { nil }
+    public func share(_ share: String) async throws -> APIShare {
+        guard let found = await listShares().first(where: { $0.id.uuidString.caseInsensitiveCompare(share) == .orderedSame || $0.name.caseInsensitiveCompare(share) == .orderedSame }) else {
+            throw OpenTrafficAPIError.notFound("No share named “\(share)”.")
+        }
+        return found
+    }
+    public func updateShare(_ share: String, _ update: APIShareUpdate, client: String) async throws -> APIShare { throw unsupported }
+    public func restartShare(_ share: String, client: String) async throws -> APIShare { throw unsupported }
+    public func deleteShare(_ share: String) async throws { throw unsupported }
+    public func protection(_ share: String) async throws -> APIProtection { throw unsupported }
+    public func setProtection(_ share: String, _ request: APIProtectionRequest) async throws -> APIProtection { throw unsupported }
+    public func regeneratePassword(_ share: String) async throws -> APIProtection { throw unsupported }
+    public func deleteComment(_ share: String, commentID: String) async throws { throw unsupported }
+    public func localServices() async -> [APILocalService] { [] }
+    public func projects() async -> [APIProject] { [] }
+    public func startProject(_ name: String, client: String) async throws -> APIProject { throw unsupported }
+    public func stopProject(_ name: String) async throws -> APIProject { throw unsupported }
+    public func zones() async throws -> [APIZone] { throw unsupported }
 }
 
 public struct APIEvent: Codable, Equatable, Sendable {

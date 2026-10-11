@@ -17,6 +17,16 @@ cask "opentraffic" do
 
   app "OpenTraffic.app"
 
+  # OpenTraffic links its `opentraffic` command into your PATH when it starts; take that link away
+  # with the app (only a link to an OpenTraffic.app, never a file of yours).
+  uninstall_postflight do
+    ["#{HOMEBREW_PREFIX}/bin/opentraffic", "/usr/local/bin/opentraffic", "#{Dir.home}/.local/bin/opentraffic"].uniq.each do |link|
+      next unless File.symlink?(link) && File.readlink(link).end_with?(".app/Contents/Resources/opentraffic")
+
+      File.delete(link)
+    end
+  end
+
   zap trash: [
     "~/Library/Application Support/OpenTraffic",
     "~/Library/Caches/se.medda.opentraffic",

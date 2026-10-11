@@ -120,3 +120,10 @@ private func parse(_ string: String) -> AutomationCommand? {
     let plain = URL(string: "opentraffic://share?port=5173")!
     #expect(AutomationCommand.parse(plain) == .share(localURL: "http://localhost:5173", kind: .quick, name: nil, collaboration: false))
 }
+
+@Test func linkTurnsOnTheLocalAPI() {
+    #expect(AutomationCommand.parse(URL(string: "opentraffic://enable-api")!) == .enableAPI)
+    #expect(AutomationCommand.parse(URL(string: "opentraffic:enable-api")!) == .enableAPI)
+    // Turning the API on asks every time, so it doesn't count as quietly exposing anything.
+    #expect(!AutomationCommand.enableAPI.exposesService)
+}
