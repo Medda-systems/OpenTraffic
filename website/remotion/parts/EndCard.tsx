@@ -1,5 +1,6 @@
 import { Img, spring, staticFile, useCurrentFrame, useVideoConfig } from "remotion"
 import { ink, line, mono, muted, sans, serif, shadow } from "../theme"
+import { OPEN_SOURCE } from "../release"
 import { GitHubMark } from "./GitHubMark"
 
 export const EndCard = () => {
@@ -20,10 +21,12 @@ export const EndCard = () => {
           </div>
           <div style={{ fontSize: 22, color: muted, marginTop: 26 }}>Free for macOS 14+ · opentraffic.dev</div>
         </div>
-        <div style={{ opacity: source, transform: `translateY(${(1 - source) * 16}px)`, marginTop: 30, display: "flex", alignItems: "center", justifyContent: "center", gap: 12, fontSize: 26, fontWeight: 600 }}>
-          <GitHubMark size={30} color={ink} />
-          Open source on GitHub
-        </div>
+        {OPEN_SOURCE ? (
+          <div style={{ opacity: source, transform: `translateY(${(1 - source) * 16}px)`, marginTop: 30, display: "flex", alignItems: "center", justifyContent: "center", gap: 12, fontSize: 26, fontWeight: 600 }}>
+            <GitHubMark size={30} color={ink} />
+            Open source on GitHub
+          </div>
+        ) : null}
       </div>
     </div>
   )

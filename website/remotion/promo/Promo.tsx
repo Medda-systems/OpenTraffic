@@ -1,5 +1,6 @@
 import { AbsoluteFill, Audio, Easing, Img, interpolate, Sequence, spring, staticFile, useCurrentFrame, useVideoConfig } from "remotion"
 import { GitHubMark } from "../parts/GitHubMark"
+import { OPEN_SOURCE } from "../release"
 import { SessionView } from "../parts/SessionView"
 import { cliSession, Terminal, typedAt } from "../parts/Terminal"
 import type { Seat, Session } from "../session"
@@ -520,10 +521,12 @@ const End = () => {
           </Pill>
           <div style={{ fontSize: 30, color: dim, marginTop: 30 }}>Free for macOS · opentraffic.dev</div>
         </div>
-        <div style={{ opacity: source, transform: `translateY(${(1 - source) * 20}px)`, marginTop: 40, display: "flex", alignItems: "center", justifyContent: "center", gap: 16, fontSize: 34, fontWeight: 600 }}>
-          <GitHubMark size={40} color={fg} />
-          Open source on GitHub
-        </div>
+        {OPEN_SOURCE ? (
+          <div style={{ opacity: source, transform: `translateY(${(1 - source) * 20}px)`, marginTop: 40, display: "flex", alignItems: "center", justifyContent: "center", gap: 16, fontSize: 34, fontWeight: 600 }}>
+            <GitHubMark size={40} color={fg} />
+            Open source on GitHub
+          </div>
+        ) : null}
       </div>
       <AbsoluteFill style={{ background: bg, opacity: fade }} />
     </AbsoluteFill>
@@ -545,7 +548,7 @@ const cut = (session: Session) =>
     { bars: 2, body: <Cli />, sfx: cliSfx() },
     { bars: 1, body: <Extras />, sfx: extrasSfx() },
     { bars: 1, body: <Hits /> },
-    { bars: 2, body: <End />, sfx: [<Sfx key="gh" at={34} name="pop" volume={0.45} />] },
+    { bars: 2, body: <End />, sfx: OPEN_SOURCE ? [<Sfx key="gh" at={34} name="pop" volume={0.45} />] : [] },
   ] as { bars: number; body: React.ReactNode; sfx?: React.ReactNode[] }[]
 
 export const PROMO_FRAMES = 23 * BAR
