@@ -114,7 +114,11 @@ struct Context {
     var args: [String] { invocation.arguments }
     var json: Bool { invocation.json }
 
-    func say(_ text: String = "") { print(text) }
+    func say(_ text: String = "") {
+        print(text)
+        // Whoever was reading is gone (`opentraffic watch | head -1`): stop instead of running on.
+        if ferror(stdout) != 0 { exit(0) }
+    }
 
     /// The share's API path.
     func sharePath(_ name: String, _ rest: String = "") -> String { "/v1/shares/\(name.pathEncoded)\(rest)" }

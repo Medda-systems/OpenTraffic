@@ -2,3 +2,5 @@
 /install https://github.com/Medda-systems/OpenTraffic-releases/releases/latest/download/install.sh 302
 /download https://github.com/Medda-systems/OpenTraffic-releases/releases/latest/download/OpenTraffic.dmg 302
 /docs/introduction /docs 301
+# curl -fsSL https://opentraffic.dev/skill | sh
+/skill /skills/install.sh 302

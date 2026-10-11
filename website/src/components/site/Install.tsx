@@ -8,6 +8,10 @@ import { Reveal } from "./Reveal"
 
 const agents = [
   {
+    name: "Agent skill · Claude Code, Codex, opencode",
+    command: "curl -fsSL https://opentraffic.dev/skill | sh",
+  },
+  {
     name: "Claude Code",
     command: 'claude mcp add --scope user opentraffic --env OPENTRAFFIC_CLIENT="Claude Code" -- /Applications/OpenTraffic.app/Contents/MacOS/opentraffic-mcp',
   },
@@ -25,7 +29,7 @@ export function Agents() {
     <section id="agents" className="scroll-mt-16 border-y bg-muted/30">
       <div className="mx-auto grid max-w-6xl gap-12 px-6 py-24 lg:grid-cols-2 lg:items-center">
         <Reveal>
-          <Badge variant="outline" className="rounded-full">MCP</Badge>
+          <Badge variant="outline" className="rounded-full">Skill · MCP</Badge>
           <h2 className="mt-4 text-4xl md:text-5xl">Feedback your coding agent can act on.</h2>
           <p className="mt-4 text-lg text-muted-foreground">
             Claude Code, Codex, Cursor, opencode, and any MCP client can share your dev server, wait for comments, fix
@@ -51,7 +55,7 @@ export function Agents() {
               </div>
             ))}
             <p className="text-xs text-muted-foreground">
-              Turn on the local API in Settings → Integrations first; OpenTraffic shows the exact setup for each agent there.
+              The skill teaches your agent the <span className="font-mono">opentraffic</span> command (<a className="underline underline-offset-4" href="/docs/agent-skill">more</a>); the MCP server adds tools like waiting for feedback. Run <span className="font-mono">opentraffic setup</span> once first.
             </p>
           </div>
         </Reveal>

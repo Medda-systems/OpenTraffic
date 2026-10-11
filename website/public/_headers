@@ -8,3 +8,6 @@
 
 /media/*
   Cache-Control: public, max-age=86400
+
+/skills/*
+  Cache-Control: public, max-age=300
