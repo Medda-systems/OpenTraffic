@@ -154,8 +154,8 @@ It also writes `dist/release/appcast.xml`, the update feed, and signs both the f
 To publish a version: set `VERSION`, add its section to `CHANGELOG.md`, commit and push, then push a tag:
 
 ```sh
-git tag -a v1.0.3 -m "OpenTraffic 1.0.3"
-git push origin v1.0.3
+git tag -a v1.0.4 -m "OpenTraffic 1.0.4"
+git push origin v1.0.4
 ```
 
 The Release workflow (`.github/workflows/release.yml`) then builds and signs the release and runs `script/publish_release.sh`, which creates the public release in [Medda-systems/OpenTraffic-releases](https://github.com/Medda-systems/OpenTraffic-releases), with the disk image, its checksum, and the update feed, and updates the Homebrew cask in [Medda-systems/homebrew-tap](https://github.com/Medda-systems/homebrew-tap). It needs two repository secrets: `SPARKLE_PRIVATE_KEY` (the exported update key) and `RELEASES_TOKEN` (a fine-grained token with Contents read/write on those two repositories). The Tests workflow runs the test suite on every push to `main` and every pull request.
