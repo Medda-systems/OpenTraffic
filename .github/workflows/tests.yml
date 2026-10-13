@@ -5,8 +5,8 @@ on:
   push:
     branches: [main]
     paths-ignore: ["**.md", "Assets/**", "Licenses/**", "website/**", "docs/**"]
+  # Every pull request, even docs-only ones, because main requires this check to pass.
   pull_request:
-    paths-ignore: ["**.md", "Assets/**", "Licenses/**", "website/**", "docs/**"]
 
 permissions:
   contents: read
