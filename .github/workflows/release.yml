@@ -27,7 +27,8 @@ concurrency:
 jobs:
   release:
     runs-on: macos-26
-    timeout-minutes: 45
+    # Apple's notary service usually answers in minutes, but sometimes takes much longer.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
         with:
