@@ -108,8 +108,8 @@ export function Install({ version }: { version: string | null }) {
                   </Button>
                 </div>
                 <Note>
-                  Open it and drag OpenTraffic into Applications. Releases aren't notarized by Apple yet, so the first
-                  launch is blocked once: open <b>System Settings → Privacy &amp; Security</b> and click <b>Open Anyway</b>.
+                  Open it and drag OpenTraffic into Applications. It's signed by Medda Systems and notarized by Apple,
+                  so it opens without any warning.
                 </Note>
               </TabsContent>
               <TabsContent value="homebrew" className="mt-0">
@@ -119,7 +119,7 @@ export function Install({ version }: { version: string | null }) {
                 </div>
                 <Note>
                   Homebrew asks you to trust casks from taps outside its own collection; the second line trusts just
-                  this one. Until releases are notarized, approve the first launch in Privacy &amp; Security.
+                  this one.
                 </Note>
               </TabsContent>
             </div>

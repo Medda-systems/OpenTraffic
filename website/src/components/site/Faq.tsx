@@ -16,8 +16,8 @@ const questions = [
     a: "Temporary URL for a quick look. OpenTunnel when you want the same link every time. Tailscale to keep it inside your team's network. ngrok to inspect and replay requests or add a password. Your own domain on Cloudflare for something permanent.",
   },
   {
-    q: "Why does macOS ask me to approve the first launch?",
-    a: "Releases aren't notarized by Apple yet. The one-line installer avoids the prompt; for the disk image or Homebrew, approve it once in System Settings → Privacy & Security → Open Anyway. Notarized releases are on the way.",
+    q: "Is OpenTraffic signed?",
+    a: "Yes. Every release is signed by Medda Systems AB and notarized by Apple, so macOS opens it without warnings. Updates are also signed with Medda Systems' own key, and OpenTraffic checks that signature before installing them.",
   },
   {
     q: "What does OpenTraffic send anywhere?",

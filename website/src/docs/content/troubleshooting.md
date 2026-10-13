@@ -4,7 +4,7 @@ Open the share’s **Overview** and inspect each hop. Recheck with **⌘R**, the
 
 ## The app is blocked on first launch
 
-The current DMG and Homebrew release are not notarized. Follow the version-specific first-launch instructions in [Installation](/docs/installation). Sparkle update signatures and Apple notarization are separate checks.
+Releases from 1.0.5 on are signed by Medda Systems and notarized by Apple, so macOS opens them without asking. Versions 1.0.4 and earlier weren't: if you install one of those from the disk image or Homebrew, open **System Settings → Privacy & Security** and click **Open Anyway** (on macOS 14, Control-click the app and choose **Open**), or install the latest version instead. If macOS says the current version is damaged or can't be checked, download it again; the disk image's checksum is on the [releases page](https://github.com/Medda-systems/OpenTraffic-releases/releases).
 
 ## My dev server is missing
 

@@ -45,7 +45,11 @@ curl -fsSL -o "${work}/${dmg}.sha256" "${RELEASES}/download/v${version}/${dmg}.s
 mounted="${work}/volume"
 mkdir "${mounted}"
 hdiutil attach -readonly -nobrowse -mountpoint "${mounted}" "${work}/${dmg}" -quiet || fail "couldn't open the disk image."
-codesign --verify --deep --strict "${mounted}/OpenTraffic.app" 2>/dev/null || fail "the app's signature is invalid."
+# Signed with Medda Systems' Developer ID (team 5TR7SD7S8J); 1.0.4 and earlier were signed ad hoc.
+requirement='anchor apple generic and certificate leaf[subject.OU] = "5TR7SD7S8J"'
+case "${version}" in 1.0.[0-4]) requirement="" ;; esac
+codesign --verify --deep --strict ${requirement:+-R="${requirement}"} "${mounted}/OpenTraffic.app" 2>/dev/null \
+  || fail "the app's signature is invalid or isn't Medda Systems'."
 
 if [ -n "${OPENTRAFFIC_INSTALL_DIR:-}" ]; then
   destination="${OPENTRAFFIC_INSTALL_DIR}"

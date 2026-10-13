@@ -84,9 +84,7 @@ Or download it:
 
 1. Download [`OpenTraffic.dmg`](https://github.com/Medda-systems/OpenTraffic-releases/releases/latest/download/OpenTraffic.dmg) (every version and its checksum are on the [releases page](https://github.com/Medda-systems/OpenTraffic-releases/releases)) and open it.
 2. Drag **OpenTraffic** onto **Applications**.
-3. Open OpenTraffic from Applications. Releases from the disk image or Homebrew aren't notarized by Apple yet, so the first launch is blocked:
-   - **macOS 15 or later:** open **System Settings → Privacy & Security**, scroll down to the message about OpenTraffic, and click **Open Anyway**.
-   - **macOS 14:** Control-click OpenTraffic in Applications, choose **Open**, then **Open** again.
+3. Open OpenTraffic from Applications. It's signed by Medda Systems and notarized by Apple, so it opens without any warning.
 4. Install `cloudflared` for Cloudflare shares, either with `brew install cloudflared` or from [Cloudflare's downloads](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/). Tailscale, ngrok, and OpenTunnel are optional.
 
 OpenTraffic updates itself: it checks once a day, and **Check for Updates…** is in the app menu. Updates are signed with Medda Systems' key and verified before they're installed. Settings → General can turn the checks or background installs off.
