@@ -24,6 +24,12 @@ OUT_DIR="$ROOT_DIR/dist/release"
 APP="$OUT_DIR/OpenTraffic.app"
 DMG="$OUT_DIR/OpenTraffic-$VERSION.dmg"
 
+# A disk image for other people always uses the real update feed and key.
+if [[ -n "${OPENTRAFFIC_UPDATE_FEED_URL:-}${OPENTRAFFIC_UPDATE_PUBLIC_KEY:-}" ]]; then
+  echo "Unset OPENTRAFFIC_UPDATE_FEED_URL and OPENTRAFFIC_UPDATE_PUBLIC_KEY (they're for local update tests)." >&2
+  exit 1
+fi
+
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 

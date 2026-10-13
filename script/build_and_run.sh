@@ -7,8 +7,9 @@ APP_NAME="OpenTraffic"
 BUNDLE_ID="${OPENTRAFFIC_BUNDLE_ID:-se.medda.opentraffic}"
 # Updates (Sparkle): the feed every release publishes, and the public half of the signing key
 # (the private half is in the release maintainer's Keychain; see script/package_dmg.sh).
-UPDATE_FEED_URL="https://github.com/Medda-systems/OpenTraffic-releases/releases/latest/download/appcast.xml"
-UPDATE_PUBLIC_KEY="aTnLSOMC0+XmcukPKUV0UCZeBOJ29DKP+jREbOihW5A="
+# OPENTRAFFIC_UPDATE_FEED_URL and OPENTRAFFIC_UPDATE_PUBLIC_KEY point a test build at a local feed.
+UPDATE_FEED_URL="${OPENTRAFFIC_UPDATE_FEED_URL:-https://github.com/Medda-systems/OpenTraffic-releases/releases/latest/download/appcast.xml}"
+UPDATE_PUBLIC_KEY="${OPENTRAFFIC_UPDATE_PUBLIC_KEY:-aTnLSOMC0+XmcukPKUV0UCZeBOJ29DKP+jREbOihW5A=}"
 MIN_SYSTEM_VERSION="14.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
