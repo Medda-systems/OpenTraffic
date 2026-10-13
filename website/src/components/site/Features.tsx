@@ -1,4 +1,4 @@
-import { Activity, Bell, Lock, MessageSquareText, MousePointer2, Network, RefreshCw, Sparkles, Terminal } from "lucide-react"
+import { Activity, Bell, Lock, MessageSquareText, MousePointer2, Network, Share, SquareTerminal, Webhook } from "lucide-react"
 import type { ReactNode } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Reveal } from "./Reveal"
@@ -64,7 +64,7 @@ export function Features() {
           </p>
         </Reveal>
         <div className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          <Feature delay={0} icon={<Sparkles className={icon} />} title="Ready to Share">
+          <Feature delay={0} icon={<Share className={icon} />} title="Ready to Share">
             Every web server running on your Mac shows up in the menu bar with its page title and uptime. One click shares it and copies the link.
           </Feature>
           <Feature delay={0.05} icon={<MousePointer2 className={icon} />} title="Live cursors and follow mode">
@@ -85,11 +85,11 @@ export function Features() {
           <Feature delay={0} icon={<Bell className={icon} />} title="Stays out of your way">
             Notifications when a link is ready or someone joins, auto-stop timers, projects that start together, and global shortcuts.
           </Feature>
-          <Feature delay={0.05} icon={<RefreshCw className={icon} />} title="Updates itself">
-            New versions arrive in the background, signed by Medda Systems and verified before they're installed.
+          <Feature delay={0.05} icon={<SquareTerminal className={icon} />} title="A complete command line">
+            <span className="font-mono text-[0.92em] text-foreground">opentraffic share 5173 --collab</span>, then read and answer the comments, follow logs, or protect it. Everything the app does, from any shell, with JSON for scripts.
           </Feature>
-          <Feature delay={0.1} icon={<Terminal className={icon} />} title="At home in the terminal">
-            <span className="font-mono text-[0.92em] text-foreground">opentraffic share 3000</span> from any shell, plus opentraffic:// links for Shortcuts and Raycast, a local REST API, and signed webhooks.
+          <Feature delay={0.1} icon={<Webhook className={icon} />} title="Hooks into your tools">
+            opentraffic:// links for Shortcuts and Raycast, a local REST API, and signed webhooks that turn feedback into tickets.
           </Feature>
         </div>
       </div>

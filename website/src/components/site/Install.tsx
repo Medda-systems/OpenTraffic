@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { homebrewCommands, links } from "@/lib/site"
 import { CopyCommand } from "./CopyCommand"
+import { GitHubMark } from "./GitHubMark"
 import { Reveal } from "./Reveal"
 
 const agents = [
@@ -77,6 +78,9 @@ export function Install({ version }: { version: string | null }) {
           <p className="mt-4 text-lg text-muted-foreground">
             Free for macOS 14 or later, on Apple silicon and Intel{version ? ` · version ${version}` : ""}. It updates itself after that.
           </p>
+          <a href={links.source} className="mt-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+            <GitHubMark className="size-4" /> Or build it from source on GitHub
+          </a>
         </Reveal>
         <Reveal delay={0.1}>
           <Tabs defaultValue="terminal" className="mt-10">

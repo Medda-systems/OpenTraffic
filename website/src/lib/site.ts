@@ -13,6 +13,10 @@ export const links = {
   cloudflared: "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/",
 }
 
+/** Bumped when a video or poster changes, so browsers and Cloudflare's cache fetch the new one. */
+const mediaVersion = "2026-10-14"
+export const media = (file: string) => `/media/${file}?v=${mediaVersion}`
+
 export const homebrewCommands = [
   "brew tap medda-systems/tap",
   "brew trust --cask medda-systems/tap/opentraffic",
