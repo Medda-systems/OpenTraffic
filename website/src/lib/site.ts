@@ -7,6 +7,8 @@ export const links = {
   releases: `${releasesRepo}/releases`,
   latestRelease: `${releasesRepo}/releases/latest`,
   homebrewTap: "https://github.com/Medda-systems/homebrew-tap",
+  source: "https://github.com/Medda-systems/OpenTraffic",
+  license: "https://github.com/Medda-systems/OpenTraffic/blob/main/LICENSE",
   medda: "https://medda.se",
   cloudflared: "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/",
 }

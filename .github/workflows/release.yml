@@ -20,6 +20,10 @@ on:
   # publishing, and keeps the disk image and feed as a workflow artifact.
   workflow_dispatch:
 
+# Publishing uses RELEASES_TOKEN, so the built-in token only needs to read the code.
+permissions:
+  contents: read
+
 concurrency:
   group: release
   cancel-in-progress: false

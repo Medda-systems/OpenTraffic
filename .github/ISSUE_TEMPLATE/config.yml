@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Medda-systems/OpenTraffic/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue.
+  - name: Documentation
+    url: https://opentraffic.dev/docs
+    about: Setup guides for each way of sharing, the CLI, and integrations.

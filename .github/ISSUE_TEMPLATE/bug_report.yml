@@ -1,0 +1,31 @@
+name: Bug report
+description: Something in OpenTraffic doesn't work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. Screenshots help.
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Way of sharing
+      options: [Temporary URL (Cloudflare), OpenTunnel, Tailscale, ngrok, Your domain (Cloudflare), Not about a share]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: OpenTraffic and macOS versions
+      placeholder: OpenTraffic 1.0.5, macOS 26.1
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or `opentraffic doctor` output
+      description: From the share's Logs tab or `opentraffic logs <share> -n 50`. Remove anything private, like tokens or hostnames you don't want public.
+      render: text

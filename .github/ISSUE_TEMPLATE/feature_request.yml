@@ -1,0 +1,11 @@
+name: Idea
+description: Suggest something OpenTraffic could do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to do?
+      description: The problem or workflow first, then the solution you have in mind.
+    validations:
+      required: true

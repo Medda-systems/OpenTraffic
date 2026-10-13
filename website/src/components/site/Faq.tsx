@@ -5,7 +5,7 @@ import { Reveal } from "./Reveal"
 const questions = [
   {
     q: "Is OpenTraffic free?",
-    a: "Yes. OpenTraffic is free and MIT licensed. Cloudflare Quick Tunnels and OpenTunnel need no account at all; Tailscale and ngrok use your own accounts with them.",
+    a: "Yes. OpenTraffic is free and open source under the MIT License (the code is on GitHub). Cloudflare Quick Tunnels and OpenTunnel need no account at all; Tailscale and ngrok use your own accounts with them.",
   },
   {
     q: "Do the people I share with need anything?",
@@ -59,10 +59,11 @@ export function Footer() {
         </div>
         <nav className="flex flex-wrap gap-x-6 gap-y-2 md:ml-auto">
           <a className="hover:text-foreground" href="/docs">Docs</a>
+          <a className="hover:text-foreground" href={links.source}>Source</a>
           <a className="hover:text-foreground" href={links.releases}>Releases</a>
           <a className="hover:text-foreground" href={links.homebrewTap}>Homebrew tap</a>
           <a className="hover:text-foreground" href="/#install">Install</a>
-          <span>MIT License</span>
+          <a className="hover:text-foreground" href={links.license}>MIT License</a>
         </nav>
       </div>
       <p className="mx-auto max-w-6xl px-6 pb-10 text-xs text-muted-foreground/80">

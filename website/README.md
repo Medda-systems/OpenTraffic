@@ -15,14 +15,19 @@ animations, for screenshots.
 
 ## The demo video
 
-`remotion/` is a [Remotion](https://www.remotion.dev) composition of the demo on the page and in the
-READMEs (the same scenes rendered three ways):
+`remotion/` holds two [Remotion](https://www.remotion.dev) compositions: `Promo`, the short video with
+music at the top of the page and (as a GIF) in the README, and `Demo`, the longer walkthrough the page
+links to:
 
 ```sh
 npm run studio     # preview and edit
-npm run video      # public/media/demo.mp4 and its poster
-npm run video:gif  # ../docs/images/demo.gif for the README
+npm run promo      # out/opentraffic-promo.mp4, with its music and sound mastered
+npm run video      # public/media/demo.mp4 (the walkthrough) and its poster
+npm run video:gif  # ../docs/images/demo.gif for the README, from out/opentraffic-promo.mp4
 ```
+
+`public/media/promo.mp4` is a smaller web encode of `out/opentraffic-promo.mp4` (x264 at CRF 23,
+160 kb/s AAC, `-movflags +faststart`).
 
 Remotion is free for individuals and companies of up to three people; larger companies need a
 [company license](https://www.remotion.pro).
