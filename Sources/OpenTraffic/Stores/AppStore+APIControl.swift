@@ -7,18 +7,20 @@ import OpenTrafficCore
 extension AppStore {
     // MARK: Status
 
-    func apiAppStatus() -> APIAppStatus {
+    func apiAppStatus() async -> APIAppStatus {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
         let cloudflaredMissing = cloudflaredPath == nil ? missingExecutableMessage(for: .cloudflare) : nil
-        func provider(_ name: String, _ blocker: String?) -> APIProviderStatus {
-            APIProviderStatus(name: name, ready: blocker == nil, detail: blocker)
+        func provider(_ name: String, _ blocker: String?, warning: String? = nil) -> APIProviderStatus {
+            APIProviderStatus(name: name, ready: blocker == nil, detail: blocker, warning: blocker == nil ? warning : nil)
         }
+        // Some networks' DNS filters keep Quick Tunnels from getting an address (cached; a few seconds at most).
+        let quickWarning = cloudflaredMissing == nil ? await checkQuickTunnelNetwork().value.warning : nil
         return APIAppStatus(
             version: version,
             shares: definitions.count,
             running: definitions.filter { isActive($0.id) }.count,
             providers: [
-                provider("quick", cloudflaredMissing),
+                provider("quick", cloudflaredMissing, warning: quickWarning),
                 provider("opentunnel", openTunnelBlocker),
                 provider("tailscale", tailscaleBlocker),
                 provider("ngrok", ngrokBlocker),
@@ -73,6 +75,15 @@ extension AppStore {
         let collaboration = request.collaboration ?? false
         let funnel = request.funnel ?? false
         let target = AutomationCommand.target(of: localURL)
+        let existing = definitions.first(where: {
+            $0.kind == kind && $0.localURL == localURL && (kind != .tailscale || $0.tailscalePublic == funnel)
+                && (domain == nil || $0.hostname?.lowercased() == domain)
+        })
+        // Like the New Tunnel sheet: a way of sharing that isn't set up is refused before asking,
+        // and nothing is created for it.
+        if existing == nil || start, let blocker = await apiBlocker(for: kind, funnel: funnel) {
+            throw OpenTrafficAPIError(status: 409, code: "not_ready", message: blocker)
+        }
         if start {
             let audience = kind == .tailscale && !funnel ? "on your tailnet" : "publicly"
             try confirmAPIPublishing(
@@ -82,10 +93,7 @@ extension AppStore {
             )
         }
         var definition: TunnelDefinition
-        if let existing = definitions.first(where: {
-            $0.kind == kind && $0.localURL == localURL && (kind != .tailscale || $0.tailscalePublic == funnel)
-                && (domain == nil || $0.hostname?.lowercased() == domain)
-        }) {
+        if let existing {
             if collaboration, !existing.collaboration {
                 if isActive(existing.id) {
                     await setCollaboration(true, for: existing.id)
@@ -96,10 +104,6 @@ extension AppStore {
             }
             definition = definitions.first { $0.id == existing.id } ?? existing
         } else {
-            // Like the New Tunnel sheet: nothing is created for a way of sharing that isn't set up.
-            if let blocker = apiBlocker(for: kind) {
-                throw OpenTrafficAPIError(status: 409, code: "not_ready", message: blocker)
-            }
             let title = request.name?.nilIfBlank ?? TunnelRowPresentation.localEndpoint(localURL).map { "localhost\($0)" } ?? "Local site"
             do {
                 definition = switch kind {
@@ -143,6 +147,15 @@ extension AppStore {
             let names = zones.map(\.name).joined(separator: ", ")
             throw OpenTrafficAPIError.badRequest("\(hostname) isn't in your Cloudflare account\(names.isEmpty ? "." : ", whose domains are \(names).")")
         }
+        // A record from elsewhere is only replaced when asked to; say so before asking to publish.
+        if request.replaceDNS != true, let cloudflare = try? await self.client(for: accountID),
+           let record = try? await cloudflare.dnsRecord(zoneID: zone.id, hostname: hostname), let content = record.content?.nilIfBlank {
+            throw OpenTrafficAPIError(
+                status: 409,
+                code: "dns_record_exists",
+                message: "A DNS record for \(hostname) already exists and points to \(content). Send replaceDNS: true to replace it, or pick another hostname."
+            )
+        }
         let target = AutomationCommand.target(of: localURL)
         // Creating the tunnel and its DNS record changes the Cloudflare account, so it always asks.
         try confirmAPIPublishing(
@@ -170,14 +183,31 @@ extension AppStore {
         return try await apiWaitUntilLive(definition.id)
     }
 
-    /// Why a new share of this kind can't be made yet (what the New Tunnel sheet shows as "Not set up").
-    private func apiBlocker(for kind: TunnelKind) -> String? {
-        switch kind.provider {
-        case .cloudflare: cloudflaredPath == nil ? missingExecutableMessage(for: .cloudflare) : nil
-        case .ngrok: ngrokBlocker.map { "\($0) Set it up in OpenTraffic → Settings → ngrok." }
-        case .tailscale: tailscaleBlocker
-        case .opentunnel: openTunnelBlocker.map { "\($0) \(OpenTunnel.installCommand)" }
+    /// Why a new share of this kind can't be made yet (what the New Tunnel sheet shows as "Not set up"),
+    /// or, with `funnel`, why a Tailscale share can't be public.
+    private func apiBlocker(for kind: TunnelKind, funnel: Bool = false) async -> String? {
+        // Tailscale's status may not have been read yet, or be older than a change in the tailnet.
+        if kind == .tailscale, tailscaleStatus == nil || (funnel && tailscaleStatus?.funnelEnabled != true) {
+            await refreshTailscale()
         }
+        switch kind.provider {
+        case .cloudflare:
+            if cloudflaredPath == nil { return missingExecutableMessage(for: .cloudflare) }
+            // A network that filters api.trycloudflare.com can't get a temporary address (cached check).
+            return kind == .quick ? await checkQuickTunnelNetwork().value.warning : nil
+        case .ngrok: return ngrokBlocker.map { "\($0) Set it up in OpenTraffic → Settings → ngrok." }
+        case .opentunnel: return openTunnelBlocker.map { "\($0) \(OpenTunnel.installCommand)" }
+        case .tailscale:
+            if let blocker = tailscaleBlocker { return blocker }
+            guard funnel, tailscaleStatus?.funnelEnabled != true else { return nil }
+            return "Funnel isn't enabled for this Mac, so it can't share publicly. Allow Funnel in your tailnet's access controls (OpenTraffic → Settings → Tailscale links to them), or share on your tailnet only."
+        }
+    }
+
+    /// A Tailscale share that can't start (Tailscale is off, or Funnel isn't allowed) is refused before asking.
+    func apiCheckTailscaleReady(_ definition: TunnelDefinition) async throws {
+        guard definition.kind == .tailscale, let blocker = await apiBlocker(for: .tailscale, funnel: definition.tailscalePublic) else { return }
+        throw OpenTrafficAPIError(status: 409, code: "not_ready", message: blocker)
     }
 
     static func apiKind(_ provider: String) -> TunnelKind? {
@@ -216,8 +246,16 @@ extension AppStore {
             }
             return duration
         }
+        let newLocalURL = try update.url.map { try apiLocalURL(port: nil, url: $0) }
+        if update.rewriteHostHeader == true {
+            var updated = definition
+            updated.localURL = newLocalURL ?? definition.localURL
+            guard updated.supportsHostHeaderRewrite else {
+                throw OpenTrafficAPIError.conflict("OpenTraffic can't rewrite the Host header for an https local service on \(definition.kind.provider.title). Allow the public hostname in your dev server instead.")
+            }
+        }
         if update.name != nil || update.url != nil {
-            let localURL = try update.url.map { try apiLocalURL(port: nil, url: $0) } ?? definition.localURL
+            let localURL = newLocalURL ?? definition.localURL
             if let message = updateManagedTunnel(id, name: update.name?.nilIfBlank ?? definition.name, localURL: localURL) {
                 throw OpenTrafficAPIError.badRequest(message)
             }
@@ -226,13 +264,20 @@ extension AppStore {
         if let captureErrors = update.captureErrors { setCaptureErrors(captureErrors, for: id) }
         if let autoStart = update.autoStart { setAutoStart(autoStart, for: id) }
         if let project = update.project { setProject(project.nilIfBlank, for: id) }
-        if let rewrite = update.rewriteHostHeader { await setHostHeaderRewrite(rewrite, for: id) }
+        if let rewrite = update.rewriteHostHeader {
+            await setHostHeaderRewrite(rewrite, for: id)
+            // Custom domains change it on Cloudflare, which can fail; the app shows why as a notice.
+            if definitions.first(where: { $0.id == id })?.rewriteHostHeader != rewrite {
+                throw OpenTrafficAPIError(status: 502, code: "cloudflare", message: notice.flatMap { $0.severity == .error ? $0.message : nil } ?? "The Host header setting couldn't be changed.")
+            }
+        }
         if let autoStop { setAutoStop(id, after: autoStop) }
         return try apiShare(apiDefinition(id.uuidString))
     }
 
     func apiRestartShare(_ reference: String, client: String) async throws -> APIShare {
         let definition = try apiDefinition(reference)
+        try await apiCheckTailscaleReady(definition)
         if isActive(definition.id) {
             await restart(definition.id)
         } else {
@@ -382,9 +427,14 @@ extension AppStore {
         return apiProject(name)
     }
 
-    func apiStopProject(_ name: String) throws -> APIProject {
-        guard !tunnels(inProject: name).isEmpty else { throw OpenTrafficAPIError.notFound("No project named “\(name)”.") }
+    func apiStopProject(_ name: String) async throws -> APIProject {
+        let members = tunnels(inProject: name)
+        guard !members.isEmpty else { throw OpenTrafficAPIError.notFound("No project named “\(name)”.") }
         stopProject(name)
+        // Like stopping one share: answer once they've stopped, up to 10 seconds.
+        for _ in 0..<50 where members.contains(where: { runtime(for: $0.id).state == .stopping }) {
+            try? await Task.sleep(for: .milliseconds(200))
+        }
         return apiProject(name)
     }
 

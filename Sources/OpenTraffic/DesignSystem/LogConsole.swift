@@ -23,7 +23,7 @@ struct LogConsole: View {
     var source: String?
     var onClear: (() -> Void)?
     var emptyTitle = "No log output yet"
-    var emptyMessage = "Start the tunnel to stream cloudflared output here."
+    var emptyMessage = "Start the share to see its connector's output here."
 
     @State private var searchText = ""
     @State private var filter = LevelFilter.all

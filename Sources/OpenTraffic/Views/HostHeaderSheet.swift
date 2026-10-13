@@ -16,7 +16,7 @@ struct HostHeaderSheet: View {
             subtitle: "Dev servers like Vite, Next.js, and Django reject requests for hostnames they don't know, such as your public URL."
         ) {
             Form {
-                if tunnel.kind.supportsHostHeaderRewrite {
+                if tunnel.supportsHostHeaderRewrite {
                     Section {
                         Toggle(isOn: rewriteBinding) {
                             VStack(alignment: .leading, spacing: Spacing.xxs) {
@@ -26,6 +26,7 @@ struct HostHeaderSheet: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                        .accessibilityLabel("Send \(tunnel.originHostHeader ?? "the local host") as the Host header")
                         .disabled(isApplying)
                         if isApplying {
                             HStack(spacing: Spacing.s) {
@@ -39,7 +40,7 @@ struct HostHeaderSheet: View {
                     }
                 } else {
                     Section {
-                        InlineMessage(severity: .info, message: "\(tunnel.kind.provider.title) shares can't rewrite the Host header, so allow the hostname in your dev server instead.")
+                        InlineMessage(severity: .info, message: "OpenTraffic can't rewrite the Host header for an https local service on \(tunnel.kind.provider.title), so allow the hostname in your dev server instead.")
                     }
                 }
 

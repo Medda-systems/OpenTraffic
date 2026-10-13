@@ -153,11 +153,14 @@ public struct APIProviderStatus: Codable, Equatable, Sendable {
     public let name: String
     public let ready: Bool
     public let detail: String?
+    /// Ready, but likely to fail anyway (for example, the network blocks it). Optional for older clients.
+    public let warning: String?
 
-    public init(name: String, ready: Bool, detail: String?) {
+    public init(name: String, ready: Bool, detail: String?, warning: String? = nil) {
         self.name = name
         self.ready = ready
         self.detail = detail
+        self.warning = warning
     }
 }
 

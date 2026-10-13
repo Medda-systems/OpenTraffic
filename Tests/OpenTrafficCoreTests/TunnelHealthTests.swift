@@ -130,3 +130,39 @@ import Testing
     #expect(SetupProgressStep.tunnelSteps().map(\.id) == ["create", "ingress", "dns"])
     #expect(SetupProgressStep.applySteps().map(\.id) == ["ingress", "dns"])
 }
+
+// MARK: Quick Tunnels on filtered networks
+
+@Test func dnsFilterRedirectingTryCloudflareIsDetected() {
+    // Telenor's "Nätskydd" answers with a CNAME to its block page; Cloudflare's DNS knows better.
+    let filtered = SystemDNSAnswer.addresses(["52.223.20.176", "35.71.190.33"], canonicalName: "natskydd.telenor.se")
+    let network = QuickTunnelNetwork.assess(system: filtered, doh: ["104.16.230.132", "104.16.231.132"])
+    #expect(network == .filtered(to: "natskydd.telenor.se"))
+    #expect(network.warning?.contains("redirects api.trycloudflare.com to natskydd.telenor.se") == true)
+    #expect(network.warning?.contains("1.1.1.1") == true)
+    // Without DNS over HTTPS, the answer alone gives it away.
+    #expect(QuickTunnelNetwork.assess(system: filtered, doh: nil).isFiltered)
+    // A sinkhole address.
+    #expect(QuickTunnelNetwork.assess(system: .addresses(["0.0.0.0"], canonicalName: "api.trycloudflare.com"), doh: nil) == .filtered(to: nil))
+    // "No such name", though the name exists.
+    #expect(QuickTunnelNetwork.assess(system: .notFound, doh: ["104.16.230.132"]) == .filtered(to: nil))
+}
+
+@Test func unfilteredOrUnknownNetworksAreNotBlamed() {
+    let cloudflare = SystemDNSAnswer.addresses(["104.16.230.132", "2606:4700::6810:e684"], canonicalName: "api.trycloudflare.com")
+    #expect(QuickTunnelNetwork.assess(system: cloudflare, doh: ["104.16.231.132"]) == .ok)
+    #expect(QuickTunnelNetwork.assess(system: cloudflare, doh: nil) == .ok)
+    #expect(QuickTunnelNetwork.assess(system: .addresses(["198.51.100.7"], canonicalName: nil), doh: ["198.51.100.7"]) == .ok)
+    #expect(QuickTunnelNetwork.assess(system: .failed, doh: ["104.16.230.132"]) == .unknown)
+    #expect(QuickTunnelNetwork.assess(system: .notFound, doh: nil) == .unknown)
+    #expect(QuickTunnelNetwork.ok.warning == nil)
+}
+
+@Test func knowsCloudflareAddresses() {
+    #expect(CloudflareAddresses.contains("104.16.230.132"))
+    #expect(CloudflareAddresses.contains("172.67.1.1"))
+    #expect(CloudflareAddresses.contains("2606:4700::6810:e684"))
+    #expect(!CloudflareAddresses.contains("52.223.20.176"))
+    #expect(!CloudflareAddresses.contains("104.24.0.0x"))
+    #expect(!CloudflareAddresses.contains("2001:db8::1"))
+}

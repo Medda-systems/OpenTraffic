@@ -145,3 +145,44 @@ extension TunnelLogEntry {
         ["error", "fatal", "panic"].contains(level.lowercased())
     }
 }
+
+/// Why cloudflared exited, in plain words, from the last lines it wrote.
+public enum CloudflaredFailure {
+    /// What cloudflared said last that explains the exit: the plain-text error it prints on its way
+    /// out, or else its last error-level line (with the error it carries).
+    public static func reason(in entries: [TunnelLogEntry]) -> String? {
+        for entry in entries.suffix(40).reversed() {
+            if entry.rawLine == nil, entry.stream == "stderr", let text = entry.message.nilIfBlank { return text }
+            guard entry.isError else { continue }
+            let error = entry.rawLine
+                .flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+                .flatMap { $0["error"] as? String }?.nilIfBlank
+            guard let error, !entry.message.contains(error) else { return entry.message.nilIfBlank }
+            return entry.message.nilIfBlank.map { "\($0): \(error)" } ?? error
+        }
+        return nil
+    }
+
+    /// cloudflared couldn't get a temporary address from api.trycloudflare.com.
+    public static func isQuickTunnelRequest(_ reason: String) -> Bool {
+        let text = reason.lowercased()
+        return text.contains("quick tunnel") && ["failed to request", "failed to unmarshal", "failed to parse"].contains { text.contains($0) }
+    }
+
+    /// The message a share shows when cloudflared exited with `status`.
+    public static func message(reason: String?, status: Int32) -> String {
+        guard let reason else { return "cloudflared exited with status \(status)." }
+        let text = reason.lowercased()
+        if isQuickTunnelRequest(reason) {
+            if text.contains("no such host") || text.contains("server misbehaving") {
+                return "Cloudflare didn't hand out a temporary address (api.trycloudflare.com couldn't be looked up). Check your internet connection and try again."
+            }
+            if text.contains("unmarshal") || text.contains("parse") {
+                return "Cloudflare didn't hand out a temporary address (api.trycloudflare.com sent an unexpected answer; it may be limiting new tunnels). Wait a minute and try again."
+            }
+            return "Cloudflare didn't hand out a temporary address (api.trycloudflare.com didn't answer). Check your internet connection and try again."
+        }
+        let sentence = reason.hasSuffix(".") ? reason : "\(reason)."
+        return "cloudflared stopped: \(sentence)"
+    }
+}

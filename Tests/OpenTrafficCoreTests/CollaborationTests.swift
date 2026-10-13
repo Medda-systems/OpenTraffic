@@ -443,6 +443,16 @@ private func injectBoth(_ chunks: [String]) -> String {
     #expect(added.count == 1)
     #expect(groups.first?.count == 3)
     #expect(groups.first?.paths == ["/", "/b"])
+    #expect(groups.first?.location == "/, /b · /a.js")
+}
+
+@Test func errorGroupsNameEachPlaceOnce() {
+    let at = Date()
+    // An inline script's source is the page it's on.
+    let inline = CollabErrorGroup(message: "boom", kind: .error, source: "/", count: 1, firstAt: at, lastAt: at, paths: ["/"])
+    #expect(inline.location == "/")
+    let unknown = CollabErrorGroup(message: "boom", kind: .network, source: nil, count: 1, firstAt: at, lastAt: at, paths: ["/cart"])
+    #expect(unknown.location == "/cart")
 }
 
 // MARK: Event log

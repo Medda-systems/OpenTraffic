@@ -15,10 +15,16 @@ import Testing
 }
 
 @Test func hostRewriteSupportFollowsProviderCapabilities() {
-    #expect(TunnelKind.quick.supportsHostHeaderRewrite)
-    #expect(TunnelKind.remote.supportsHostHeaderRewrite)
-    #expect(TunnelKind.ngrok.supportsHostHeaderRewrite)
-    #expect(!TunnelKind.tailscale.supportsHostHeaderRewrite)
+    func share(_ kind: TunnelKind, _ localURL: String = "http://localhost:5173") -> TunnelDefinition {
+        TunnelDefinition(name: "x", kind: kind, localURL: localURL)
+    }
+    #expect(share(.quick).supportsHostHeaderRewrite)
+    #expect(share(.remote).supportsHostHeaderRewrite)
+    #expect(share(.ngrok, "https://localhost:8443").supportsHostHeaderRewrite)
+    #expect(share(.opentunnel).supportsHostHeaderRewrite)
+    // Tailscale shares get it from OpenTraffic's proxy, which only speaks plain HTTP to the local service.
+    #expect(share(.tailscale).supportsHostHeaderRewrite)
+    #expect(!share(.tailscale, "https://localhost:8443").supportsHostHeaderRewrite)
 }
 
 @Test func detectsWhichFrameworkBlockedTheHost() {

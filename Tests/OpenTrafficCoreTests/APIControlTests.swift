@@ -14,7 +14,12 @@ private func errorCode(_ data: Data) -> String? {
 
     let status = try await api.object("GET", "/v1/status")
     #expect(status["version"] as? String == "9.9.9")
-    #expect((status["providers"] as? [[String: Any]])?.count == 2)
+    let providers = try #require(status["providers"] as? [[String: Any]])
+    #expect(providers.count == 2)
+    // Ready, with a warning: the network blocks temporary tunnels.
+    #expect(providers[0]["ready"] as? Bool == true)
+    #expect((providers[0]["warning"] as? String)?.contains("1.1.1.1") == true)
+    #expect(providers[1]["warning"] == nil)
 
     let services = try #require(try await api.object("GET", "/v1/services")["services"] as? [[String: Any]])
     #expect(services.first?["port"] as? Int == 5173)

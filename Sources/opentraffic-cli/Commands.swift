@@ -301,7 +301,7 @@ struct Context {
         guard let name = args.first else { throw CLIError.usage("Usage: opentraffic stop <share> | stop --all") }
         let (share, raw) = try await client.call("POST", sharePath(name, "/stop"), as: Share.self)
         if json { return say(JSON.pretty(raw)) }
-        say("Stopped \(style.bold(share.name)).")
+        say(share.state == "stopping" ? "\(style.bold(share.name)) is still stopping…" : "Stopped \(style.bold(share.name)).")
     }
 
     func restart() async throws {
@@ -496,7 +496,7 @@ struct Context {
         }
         for error in body.errors {
             say("\(style.red(error.kind))  \(error.message)")
-            say(style.dim("  \(Format.plural(error.count, "time")), last \(Format.ago(error.lastAt)) · \(error.paths.joined(separator: ", "))\(error.source.map { " · \($0)" } ?? "")"))
+            say(style.dim("  \(Format.plural(error.count, "time")), last \(Format.ago(error.lastAt)) \(error.location.isEmpty ? "" : " · \(error.location)")"))
         }
     }
 
@@ -639,7 +639,11 @@ struct Context {
         let titles = ["quick": "Temporary URL (Cloudflare)", "opentunnel": "OpenTunnel", "tailscale": "Tailscale", "ngrok": "ngrok", "domain": "Your domain (Cloudflare)"]
         for provider in status.providers {
             let title = titles[provider.name] ?? provider.name
-            line(provider.ready, provider.ready ? "\(title) is ready" : "\(title): \(provider.detail ?? "not ready")")
+            if provider.ready, let warning = provider.warning {
+                line(nil, "\(title): \(warning)")
+            } else {
+                line(provider.ready, provider.ready ? "\(title) is ready" : "\(title): \(provider.detail ?? "not ready")")
+            }
         }
     }
 

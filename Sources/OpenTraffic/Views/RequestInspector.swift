@@ -19,13 +19,24 @@ struct RequestInspector: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            HSplitView {
-                list
-                    .frame(minWidth: 280, idealWidth: 330, maxWidth: 460)
-                detail
-                    .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+            // Not an HSplitView: inside the window's split view it sized itself from its panes' ideal
+            // widths rather than the space it was given, pushing the window's sidebar and this tab's
+            // right edge out of the window at default sizes. Here the list gets a share of the actual width.
+            GeometryReader { proxy in
+                HStack(spacing: 0) {
+                    list
+                        .frame(width: Self.listWidth(available: proxy.size.width))
+                    Divider()
+                    detail
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
+    }
+
+    /// About two-fifths of the tab, within 240–340pt, leaving the rest to the selected request.
+    private static func listWidth(available: CGFloat) -> CGFloat {
+        min(340, max(240, (available * 0.4).rounded()))
     }
 
     private var requests: [NgrokRequest] { store.ngrokRequests[tunnel.id] ?? [] }
@@ -49,6 +60,9 @@ struct RequestInspector: View {
                     .tag(request.id)
             }
             .listStyle(.inset)
+            // In a split view's detail column, rows inserted without an animation keep the default
+            // row height instead of being measured, so new requests drew squashed over their neighbors.
+            .animation(.default, value: filtered.map(\.id))
         }
         .onAppear { if selectedID == nil { selectedID = requests.first?.id } }
     }
@@ -86,6 +100,10 @@ private struct RequestRow: View {
                     }
                     if let duration = request.duration {
                         Text("· \(RequestFormat.duration(duration))")
+                    }
+                    if request.start == nil && request.duration == nil && !request.isReplay {
+                        // Keeps every row two lines tall.
+                        Text("—")
                     }
                     if request.isReplay {
                         Text("Replayed")
@@ -144,12 +162,12 @@ private struct RequestDetail: View {
                         .help("Show Authorization, Cookie, and API key header values")
                 }, content: {
                     HeaderList(headers: request.request.headers, revealSecrets: revealSecrets)
-                    BodyView(data: request.request.body)
+                    BodyView(content: request.request.decodedBody)
                 })
                 if let response = request.response {
                     Card(title: "Response") {
                         HeaderList(headers: response.headers, revealSecrets: revealSecrets)
-                        BodyView(data: response.body)
+                        BodyView(content: response.decodedBody)
                     }
                 }
             }
@@ -246,7 +264,8 @@ private struct HeaderList: View {
 }
 
 private struct BodyView: View {
-    let data: Data
+    let content: NgrokRequest.DecodedBody
+    private var data: Data { content.data }
 
     var body: some View {
         if !data.isEmpty {
@@ -266,6 +285,10 @@ private struct BodyView: View {
 
     /// Pretty-printed JSON when possible, UTF-8 text otherwise, capped so huge bodies stay responsive.
     private var text: String {
+        // A content coding that couldn't be undone (brotli, say) would only show as noise.
+        if let encoding = content.encoding {
+            return "\(encoding)-compressed, \(data.count) bytes"
+        }
         let limit = 64 * 1024
         let slice = data.prefix(limit)
         if let object = try? JSONSerialization.jsonObject(with: slice, options: [.fragmentsAllowed]),

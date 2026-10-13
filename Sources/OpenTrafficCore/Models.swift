@@ -102,15 +102,6 @@ public enum TunnelKind: String, Codable, Sendable, CaseIterable {
         }
     }
 
-    /// Whether OpenTraffic can make the tunnel send the local host as the Host header. OpenTunnel
-    /// shares get it from OpenTraffic's own proxy.
-    public var supportsHostHeaderRewrite: Bool {
-        switch self {
-        case .quick, .remote, .ngrok, .opentunnel: true
-        case .tailscale: false
-        }
-    }
-
     /// Live collaboration runs the share through OpenTraffic's proxy (see specs/collab-plan.md for
     /// the other kinds).
     public var supportsCollaboration: Bool {
@@ -261,6 +252,13 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         bridgedPorts = (try container.decodeIfPresent([Int].self, forKey: .bridgedPorts) ?? []).filter { (1...65_535).contains($0) }
         captureErrors = try container.decodeIfPresent(Bool.self, forKey: .captureErrors) ?? false
         openTunnelRoute = try container.decodeIfPresent(String.self, forKey: .openTunnelRoute)
+    }
+
+    /// Whether OpenTraffic can make this share send the local host as the Host header. cloudflared
+    /// and ngrok do it themselves; OpenTunnel and Tailscale shares get it from OpenTraffic's own
+    /// proxy, which speaks plain HTTP to the local service (OpenTunnel shares always do).
+    public var supportsHostHeaderRewrite: Bool {
+        kind != .tailscale || URL(string: localURL)?.scheme?.lowercased() == "http"
     }
 
     /// The Host header a rewrite sends: the local service's `host[:port]`.

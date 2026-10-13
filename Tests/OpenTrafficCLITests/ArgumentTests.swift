@@ -136,3 +136,21 @@ import Testing
     #expect(custom.bundleID == "se.medda.opentraffic.demo")
     #expect(custom.tokenFile.path.hasSuffix("/token"))
 }
+
+@Test func browserErrorsNameEachPlaceOnce() {
+    func group(_ paths: [String], _ source: String?) -> ErrorGroup {
+        ErrorGroup(message: "x is not defined", kind: "error", source: source, count: 1, lastAt: Date(), paths: paths)
+    }
+    // An inline script's source is its page.
+    #expect(group(["/"], "/").location == "/")
+    #expect(group(["/", "/about"], "/assets/app.js").location == "/, /about · /assets/app.js")
+    #expect(group(["/"], nil).location == "/")
+    #expect(group(["/"], "").location == "/")
+}
+
+@Test func apiFieldsBecomeCommandOptionsInErrors() {
+    let body = Data(#"{"error":{"code":"dns_record_exists","message":"A DNS record for app.example.com already exists and points to 1.2.3.4. Send replaceDNS: true to replace it, or pick another hostname."}}"#.utf8)
+    #expect(Client.errorMessage(in: body) == "A DNS record for app.example.com already exists and points to 1.2.3.4. Add --replace-dns to replace it, or pick another hostname.")
+    let other = Data(#"{"error":{"code":"not_ready","message":"Send replaceDNS: true to replace it"}}"#.utf8)
+    #expect(Client.errorMessage(in: other) == "Send replaceDNS: true to replace it")
+}

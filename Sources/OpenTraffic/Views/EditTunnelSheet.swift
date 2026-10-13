@@ -67,7 +67,7 @@ struct EditTunnelSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if tunnel.kind.supportsHostHeaderRewrite {
+                if tunnel.supportsHostHeaderRewrite {
                     Section {
                         Toggle("Send \(tunnel.originHostHeader ?? "the local host") as the Host header", isOn: $rewriteHostHeader)
                     } footer: {

@@ -20,7 +20,7 @@ Confirm that the server is actually listening and serving HTTP, and check its lo
 
 ## Invalid host or forbidden hostname
 
-Vite, Next.js, Django, and Rails can reject unfamiliar public hostnames. Use the health check’s **Fix Host Header** action when supported, or **Config Snippet…** for your framework. Tailscale uses the configuration-snippet route. OpenTunnel needs the local proxy to rewrite the host header.
+Vite, Next.js, Django, and Rails can reject unfamiliar public hostnames. Use the health check’s **Fix Host Header** action when supported, or **Config Snippet…** for your framework. OpenTunnel and Tailscale shares rewrite it through OpenTraffic's local proxy; a Tailscale share of an https local service uses the configuration-snippet route.
 
 ## Duplicate custom domain
 

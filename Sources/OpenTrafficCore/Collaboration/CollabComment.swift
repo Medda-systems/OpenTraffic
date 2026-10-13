@@ -226,6 +226,14 @@ public struct CollabErrorGroup: Codable, Equatable, Sendable {
         self.paths = paths
     }
 
+    /// The pages it happened on, then the script it came from unless that's one of them (an
+    /// inline script's source is its page): each place once.
+    public var location: String {
+        let pages = paths.joined(separator: ", ")
+        guard let source = source?.nilIfBlank, !paths.contains(source) else { return pages }
+        return pages.isEmpty ? source : "\(pages) · \(source)"
+    }
+
     /// Adds items to `groups` (same kind, message and source count as one), newest groups first, at most `limit`.
     /// Returns the groups that are new.
     @discardableResult

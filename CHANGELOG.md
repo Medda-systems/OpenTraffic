@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.6
+
+- **Clearer when temporary URLs can't work:** if your network's DNS filter blocks Cloudflare's temporary tunnels (some ISPs' "safe browsing" filters do), OpenTraffic and `opentraffic doctor` say so, instead of "cloudflared exited with status 1". Other cloudflared failures now say what went wrong too.
+- **Host header fix for Tailscale shares:** Vite, Next.js, and other dev servers that reject your tailnet name now work with **Fix Host Header**, like the other providers.
+- **Refused up front:** sharing with Tailscale Funnel when it isn't allowed, or on a hostname that already has a DNS record, is refused before OpenTraffic asks you anything, and nothing is left behind. From the command line, add `--replace-dns` to replace the record.
+- **ngrok request inspector:** response bodies are shown decoded (no more chunk sizes around JSON, and gzip is unpacked), new requests no longer overlap in the list, and the inspector fits narrower windows.
+- **Health checks:** a new custom-domain hostname that this Mac looked up too early no longer shows as failing while everyone else can open it.
+- `opentraffic stop` waits until the share has stopped, so the next command can change it right away. Browser errors list each page once, the Logs tab names the right connector, the reply field is ready to type in, and Settings no longer suggests a token can turn on email sign-in when Cloudflare refuses it.
+
 ## 1.0.5
 
 - **Signed by Medda Systems and notarized by Apple:** OpenTraffic now opens like any other app, from the disk image, Homebrew, or the installer, with no trip to Privacy & Security. The first update to this version may ask once for access to OpenTraffic's saved Keychain items, because the app's signature changes.

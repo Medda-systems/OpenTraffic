@@ -73,6 +73,14 @@ struct ErrorGroup: Decodable {
     let count: Int
     let lastAt: Date
     let paths: [String]
+
+    /// The pages it happened on, then the script it came from unless that's one of them (an
+    /// inline script's source is its page): each place once.
+    var location: String {
+        let pages = paths.joined(separator: ", ")
+        guard let source = source?.nonEmpty, !paths.contains(source) else { return pages }
+        return pages.isEmpty ? source : "\(pages) · \(source)"
+    }
 }
 
 struct LocalService: Decodable {
@@ -107,6 +115,8 @@ struct AppStatus: Decodable {
         let name: String
         let ready: Bool
         let detail: String?
+        /// Ready, but likely to fail anyway (newer versions of OpenTraffic).
+        let warning: String?
     }
 }
 

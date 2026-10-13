@@ -39,7 +39,7 @@ struct TunnelDetailView: View {
             case .feedback:
                 overview
             case .logs:
-                LogConsole(entries: store.logEntries(for: tunnel.id)) { store.clearLogs(tunnel.id) }
+                LogConsole(entries: store.logEntries(for: tunnel.id), onClear: { store.clearLogs(tunnel.id) }, emptyMessage: emptyLogMessage)
             }
         }
         .task(id: tunnel.id) { store.loadComments(for: tunnel.id) }
@@ -103,6 +103,14 @@ struct TunnelDetailView: View {
     }
 
     // MARK: Overview
+
+    /// What the Logs tab says before the connector has written anything.
+    private var emptyLogMessage: String {
+        let connector = tunnel.kind.provider.executableName
+        return store.isActive(tunnel.id)
+            ? "\(connector) hasn't written anything for this share yet."
+            : "Start the share to see \(connector)'s output here."
+    }
 
     private var overview: some View {
         ScrollView {
@@ -321,7 +329,7 @@ struct TunnelDetailView: View {
             return [HealthFix(title: "Finish Setup", isProminent: true, action: finishSetup)]
         case (.publicSite, .failed) where check.remedy != nil:
             var fixes: [HealthFix] = []
-            if tunnel.kind.supportsHostHeaderRewrite, !tunnel.rewriteHostHeader {
+            if tunnel.supportsHostHeaderRewrite, !tunnel.rewriteHostHeader {
                 fixes.append(HealthFix(title: "Fix Host Header", isProminent: true) {
                     Task { await store.setHostHeaderRewrite(true, for: tunnel.id) }
                 })

@@ -94,7 +94,13 @@ extension AppStore {
             }
             return nil
         } catch {
-            return Self.explainAccessError(error.localizedDescription)
+            let message = Self.explainAccessError(error.localizedDescription)
+            // Cloudflare refused the write, so the token can read Access but not edit it: say so in Settings.
+            if message.hasPrefix("Your Cloudflare API token can't manage Access") {
+                accessEditDenied = true
+                cloudflareAccessPermission = false
+            }
+            return message
         }
     }
 
@@ -120,6 +126,7 @@ extension AppStore {
             cloudflareAccessPermission = nil
             return
         }
-        cloudflareAccessPermission = await client.canManageAccessApplications()
+        let canRead = await client.canManageAccessApplications()
+        cloudflareAccessPermission = accessEditDenied && canRead == true ? false : canRead
     }
 }

@@ -103,3 +103,89 @@ private var requestsJSON: String {
     #expect(entry.timestamp == Date(timeIntervalSince1970: 1_791_061_060))
     #expect(StructuredLog.fields(fromRawLine: entry.rawLine).map(\.key) == ["err"])
 }
+
+// MARK: Body decoding
+
+private let launches = #"{"status":"ok","launches":3}"#
+
+private func message(_ head: String, body: Data, headers: [(name: String, values: [String])] = []) -> NgrokRequest.Message {
+    NgrokRequest.Message(headers: headers, raw: Data((head + "\r\n\r\n").utf8) + body)
+}
+
+@Test func dechunksANodeResponseEvenWithoutTheHeaderInTheMap() {
+    // Node's framing for a 28-byte JSON body. Go (and so ngrok) leaves Transfer-Encoding out of the header map.
+    let response = message("HTTP/1.1 200 OK\r\nContent-Type: application/json", body: Data("1c\r\n\(launches)\r\n0\r\n\r\n".utf8))
+    #expect(String(decoding: response.payload, as: UTF8.self) == launches)
+    #expect(response.decodedBody == .init(data: Data(launches.utf8), encoding: nil))
+    #expect(response.decodedBody.data.count == 28)
+
+    let declared = message("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked", body: Data("5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n".utf8))
+    #expect(String(decoding: declared.payload, as: UTF8.self) == "hello world")
+}
+
+@Test func dechunkIgnoresExtensionsAndTrailers() {
+    let framed = Data("4;name=\"a\"\r\nWiki\r\n5 ; x\r\npedia\r\nE\r\n in\r\n\r\nchunks.\r\n0;last\r\nExpires: never\r\nX-Checksum: abc\r\n\r\n".utf8)
+    #expect(HTTPBodyDecoding.dechunk(framed).map { String(decoding: $0, as: UTF8.self) } == "Wikipedia in\r\n\r\nchunks.")
+    #expect(HTTPBodyDecoding.dechunk(Data("0\r\n\r\n".utf8)) == Data())
+}
+
+@Test func malformedChunkingFallsBackToTheRawBody() {
+    for body in [
+        "zz\r\nhello\r\n0\r\n\r\n",   // size isn't hex
+        "5\r\nhello world\r\n0\r\n\r\n", // chunk longer than declared
+        "5\r\nhel",                    // truncated, and nothing declared it chunked
+        "5\r\nhello\r\n0\r\n\r\nextra", // bytes after the message
+        "0\r\nnot a trailer\r\n\r\n",
+        "0\n",                         // plain text that happens to look like a last chunk
+        "{\"a\":1}",
+    ] {
+        #expect(HTTPBodyDecoding.dechunk(Data(body.utf8)) == nil, "\(body)")
+        let response = message("HTTP/1.1 200 OK", body: Data(body.utf8))
+        #expect(response.payload == Data(body.utf8))
+    }
+    // Garbage under a chunked header is shown as it came.
+    let declared = message("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked", body: Data("hello".utf8))
+    #expect(declared.payload == Data("hello".utf8))
+}
+
+@Test func declaredChunkingKeepsWhatATruncatedCaptureHas() {
+    let response = message("HTTP/1.1 200 OK", body: Data("5\r\nhello\r\n10\r\n wor".utf8),
+                           headers: [(name: "Transfer-Encoding", values: ["chunked"])])
+    #expect(String(decoding: response.payload, as: UTF8.self) == "hello wor")
+}
+
+@Test func decodesGzipAndDeflateContent() throws {
+    let gzip = try #require(Data(base64Encoded: "H4sIAAAAAAAC/6tWKi5JLCktVrJSys9W0lHKSSzNS85IBfKNawGu+E16HAAAAA=="))
+    let named = try #require(Data(base64Encoded: "H4sICAAAAAAC/2xhdW5jaGVzLmpzb24Aq1YqLkksKS1WslLKz1bSUcpJLM1LzkgF8o1rAa74TXocAAAA"))
+    let zlib = try #require(Data(base64Encoded: "eJyrViouSSwpLVayUsrPVtJRykkszUvOSAXyjWsBiwMJaQ=="))
+    let rawDeflate = try #require(Data(base64Encoded: "q1YqLkksKS1WslLKz1bSUcpJLM1LzkgF8o1rAQ=="))
+    #expect(HTTPBodyDecoding.decode(gzip, contentEncoding: "gzip") == Data(launches.utf8))
+    #expect(HTTPBodyDecoding.decode(named, contentEncoding: "x-gzip") == Data(launches.utf8))
+    #expect(HTTPBodyDecoding.decode(zlib, contentEncoding: "deflate") == Data(launches.utf8))
+    #expect(HTTPBodyDecoding.decode(rawDeflate, contentEncoding: "deflate") == Data(launches.utf8))
+    #expect(HTTPBodyDecoding.decode(gzip.dropLast(12), contentEncoding: "gzip") == nil)
+
+    // Chunked and gzipped together, the usual shape from a compressing server.
+    let chunked = Data("\(String(gzip.count, radix: 16))\r\n".utf8) + gzip + Data("\r\n0\r\n\r\n".utf8)
+    let response = message("HTTP/1.1 200 OK", body: chunked, headers: [(name: "Content-Encoding", values: ["gzip"])])
+    #expect(response.decodedBody == .init(data: Data(launches.utf8), encoding: nil))
+}
+
+@Test func undecodableContentStaysMarkedAsCompressed() {
+    let response = message("HTTP/1.1 200 OK", body: Data([0x1B, 0x2F, 0x00, 0xF8]),
+                           headers: [(name: "Content-Encoding", values: ["br"])])
+    #expect(response.decodedBody == .init(data: Data([0x1B, 0x2F, 0x00, 0xF8]), encoding: "br"))
+    let corrupt = message("HTTP/1.1 200 OK", body: Data("not gzip".utf8), headers: [(name: "Content-Encoding", values: ["gzip"])])
+    #expect(corrupt.decodedBody.encoding == "gzip")
+}
+
+@Test func curlExportSendsTheDechunkedBody() throws {
+    let json = requestsJSON.replacingOccurrences(
+        of: base64("POST /webhook HTTP/1.1\r\nContent-Type: application/json\r\nAuthorization: Bearer secret\r\n\r\n{\"event\":\"test\"}"),
+        with: base64("POST /webhook HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n10\r\n{\"event\":\"test\"}\r\n0\r\n\r\n")
+    )
+    let post = try #require(NgrokRequest.parse(Data(json.utf8)).first)
+    let curl = post.curlCommand(baseURL: "https://example-name.ngrok-free.dev")
+    #expect(curl.hasSuffix(#"--data-binary '{"event":"test"}'"#))
+    #expect(!curl.contains("Transfer-Encoding"))
+}

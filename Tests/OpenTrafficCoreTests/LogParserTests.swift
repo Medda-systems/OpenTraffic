@@ -58,3 +58,34 @@ import Testing
     buffer.removeAll()
     #expect(buffer.errorCount == 0)
 }
+
+// MARK: Why cloudflared exited
+
+@Test func explainsAQuickTunnelThatGotNoAddress() {
+    var parser = CloudflaredLogParser()
+    let entries = parser.append(Data("""
+    {"level":"info","time":"2026-10-13T21:18:00Z","message":"Requesting new quick Tunnel on trycloudflare.com..."}
+    failed to request quick Tunnel: Post "https://api.trycloudflare.com/tunnel": context deadline exceeded
+
+    """.utf8), stream: "stderr")
+    let reason = CloudflaredFailure.reason(in: entries)
+    #expect(reason == #"failed to request quick Tunnel: Post "https://api.trycloudflare.com/tunnel": context deadline exceeded"#)
+    #expect(reason.map(CloudflaredFailure.isQuickTunnelRequest) == true)
+    let message = CloudflaredFailure.message(reason: reason, status: 1)
+    #expect(message.hasPrefix("Cloudflare didn't hand out a temporary address (api.trycloudflare.com didn't answer)"))
+    #expect(CloudflaredFailure.message(reason: "failed to request quick Tunnel: dial tcp: lookup api.trycloudflare.com: no such host", status: 1).contains("couldn't be looked up"))
+    #expect(CloudflaredFailure.message(reason: "failed to unmarshal quick Tunnel: invalid character '<'", status: 1).contains("unexpected answer"))
+}
+
+@Test func otherExitsSayWhatCloudflaredSaidLast() {
+    let entries = [
+        CloudflaredLogParser.parseLine(#"{"level":"info","message":"Starting tunnel"}"#, stream: "stderr"),
+        CloudflaredLogParser.parseLine(#"{"level":"error","error":"Unauthorized: Invalid tunnel secret","message":"Register tunnel error from server side"}"#, stream: "stderr"),
+        CloudflaredLogParser.parseLine(#"{"level":"info","message":"Retrying connection"}"#, stream: "stderr"),
+    ]
+    let reason = CloudflaredFailure.reason(in: entries)
+    #expect(reason == "Register tunnel error from server side: Unauthorized: Invalid tunnel secret")
+    #expect(reason.map(CloudflaredFailure.isQuickTunnelRequest) == false)
+    #expect(CloudflaredFailure.message(reason: reason, status: 1) == "cloudflared stopped: Register tunnel error from server side: Unauthorized: Invalid tunnel secret.")
+    #expect(CloudflaredFailure.message(reason: nil, status: 2) == "cloudflared exited with status 2.")
+}

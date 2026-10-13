@@ -31,14 +31,14 @@ Shares are named by id or by name (case-insensitive); percent-encode names with 
 
 | Method | Path | Body / query | Returns |
 | --- | --- | --- | --- |
-| GET | `/v1/status` | | `{version, shares, running, providers: [{name, ready, detail}], publishesWithoutAsking}` |
+| GET | `/v1/status` | | `{version, shares, running, providers: [{name, ready, detail, warning?}], publishesWithoutAsking}` |
 | GET | `/v1/services` | | `{services: [{port, url, title, process, statusCode, upSince, sharedAs}]}` |
 | GET | `/v1/shares` | | `{shares: [Share]}` |
 | POST | `/v1/shares` | see below | `Share` (waits ≤ 30 s for the URL) |
 | GET | `/v1/shares/{ref}` | | `Share` |
 | PATCH | `/v1/shares/{ref}` | `{name?, url?, collaboration?, captureErrors?, autoStart?, project?, rewriteHostHeader?, autoStop?}` | `Share` |
 | DELETE | `/v1/shares/{ref}` | | `{deleted: true}` |
-| POST | `/v1/shares/{ref}/start`, `/stop`, `/restart` | | `Share` |
+| POST | `/v1/shares/{ref}/start`, `/stop`, `/restart` | | `Share` (`/stop` waits ≤ 10 s until it has stopped) |
 | GET, PUT | `/v1/shares/{ref}/protection` | PUT: `{mode, username?, emails?}` | `{mode, username, password, emails}` |
 | POST | `/v1/shares/{ref}/password` | | a new password: `{mode, username, password, emails}` |
 | GET | `/v1/shares/{ref}/comments` | `?status=open\|resolved\|all` (default `open`) | `{comments: [Comment]}` |
@@ -73,7 +73,7 @@ Dates are ISO 8601. Errors are `{"error": {"code": "...", "message": "..."}}` wi
 | `funnel` | boolean | `tailscale`: public on the internet through Funnel instead of tailnet only. |
 | `start` | boolean | `false` saves the share without starting it. |
 
-A share for a way of sharing that isn't set up yet is refused with 409 (`not_ready`) and the reason, and nothing is created; `GET /v1/status` lists what's ready. Creating a custom-domain share always asks for confirmation, because it creates a tunnel and a DNS record in your Cloudflare account.
+A share for a way of sharing that isn't set up yet (including `funnel` when Funnel isn't allowed for this Mac) is refused with 409 (`not_ready`) and the reason, before anything is asked or created; `GET /v1/status` lists what's ready, and a `warning` when a way that's ready is likely to fail anyway (for example, a network whose DNS filter blocks temporary Cloudflare tunnels). A `domain` hostname that already has a DNS record is refused with 409 (`dns_record_exists`) unless `replaceDNS` is set. Creating a custom-domain share always asks for confirmation, because it creates a tunnel and a DNS record in your Cloudflare account.
 
 A create request waits up to 30 seconds for a URL. The returned share may still be starting and `publicURL` may be absent; use `GET /v1/shares` to check progress rather than creating a duplicate.
 

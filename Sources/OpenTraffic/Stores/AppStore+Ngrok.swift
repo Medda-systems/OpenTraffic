@@ -123,7 +123,9 @@ extension AppStore {
             let errors = recent.filter { LogConsole.rank($0.level) >= 2 || ($0.rawLine ?? $0.message).contains("ERR_NGROK") }
             let text = errors.map { $0.rawLine ?? $0.message }.joined(separator: "\n")
             return text.isEmpty ? "ngrok exited with status \(status)." : NgrokAgent.explain(text)
-        case .cloudflare, .tailscale, .opentunnel:
+        case .cloudflare:
+            return CloudflaredFailure.message(reason: cloudflaredExitReason(for: id), status: status)
+        case .tailscale, .opentunnel:
             return "\(definition.kind.provider.executableName) exited with status \(status)."
         }
     }

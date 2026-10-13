@@ -130,7 +130,7 @@ final class FakeAPIBackend: OpenTrafficAPIBackend, @unchecked Sendable {
 
     func status() async -> APIAppStatus? {
         APIAppStatus(version: "9.9.9", shares: lock.withLock { shares.count }, running: 1,
-                     providers: [APIProviderStatus(name: "quick", ready: true, detail: nil), APIProviderStatus(name: "ngrok", ready: false, detail: "ngrok isn't installed.")],
+                     providers: [APIProviderStatus(name: "quick", ready: true, detail: nil, warning: QuickTunnelNetwork.filtered(to: nil).warning), APIProviderStatus(name: "ngrok", ready: false, detail: "ngrok isn't installed.")],
                      publishesWithoutAsking: false)
     }
 

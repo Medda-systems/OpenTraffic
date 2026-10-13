@@ -79,7 +79,7 @@ extension AppStore {
     func setHostHeaderRewrite(_ enabled: Bool, for id: UUID) async {
         guard let index = definitions.firstIndex(where: { $0.id == id }) else { return }
         let definition = definitions[index]
-        guard definition.kind.supportsHostHeaderRewrite, definition.rewriteHostHeader != enabled else { return }
+        guard definition.supportsHostHeaderRewrite, definition.rewriteHostHeader != enabled else { return }
         if definition.kind.usesCloudflareAccount {
             do {
                 guard let account = definition.accountID, let tunnelID = definition.cloudflareTunnelID,

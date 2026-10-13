@@ -137,9 +137,15 @@ final class AppStore {
     }
     /// Whether the Cloudflare token may manage Access applications (nil: unknown).
     var cloudflareAccessPermission: Bool?
+    /// Cloudflare refused an Access change with this token (it may still read Access). Reset with the token.
+    @ObservationIgnored var accessEditDenied = false
     @ObservationIgnored var autoStartTracker = AutoStartTracker()
     @ObservationIgnored var restartHistory: [UUID: [Date]] = [:]
     @ObservationIgnored var pendingRestarts: Set<UUID> = []
+    /// The latest check of whether this network lets Quick Tunnels get an address, and when it started.
+    @ObservationIgnored var quickTunnelNetworkCheck: (task: Task<QuickTunnelNetwork, Never>, startedAt: Date)?
+    /// Quick Tunnel failures still being explained (see `explainQuickTunnelFailure`).
+    @ObservationIgnored var failureDiagnoses: [UUID: Task<Void, Never>] = [:]
     /// Set when the app starts quitting; nothing may start or restart a connector after that.
     @ObservationIgnored private(set) var isTerminating = false
     var hasCompletedOnboarding: Bool {
@@ -1089,6 +1095,14 @@ final class AppStore {
                         : "Waiting for the public site to become reachable…"
                 ))
                 scheduleHealthRecheck(id)
+            } else if probe.hostNotFound, await SiteHealthChecker.probeDNS(host) == true {
+                // Public DNS has the name, but macOS cached "not found" from an earlier lookup (often
+                // before the record existed). Everyone else can open it; this Mac catches up by itself.
+                checks.append(TunnelHealthCheck(
+                    kind: .publicSite,
+                    state: .working,
+                    detail: "\(host) is in public DNS, but this Mac still remembers an older \"not found\" answer. Others can open it now; this Mac catches up within minutes."
+                ))
             } else {
                 checks.append(TunnelHealthCheck(kind: .publicSite, state: .failed, detail: probe.transportError ?? "Could not reach the public site. DNS may still be propagating."))
             }
@@ -1292,6 +1306,7 @@ final class AppStore {
         tokenStorageKind = useKeychainUserPresence ? .userPresence : .standard
         credentialError = nil
         requiresLegacyTokenAuthorization = false
+        accessEditDenied = false
     }
 
     func forgetAPIToken() async throws {
@@ -1303,6 +1318,7 @@ final class AppStore {
         tokenStorageKind = nil
         credentialError = nil
         requiresLegacyTokenAuthorization = false
+        accessEditDenied = false
     }
 
     func hasAPIToken() -> Bool {
@@ -1797,6 +1813,8 @@ final class AppStore {
         if runtime.state == .starting { runtime.state = .running }
         runtimes[id] = runtime
         rememberNgrokDomain(publicURL, for: id)
+        // A temporary address arrived, so whatever the last network check said no longer holds.
+        if definitions.first(where: { $0.id == id })?.kind == .quick { quickTunnelNetworkCheck = nil }
         collaborationReceived(publicURL: publicURL, for: id)
         if firstURL, let share = apiShareRef(id) { apiEvents.append(.shareStarted, share: share) }
         let name = definitions.first(where: { $0.id == id })?.name ?? "Tunnel"
@@ -1831,7 +1849,12 @@ final class AppStore {
         pendingAutoCopy.remove(id)
         if let share = apiShareRef(id) { apiEvents.append(.shareStopped, share: share) }
         stopCollaboration(id)
-        if status != 0 { notifyFailure(id: id, message: runtime.lastError ?? "") }
+        if status != 0, definitions.first(where: { $0.id == id })?.kind == .quick,
+           cloudflaredExitReason(for: id).map(CloudflaredFailure.isQuickTunnelRequest) == true {
+            explainQuickTunnelFailure(id, generation: generation)
+        } else if status != 0 {
+            notifyFailure(id: id, message: runtime.lastError ?? "")
+        }
         markEffectiveOriginLastKnown(id: id)
         // The generation still matched, so nobody asked for this exit.
         scheduleRestartAfterCrash(id)
@@ -1851,6 +1874,38 @@ final class AppStore {
     private func notifyFailure(id: UUID, message: String) {
         guard notifyOnFailure, let name = definitions.first(where: { $0.id == id })?.name else { return }
         TunnelNotifications.post(title: "\(name) needs attention", body: message, identifier: "failure-\(id.uuidString)", category: .failure, tunnelID: id)
+    }
+
+    /// What cloudflared said last in its current run that explains why it exited.
+    func cloudflaredExitReason(for id: UUID) -> String? {
+        let since = runtime(for: id).startedAt?.addingTimeInterval(-2) ?? .distantPast
+        return CloudflaredFailure.reason(in: logEntries(for: id).filter { $0.timestamp >= since })
+    }
+
+    /// Whether this network lets Quick Tunnels get an address. Checked at most every ten minutes, or
+    /// again with `refresh` (after a failure); it runs in the background and callers await it.
+    func checkQuickTunnelNetwork(refresh: Bool = false) -> Task<QuickTunnelNetwork, Never> {
+        if !refresh, let check = quickTunnelNetworkCheck, Date().timeIntervalSince(check.startedAt) < 600 { return check.task }
+        let task = Task.detached { await QuickTunnelNetwork.check() }
+        quickTunnelNetworkCheck = (task, Date())
+        return task
+    }
+
+    /// A Quick Tunnel couldn't get an address. Before saying so (in the share and a notification),
+    /// checks whether the network's DNS filter is why.
+    private func explainQuickTunnelFailure(_ id: UUID, generation: UInt64) {
+        let check = checkQuickTunnelNetwork(refresh: true)
+        failureDiagnoses[id] = Task { [weak self] in
+            let network = await check.value
+            guard let self else { return }
+            if runtimes[id]?.generation == generation { failureDiagnoses[id] = nil }
+            guard var runtime = runtimes[id], runtime.generation == generation, runtime.state == .failed else { return }
+            if let warning = network.warning {
+                runtime.lastError = warning
+                runtimes[id] = runtime
+            }
+            notifyFailure(id: id, message: runtime.lastError ?? "")
+        }
     }
 
     func validateLocalURL(_ value: String) throws {

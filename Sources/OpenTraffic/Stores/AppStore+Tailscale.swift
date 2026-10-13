@@ -96,12 +96,13 @@ extension AppStore {
             defer { if tailscaleReservedPorts[definition.id] == port { tailscaleReservedPorts[definition.id] = nil } }
             // The relay and record stay local to this generation until it's confirmed current, so a
             // stale start never tears down what a newer start set up.
-            let (target, forwarder) = try await prepareTailscaleTarget(for: definition)
-            relay = forwarder
-            guard isCurrent(definition.id, generation) else {
-                forwarder?.stop()
+            let prepared = try await prepareTailscaleTarget(for: definition, generation: generation)
+            relay = prepared?.relay
+            guard let prepared, isCurrent(definition.id, generation) else {
+                prepared?.relay?.stop()
                 return
             }
+            let (target, forwarder) = prepared
             try await cli.run(TailscaleShare.shareArguments(port: port, target: target, isPublic: definition.tailscalePublic))
             let record = TailscaleShareRecord(tunnelID: definition.id, port: port, isPublic: definition.tailscalePublic, target: target)
             tailscaleRecords.append(record)
@@ -129,19 +130,28 @@ extension AppStore {
             await refreshHealth(for: definition.id)
         } catch {
             relay?.stop()
+            if isCurrent(definition.id, generation) { stopCollaboration(definition.id) }
             setFailure(error.localizedDescription, for: definition.id, generation: generation)
             await refreshHealth(for: definition.id)
         }
     }
 
     /// Tailscale proxies only to 127.0.0.1. Servers there are used directly; IPv6-only servers and
-    /// other machines get OpenTraffic's loopback relay in between.
-    private func prepareTailscaleTarget(for definition: TunnelDefinition) async throws -> (target: String, relay: LoopbackForwarder?) {
+    /// other machines get OpenTraffic's loopback relay in between. Nil when a newer start or a stop
+    /// has taken over.
+    private func prepareTailscaleTarget(for definition: TunnelDefinition, generation: UInt64) async throws -> (target: String, relay: LoopbackForwarder?)? {
         guard let url = URL(string: definition.localURL), let host = url.host else {
             throw OpenTrafficError.invalidLocalURL
         }
         let port = url.port ?? (url.scheme?.lowercased() == "https" ? 443 : 80)
         let path = url.path.isEmpty || url.path == "/" ? "" : url.path
+        // Tailscale can't rewrite the Host header, so the fix puts OpenTraffic's proxy in between
+        // (as for OpenTunnel). It reaches IPv6-only servers and other machines too.
+        if definition.rewriteHostHeader, definition.supportsHostHeaderRewrite {
+            guard let proxyURL = try await startShareProxy(for: definition, generation: generation, collaboration: false),
+                  let proxyPort = URL(string: proxyURL)?.port else { return nil }
+            return (TailscaleShare.target(scheme: "http", port: proxyPort) + path, nil)
+        }
         let relayHost: String
         if TailscaleShare.needsForwarder(host: host) {
             relayHost = host
@@ -242,7 +252,8 @@ extension AppStore {
         if definition.kind == .opentunnel { return openTunnelRunningDetail(for: definition) }
         guard definition.kind == .tailscale else { return "Connector running" }
         let port = tailscaleRecords.first(where: { $0.tunnelID == definition.id })?.port
-        let relay = tailscaleForwarders[definition.id] != nil ? " through OpenTraffic's local relay" : ""
+        let relay = collabProxies[definition.id] != nil ? " through OpenTraffic's proxy (Host header fix)"
+            : tailscaleForwarders[definition.id] != nil ? " through OpenTraffic's local relay" : ""
         return port.map { "Shared on HTTPS port \($0)\(relay)." } ?? "Shared\(relay)."
     }
 }

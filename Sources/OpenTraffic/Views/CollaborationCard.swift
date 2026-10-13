@@ -53,6 +53,7 @@ struct CollaborationCard: View {
                 }
             }
             .toggleStyle(.switch)
+            .accessibilityLabel("Show who's here")
             .disabled(blocker != nil || applying)
 
             if let blocker {

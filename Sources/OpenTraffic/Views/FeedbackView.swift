@@ -94,6 +94,7 @@ private struct CommentRow: View {
     @State private var confirmingDelete = false
     @State private var replying = false
     @State private var reply = ""
+    @FocusState private var replyFocused: Bool
     @State private var screenshot: LoadedScreenshot?
 
     var body: some View {
@@ -151,6 +152,8 @@ private struct CommentRow: View {
                         TextField("Reply", text: $reply, axis: .vertical)
                             .lineLimit(2...6)
                             .textFieldStyle(.roundedBorder)
+                            .focused($replyFocused)
+                            .onAppear { replyFocused = true }
                             .onSubmit(send)
                         HStack {
                             Button("Cancel") { replying = false; reply = "" }
@@ -280,9 +283,7 @@ private struct ErrorGroupRow: View {
     }
 
     private var detail: String {
-        var parts = [group.paths.joined(separator: ", ")]
-        if let source = group.source { parts.append(source) }
-        parts.append(group.lastAt.formatted(date: .omitted, time: .shortened))
-        return parts.joined(separator: " · ")
+        let time = group.lastAt.formatted(date: .omitted, time: .shortened)
+        return group.location.isEmpty ? time : "\(group.location) · \(time)"
     }
 }

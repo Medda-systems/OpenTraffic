@@ -269,15 +269,21 @@ extension AppStore {
     func apiStartShare(_ reference: String, client: String) async throws -> APIShare {
         let definition = try apiDefinition(reference)
         if !isActive(definition.id) {
+            try await apiCheckTailscaleReady(definition)
             try confirmAPIPublishing("start “\(definition.name)”", client: client)
             startSharing(definition)
         }
         return try await apiWaitUntilLive(definition.id)
     }
 
+    /// Answers once the share has stopped (Tailscale and OpenTunnel take a moment), so whatever the
+    /// caller does next sees it stopped. Waits up to 10 seconds.
     func apiStopShare(_ reference: String) async throws -> APIShare {
         let definition = try apiDefinition(reference)
         stop(definition.id)
+        for _ in 0..<50 where runtime(for: definition.id).state == .stopping {
+            try? await Task.sleep(for: .milliseconds(200))
+        }
         return apiShare(definitions.first { $0.id == definition.id } ?? definition)
     }
 
@@ -285,10 +291,12 @@ extension AppStore {
     func apiWaitUntilLive(_ id: UUID) async throws -> APIShare {
         for _ in 0..<120 {
             guard let definition = definitions.first(where: { $0.id == id }) else { throw OpenTrafficAPIError.notFound("The share was removed.") }
-            let runtime = runtime(for: id)
-            if runtime.state == .failed {
-                throw OpenTrafficAPIError(status: 502, code: "start_failed", message: runtime.lastError ?? "The share failed to start.")
+            if runtime(for: id).state == .failed {
+                // A Quick Tunnel's failure may still be being explained (see explainQuickTunnelFailure).
+                await failureDiagnoses[id]?.value
+                throw OpenTrafficAPIError(status: 502, code: "start_failed", message: runtime(for: id).lastError ?? "The share failed to start.")
             }
+            let runtime = runtime(for: id)
             if runtime.state == .running, publicURL(for: definition) != nil { return apiShare(definition) }
             try? await Task.sleep(for: .milliseconds(250))
         }

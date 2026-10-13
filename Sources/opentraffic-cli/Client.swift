@@ -199,11 +199,17 @@ final class Client: Sendable {
         }
     }
 
-    /// `message` from the API's `{error: {code, message}}`.
+    /// `message` from the API's `{error: {code, message}}`, naming this command's options where the
+    /// API names its request fields.
     static func errorMessage(in body: Data) -> String? {
         guard let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-              let error = object["error"] as? [String: Any] else { return nil }
-        return error["message"] as? String
+              let error = object["error"] as? [String: Any], let message = error["message"] as? String else { return nil }
+        switch error["code"] as? String {
+        case "dns_record_exists":
+            return message.replacingOccurrences(of: "Send replaceDNS: true to replace it", with: "Add --replace-dns to replace it")
+        default:
+            return message
+        }
     }
 
     /// Turns on the local API: OpenTraffic asks the user first.

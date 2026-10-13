@@ -106,12 +106,52 @@ public struct NgrokRequest: Identifiable, Equatable, Sendable {
             lhs.raw == rhs.raw && lhs.headers.map(\.name) == rhs.headers.map(\.name)
         }
 
-        /// Everything after the blank line that ends the headers.
+        /// Everything after the blank line that ends the headers, exactly as it went over the wire.
         public var body: Data {
             let separator = Data("\r\n\r\n".utf8)
             guard let range = raw.range(of: separator) else { return Data() }
             return raw[range.upperBound...]
         }
+
+        /// All values of a header, matched case-insensitively. ngrok's header map comes from Go, which
+        /// moves Transfer-Encoding out of it, so the raw message's own header lines are the fallback.
+        public func values(of name: String) -> [String] {
+            let reported = headers.filter { $0.name.caseInsensitiveCompare(name) == .orderedSame }.flatMap(\.values)
+            guard reported.isEmpty, let end = raw.range(of: Data("\r\n\r\n".utf8)) else { return reported }
+            let lines = String(decoding: raw[..<end.lowerBound], as: UTF8.self).components(separatedBy: "\r\n").dropFirst()
+            return lines.compactMap { line in
+                guard let colon = line.firstIndex(of: ":"),
+                      line[..<colon].trimmingCharacters(in: .whitespaces).caseInsensitiveCompare(name) == .orderedSame else { return nil }
+                return line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        /// The body with chunked transfer framing removed. ngrok's `raw` keeps the chunk sizes, so a
+        /// chunked response would otherwise read `1c\r\n{…}\r\n0`.
+        public var payload: Data {
+            let body = body
+            let declared = values(of: "Transfer-Encoding").joined(separator: ",").lowercased().contains("chunked")
+            // Without the header, only a body that is entirely valid framing is treated as chunked.
+            return HTTPBodyDecoding.dechunk(body, declared: declared) ?? body
+        }
+
+        /// The payload with any `Content-Encoding` undone, ready to show.
+        public var decodedBody: DecodedBody {
+            let payload = payload
+            let encoding = values(of: "Content-Encoding").joined(separator: ", ")
+            guard !payload.isEmpty, encoding.nilIfBlank != nil else { return DecodedBody(data: payload, encoding: nil) }
+            if let decoded = HTTPBodyDecoding.decode(payload, contentEncoding: encoding) {
+                return DecodedBody(data: decoded, encoding: nil)
+            }
+            return DecodedBody(data: payload, encoding: encoding)
+        }
+    }
+
+    /// A body as it should be displayed.
+    public struct DecodedBody: Equatable, Sendable {
+        public let data: Data
+        /// The content coding still applied to `data` when it couldn't be undone (brotli, say); nil when `data` is plain.
+        public let encoding: String?
     }
 
     public let id: String
@@ -158,10 +198,12 @@ public struct NgrokRequest: Identifiable, Equatable, Sendable {
     public func curlCommand(baseURL: String) -> String {
         // The method comes from whoever sent the request, so it's quoted like everything else.
         var parts = ["curl", "-X", shellQuote(method), shellQuote(baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + uri)]
-        for header in request.headers where !Self.isSensitive(header.name) && !["host", "content-length", "accept-encoding"].contains(header.name.lowercased()) {
+        // curl frames the body itself, so the original transfer encoding and length don't carry over.
+        let skipped: Set<String> = ["host", "content-length", "accept-encoding", "transfer-encoding"]
+        for header in request.headers where !Self.isSensitive(header.name) && !skipped.contains(header.name.lowercased()) {
             for value in header.values { parts += ["-H", shellQuote("\(header.name): \(value)")] }
         }
-        if !request.body.isEmpty, let body = String(data: request.body, encoding: .utf8) {
+        if !request.payload.isEmpty, let body = String(data: request.payload, encoding: .utf8) {
             parts += ["--data-binary", shellQuote(body)]
         }
         return parts.joined(separator: " ")
@@ -185,6 +227,114 @@ public struct NgrokRequest: Identifiable, Equatable, Sendable {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
         return formatter.date(from: value)
+    }
+}
+
+/// Undoing HTTP transfer and content codings on captured bodies.
+public enum HTTPBodyDecoding {
+    /// Removes chunked transfer framing (RFC 9112 §7.1): hex size lines, whose `;extensions` are
+    /// ignored, each followed by that many bytes; a zero-size last chunk; then optional trailer fields
+    /// and a blank line. Returns nil unless the framing is valid.
+    ///
+    /// `declared` is for bodies whose headers say chunked: a bare LF is accepted for CRLF, and a body
+    /// that stops partway (ngrok caps what it captures) yields the chunks received so far. Undeclared
+    /// bodies must be complete, exact framing, so ordinary content is never mistaken for it.
+    public static func dechunk(_ data: Data, declared: Bool = false) -> Data? {
+        let bytes = [UInt8](data)
+        var index = 0
+        var output = Data()
+
+        // The next line without its line ending, or nil when the data runs out (or the line ending is invalid).
+        func nextLine() -> ArraySlice<UInt8>? {
+            guard let newline = bytes[index...].firstIndex(of: 0x0A) else { return nil }
+            let hasCR = newline > index && bytes[newline - 1] == 0x0D
+            guard hasCR || declared else { return nil }
+            defer { index = newline + 1 }
+            return bytes[index..<(hasCR ? newline - 1 : newline)]
+        }
+
+        while true {
+            guard let sizeLine = nextLine() else { return declared && index > 0 ? output : nil }
+            let sizeField = String(decoding: sizeLine.prefix { $0 != UInt8(ascii: ";") }, as: UTF8.self)
+                .trimmingCharacters(in: .whitespaces)
+            guard !sizeField.isEmpty, sizeField.allSatisfy(\.isHexDigit),
+                  let size = Int(sizeField, radix: 16) else { return nil }
+            if size == 0 { break }
+            guard size <= bytes.count - index else {
+                return declared ? output + bytes[index...] : nil
+            }
+            output.append(contentsOf: bytes[index..<index + size])
+            index += size
+            guard let terminator = nextLine() else { return declared ? output : nil }
+            guard terminator.isEmpty else { return nil }
+        }
+        // Trailer fields, up to the blank line that ends the message.
+        while true {
+            guard let trailer = nextLine() else { return declared ? output : nil }
+            if trailer.isEmpty { break }
+            guard trailer.contains(UInt8(ascii: ":")) else { return nil }
+        }
+        return index == bytes.count || declared ? output : nil
+    }
+
+    /// Undoes a `Content-Encoding` list (applied in order, so removed in reverse). Handles gzip and
+    /// deflate; nil for anything else or a body that doesn't decode.
+    public static func decode(_ data: Data, contentEncoding: String) -> Data? {
+        var data = data
+        let codings = contentEncoding.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+        for coding in codings.reversed() {
+            switch coding {
+            case "identity", "": continue
+            case "gzip", "x-gzip":
+                guard let decoded = gunzip(data) else { return nil }
+                data = decoded
+            case "deflate":
+                guard let decoded = inflateZlib(data) else { return nil }
+                data = decoded
+            default:
+                return nil
+            }
+        }
+        return data
+    }
+
+    /// A single-member gzip file (RFC 1952): a header with optional fields, a raw deflate stream,
+    /// and a CRC32 and length trailer. The length is checked to catch truncated captures.
+    static func gunzip(_ data: Data) -> Data? {
+        let bytes = [UInt8](data)
+        guard bytes.count >= 18, bytes[0] == 0x1F, bytes[1] == 0x8B, bytes[2] == 8 else { return nil }
+        let flags = bytes[3]
+        var index = 10
+        if flags & 0x04 != 0 { // FEXTRA
+            guard index + 2 <= bytes.count else { return nil }
+            index += 2 + (Int(bytes[index]) | Int(bytes[index + 1]) << 8)
+        }
+        for flag: UInt8 in [0x08, 0x10] where flags & flag != 0 { // FNAME, FCOMMENT: zero-terminated
+            guard index < bytes.count, let end = bytes[index...].firstIndex(of: 0) else { return nil }
+            index = end + 1
+        }
+        if flags & 0x02 != 0 { index += 2 } // FHCRC
+        let trailerStart = bytes.count - 8
+        guard index <= trailerStart else { return nil }
+        let expectedSize = bytes[(trailerStart + 4)...].reversed().reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+        guard let inflated = inflateRaw(Data(bytes[index..<trailerStart])),
+              UInt32(truncatingIfNeeded: inflated.count) == expectedSize else { return nil }
+        return inflated
+    }
+
+    /// `deflate` is meant to be zlib-wrapped (RFC 1950), but some servers send a bare deflate stream.
+    static func inflateZlib(_ data: Data) -> Data? {
+        let bytes = [UInt8](data)
+        if bytes.count >= 6, bytes[0] & 0x0F == 8, (UInt16(bytes[0]) << 8 | UInt16(bytes[1])) % 31 == 0,
+           let inflated = inflateRaw(Data(bytes[2..<(bytes.count - 4)])) {
+            return inflated
+        }
+        return inflateRaw(data)
+    }
+
+    private static func inflateRaw(_ data: Data) -> Data? {
+        // Foundation's .zlib is a raw deflate stream (RFC 1951), without the zlib header.
+        try? (data as NSData).decompressed(using: .zlib) as Data
     }
 }
 

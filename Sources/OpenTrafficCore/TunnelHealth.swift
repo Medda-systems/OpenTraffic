@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 public enum HealthCheckKind: String, Sendable, Equatable {
     case localOrigin
@@ -124,11 +125,14 @@ public struct PublicSiteProbe: Sendable, Equatable {
     public let statusCode: Int?
     public let bodyExcerpt: String?
     public let transportError: String?
+    /// This Mac's resolver had no address for the hostname.
+    public let hostNotFound: Bool
 
-    public init(statusCode: Int? = nil, bodyExcerpt: String? = nil, transportError: String? = nil) {
+    public init(statusCode: Int? = nil, bodyExcerpt: String? = nil, transportError: String? = nil, hostNotFound: Bool = false) {
         self.statusCode = statusCode
         self.bodyExcerpt = bodyExcerpt
         self.transportError = transportError
+        self.hostNotFound = hostNotFound
     }
 }
 
@@ -142,11 +146,26 @@ public enum SiteHealthChecker {
             let excerpt = String(decoding: data.prefix(48 * 1024), as: UTF8.self)
             return PublicSiteProbe(statusCode: (response as? HTTPURLResponse)?.statusCode, bodyExcerpt: excerpt)
         } catch {
-            return PublicSiteProbe(transportError: error.localizedDescription)
+            let notFound = (error as? URLError)?.code == .cannotFindHost || (error as? URLError)?.code == .dnsLookupFailed
+            return PublicSiteProbe(transportError: error.localizedDescription, hostNotFound: notFound)
         }
     }
 
     public static func probeDNS(_ hostname: String, timeout: TimeInterval = 5) async -> Bool? {
+        guard let status = await queryDoH(hostname, timeout: timeout)?.status else { return nil }
+        if status == 0 { return true }
+        if status == 3 { return false }
+        return nil
+    }
+
+    /// The hostname's IPv4 addresses according to Cloudflare's DNS over HTTPS, which local DNS
+    /// filters can't rewrite; nil when it couldn't be asked.
+    public static func resolveDoH(_ hostname: String, timeout: TimeInterval = 5) async -> [String]? {
+        guard let response = await queryDoH(hostname, timeout: timeout), response.status == 0 else { return nil }
+        return (response.answer ?? []).filter { $0.type == 1 }.map(\.data)
+    }
+
+    private static func queryDoH(_ hostname: String, timeout: TimeInterval) async -> DoHResponse? {
         guard var components = URLComponents(string: "https://cloudflare-dns.com/dns-query") else { return nil }
         components.queryItems = [
             URLQueryItem(name: "name", value: hostname),
@@ -157,20 +176,157 @@ public enum SiteHealthChecker {
         request.timeoutInterval = timeout
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/dns-json", forHTTPHeaderField: "Accept")
-        guard let (data, _) = try? await URLSession.shared.data(for: request),
-              let response = try? JSONDecoder().decode(DoHResponse.self, from: data),
-              let status = response.status else { return nil }
-        if status == 0 { return true }
-        if status == 3 { return false }
-        return nil
+        guard let (data, _) = try? await URLSession.shared.data(for: request) else { return nil }
+        return try? JSONDecoder().decode(DoHResponse.self, from: data)
     }
 }
 
 struct DoHResponse: Decodable {
+    struct Answer: Decodable {
+        let type: Int
+        let data: String
+    }
+
     let status: Int?
+    let answer: [Answer]?
 
     enum CodingKeys: String, CodingKey {
         case status = "Status"
+        case answer = "Answer"
+    }
+}
+
+/// What this Mac's own DNS resolver (the network's, a router's, or a filter's) answers for a hostname.
+public enum SystemDNSAnswer: Sendable, Equatable {
+    /// `canonicalName`: where a CNAME led, when the resolver says.
+    case addresses([String], canonicalName: String?)
+    case notFound
+    /// No answer in time, or no network.
+    case failed
+
+    public static func lookup(_ hostname: String, timeout: TimeInterval = 4) async -> SystemDNSAnswer {
+        await withCheckedContinuation { continuation in
+            // getaddrinfo can't be cancelled; whichever finishes first answers, the other is ignored.
+            let answered = OSAllocatedUnfairLock(initialState: false)
+            let finish: @Sendable (SystemDNSAnswer) -> Void = { answer in
+                guard answered.withLock({ done in defer { done = true }; return !done }) else { return }
+                continuation.resume(returning: answer)
+            }
+            DispatchQueue.global().async { finish(resolve(hostname)) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { finish(.failed) }
+        }
+    }
+
+    private static func resolve(_ hostname: String) -> SystemDNSAnswer {
+        var hints = addrinfo()
+        hints.ai_flags = AI_CANONNAME
+        hints.ai_family = AF_UNSPEC
+        hints.ai_socktype = SOCK_STREAM
+        var list: UnsafeMutablePointer<addrinfo>?
+        let status = getaddrinfo(hostname, "443", &hints, &list)
+        defer { if let list { freeaddrinfo(list) } }
+        guard status == 0 else { return status == EAI_NONAME ? .notFound : .failed }
+        var addresses: [String] = []
+        var canonicalName: String?
+        var next = list
+        while let info = next?.pointee {
+            if canonicalName == nil, let name = info.ai_canonname { canonicalName = String(cString: name) }
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            if let address = info.ai_addr,
+               getnameinfo(address, info.ai_addrlen, &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 {
+                let text = String(decoding: host.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+                if !addresses.contains(text) { addresses.append(text) }
+            }
+            next = info.ai_next
+        }
+        return .addresses(addresses, canonicalName: canonicalName)
+    }
+}
+
+/// Whether this network lets cloudflared ask api.trycloudflare.com for a temporary address. Some
+/// ISP and router DNS filters answer that name with their own block page instead.
+public enum QuickTunnelNetwork: Sendable, Equatable {
+    case ok
+    /// The network's DNS sends api.trycloudflare.com elsewhere (`to`: where, when it says).
+    case filtered(to: String?)
+    /// Couldn't tell (no network, or nothing answered).
+    case unknown
+
+    public static let hostname = "api.trycloudflare.com"
+
+    public var isFiltered: Bool {
+        if case .filtered = self { true } else { false }
+    }
+
+    /// What to tell the user, when the network blocks temporary tunnels.
+    public var warning: String? {
+        guard case .filtered(let to) = self else { return nil }
+        return "Your network blocks Cloudflare's temporary tunnels (its DNS filter redirects \(Self.hostname)\(to.map { " to \($0)" } ?? "")). Turn off the filter, use another DNS server such as 1.1.1.1, or share with another provider."
+    }
+
+    /// Asks this Mac's resolver and Cloudflare's DNS over HTTPS at the same time, and compares.
+    public static func check(timeout: TimeInterval = 4) async -> QuickTunnelNetwork {
+        async let system = SystemDNSAnswer.lookup(hostname, timeout: timeout)
+        async let doh = SiteHealthChecker.resolveDoH(hostname, timeout: timeout)
+        return await assess(system: system, doh: doh)
+    }
+
+    /// `doh`: the addresses DNS over HTTPS gave, or nil when it couldn't be asked.
+    public static func assess(system: SystemDNSAnswer, doh: [String]?) -> QuickTunnelNetwork {
+        switch system {
+        case .addresses(let addresses, let canonicalName):
+            if let doh, !Set(addresses).isDisjoint(with: doh) { return .ok }
+            let name = canonicalName?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            if let name, !name.isEmpty, name != hostname, !CloudflareAddresses.isCloudflareName(name) {
+                return .filtered(to: name)
+            }
+            if !addresses.isEmpty, !addresses.contains(where: CloudflareAddresses.contains) { return .filtered(to: nil) }
+            return addresses.isEmpty ? .unknown : .ok
+        case .notFound:
+            // The name exists (DNS over HTTPS knows it), yet the network's DNS says it doesn't.
+            return doh?.isEmpty == false ? .filtered(to: nil) : .unknown
+        case .failed:
+            return .unknown
+        }
+    }
+}
+
+/// Cloudflare's published address ranges (cloudflare.com/ips).
+public enum CloudflareAddresses {
+    static let ranges: [(prefix: [UInt8], bits: Int)] = [
+        "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "141.101.64.0/18",
+        "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22", "198.41.128.0/17",
+        "162.158.0.0/15", "104.16.0.0/13", "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+        "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32", "2405:8100::/32",
+        "2a06:98c0::/29", "2c0f:f248::/32",
+    ].compactMap { cidr in
+        let parts = cidr.split(separator: "/")
+        guard parts.count == 2, let bits = Int(parts[1]), let bytes = bytes(of: String(parts[0])) else { return nil }
+        return (bytes, bits)
+    }
+
+    public static func contains(_ address: String) -> Bool {
+        guard let bytes = bytes(of: address) else { return false }
+        return ranges.contains { range in
+            guard range.prefix.count == bytes.count else { return false }
+            for bit in 0..<range.bits where (bytes[bit / 8] ^ range.prefix[bit / 8]) & (0x80 >> UInt8(bit % 8)) != 0 {
+                return false
+            }
+            return true
+        }
+    }
+
+    public static func isCloudflareName(_ name: String) -> Bool {
+        ["trycloudflare.com", "cloudflare.com", "cloudflare.net"].contains { name == $0 || name.hasSuffix(".\($0)") }
+    }
+
+    /// An IPv4 or IPv6 address as its 4 or 16 bytes.
+    static func bytes(of address: String) -> [UInt8]? {
+        var v4 = in_addr()
+        if inet_pton(AF_INET, address, &v4) == 1 { return withUnsafeBytes(of: &v4) { Array($0) } }
+        var v6 = in6_addr()
+        if inet_pton(AF_INET6, address, &v6) == 1 { return withUnsafeBytes(of: &v6) { Array($0) } }
+        return nil
     }
 }
 
