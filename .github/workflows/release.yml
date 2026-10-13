@@ -1,9 +1,14 @@
-# Pushing a v<version> tag builds the universal release, signs the update with Medda Systems'
-# update key, and publishes it: the GitHub Release in Medda-systems/OpenTraffic-releases (disk image,
+# Pushing a v<version> tag builds the universal release, signs it with Medda Systems' Developer ID,
+# has Apple notarize it, signs the update with Medda Systems' update key, and publishes it: the GitHub Release in Medda-systems/OpenTraffic-releases (disk image,
 # checksum, update feed, installer) and the Homebrew cask in Medda-systems/homebrew-tap.
 #
 # Secrets:
 #   SPARKLE_PRIVATE_KEY  the update signing key (generate_keys --account medda-systems -x <file>)
+#   DEVELOPER_ID_CERTIFICATE           the Developer ID Application certificate and its private key,
+#                                      exported as .p12, base64-encoded
+#   DEVELOPER_ID_CERTIFICATE_PASSWORD  the .p12's password
+#   NOTARY_API_KEY                     an App Store Connect API key (the AuthKey_….p8 file's contents)
+#   NOTARY_API_KEY_ID, NOTARY_API_ISSUER  its Key ID and Issuer ID
 #   RELEASES_TOKEN       fine-grained token with Contents read/write on OpenTraffic-releases and
 #                        homebrew-tap
 name: Release
@@ -11,8 +16,8 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  # A dry run from the Actions tab: builds and signs main without publishing, and keeps the disk
-  # image and feed as a workflow artifact.
+  # A dry run from the Actions tab: builds, signs, and (with the secrets set) notarizes main without
+  # publishing, and keeps the disk image and feed as a workflow artifact.
   workflow_dispatch:
 
 concurrency:
@@ -34,14 +39,52 @@ jobs:
           version="$(tr -d '[:space:]' < VERSION)"
           [[ "${GITHUB_REF_NAME}" == "v${version}" ]] || { echo "Tag ${GITHUB_REF_NAME} doesn't match VERSION ${version}" >&2; exit 1; }
           grep -q "^## ${version}$" CHANGELOG.md || { echo "CHANGELOG.md has no section for ${version}" >&2; exit 1; }
-      - name: Build and sign
+      - name: Build, sign, and notarize
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          DEVELOPER_ID_CERTIFICATE: ${{ secrets.DEVELOPER_ID_CERTIFICATE }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          NOTARY_API_KEY: ${{ secrets.NOTARY_API_KEY }}
+          OPENTRAFFIC_NOTARY_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          OPENTRAFFIC_NOTARY_ISSUER: ${{ secrets.NOTARY_API_ISSUER }}
+          # Releases must open without Gatekeeper warnings; a dry run without the secrets is ad-hoc.
+          OPENTRAFFIC_REQUIRE_NOTARIZATION: ${{ github.event_name == 'push' && '1' || '' }}
         run: |
           [[ -n "${SPARKLE_PRIVATE_KEY}" ]] || { echo "The SPARKLE_PRIVATE_KEY secret isn't set" >&2; exit 1; }
-          export OPENTRAFFIC_UPDATE_KEY_FILE="${RUNNER_TEMP}/update-key"
+          secrets="${RUNNER_TEMP}/secrets"
+          keychain="${RUNNER_TEMP}/signing.keychain-db"
+          mkdir -m 700 "${secrets}"
+          cleanup() {
+            [[ -f "${keychain}" ]] && security delete-keychain "${keychain}"
+            rm -rf "${secrets}"
+          }
+          trap cleanup EXIT
+          export OPENTRAFFIC_UPDATE_KEY_FILE="${secrets}/update-key"
           printf '%s' "${SPARKLE_PRIVATE_KEY}" > "${OPENTRAFFIC_UPDATE_KEY_FILE}"
-          trap 'rm -f "${OPENTRAFFIC_UPDATE_KEY_FILE}"' EXIT
+
+          if [[ -n "${DEVELOPER_ID_CERTIFICATE}" ]]; then
+            # A keychain of its own for this run, holding only the Developer ID certificate.
+            keychain_password="$(uuidgen)"
+            security create-keychain -p "${keychain_password}" "${keychain}"
+            security set-keychain-settings -lut 3600 "${keychain}"
+            security unlock-keychain -p "${keychain_password}" "${keychain}"
+            printf '%s' "${DEVELOPER_ID_CERTIFICATE}" | base64 --decode > "${secrets}/certificate.p12"
+            security import "${secrets}/certificate.p12" -k "${keychain}" -f pkcs12 \
+              -P "${DEVELOPER_ID_CERTIFICATE_PASSWORD}" -T /usr/bin/codesign
+            # The intermediate, in case the runner image doesn't have it.
+            curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "${secrets}/DeveloperIDG2CA.cer"
+            security import "${secrets}/DeveloperIDG2CA.cer" -k "${keychain}" || true
+            security set-key-partition-list -S apple-tool:,apple: -s -k "${keychain_password}" "${keychain}" > /dev/null
+            security list-keychains -d user -s "${keychain}" $(security list-keychains -d user | tr -d '"')
+            identity="$(security find-identity -v -p codesigning "${keychain}" | awk -F'"' '/"Developer ID Application: / { print $2; exit }')"
+            [[ -n "${identity}" ]] || { echo "DEVELOPER_ID_CERTIFICATE has no Developer ID Application identity" >&2; exit 1; }
+            export OPENTRAFFIC_SIGNING_IDENTITY="${identity}"
+            echo "Signing as ${identity}"
+          fi
+          if [[ -n "${NOTARY_API_KEY}" ]]; then
+            export OPENTRAFFIC_NOTARY_KEY_FILE="${secrets}/notary-key.p8"
+            printf '%s\n' "${NOTARY_API_KEY}" > "${OPENTRAFFIC_NOTARY_KEY_FILE}"
+          fi
           ./script/package_dmg.sh
       - name: Keep the dry run's build
         if: github.event_name != 'push'

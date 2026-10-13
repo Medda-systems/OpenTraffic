@@ -20,6 +20,7 @@ fail() { echo "publish_release: $1" >&2; exit 1; }
 [[ -f "$DMG" && -f "$DMG.sha256" && -f "$OUT_DIR/appcast.xml" ]] || fail "run script/package_dmg.sh first"
 grep -q "<sparkle:shortVersionString>$VERSION<" "$OUT_DIR/appcast.xml" || fail "appcast.xml isn't for $VERSION"
 grep -q "releases/download/$TAG/" "$OUT_DIR/appcast.xml" || fail "appcast.xml doesn't point at the $TAG release (OPENTRAFFIC_DOWNLOAD_BASE set?)"
+/usr/bin/xcrun stapler validate -q "$DMG" || fail "the disk image isn't notarized"
 [[ -z "$(git -C "$ROOT_DIR" status --porcelain)" ]] || fail "the working tree has uncommitted changes"
 [[ "$(git -C "$ROOT_DIR" rev-parse "$TAG^{commit}" 2>/dev/null)" == "$(git -C "$ROOT_DIR" rev-parse HEAD)" ]] \
   || fail "tag $TAG must point at the commit being released (push the tag; CI does the rest)"
@@ -49,7 +50,7 @@ brew install --cask opentraffic
 
 Or download \`OpenTraffic-$VERSION.dmg\` below, open it, and drag OpenTraffic into Applications. Installed copies update themselves.
 
-This build isn't notarized yet, so when installed from the disk image or Homebrew the first launch is blocked: on macOS 15 or later, open **System Settings → Privacy & Security** and click **Open Anyway**; on macOS 14, Control-click the app and choose **Open**. Check the download with \`shasum -a 256 -c OpenTraffic-$VERSION.dmg.sha256\`.
+Signed by Medda Systems AB and notarized by Apple. Check the download with \`shasum -a 256 -c OpenTraffic-$VERSION.dmg.sha256\`.
 
 Universal (Apple silicon and Intel), macOS 14 or later.
 TEXT

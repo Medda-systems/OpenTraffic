@@ -33,9 +33,4 @@ cask "opentraffic" do
     "~/Library/HTTPStorages/se.medda.opentraffic",
     "~/Library/Preferences/se.medda.opentraffic.plist",
   ]
-
-  caveats <<~EOS
-    OpenTraffic isn't notarized yet. The first time you open it, macOS blocks it:
-    open System Settings → Privacy & Security and click "Open Anyway".
-  EOS
 end

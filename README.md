@@ -145,9 +145,10 @@ To build a release disk image:
 
 This builds a universal (Apple silicon and Intel) release app, signs it, and writes `dist/release/OpenTraffic-<version>.dmg` with a `.sha256` checksum next to it. The version comes from the `VERSION` file.
 
-- By default the app is signed ad hoc, which is free but Gatekeeper asks users to approve the first launch.
-- With an Apple Developer ID, set `OPENTRAFFIC_SIGNING_IDENTITY="Developer ID Application: …"` to sign with the hardened runtime.
-- Also set `OPENTRAFFIC_NOTARY_PROFILE` to the name of a `xcrun notarytool store-credentials` profile, and the disk image is notarized and stapled too.
+- By default the app is signed ad hoc, and Gatekeeper asks people to approve the first launch. That's fine for testing; releases are always notarized.
+- Set `OPENTRAFFIC_SIGNING_IDENTITY="Developer ID Application: Medda Systems AB (…)"` to sign with Medda Systems' Developer ID and the hardened runtime.
+- Also give it notary credentials, either `OPENTRAFFIC_NOTARY_PROFILE` (the name of a `xcrun notarytool store-credentials` profile) or an App Store Connect API key (`OPENTRAFFIC_NOTARY_KEY_FILE`, `OPENTRAFFIC_NOTARY_KEY_ID`, `OPENTRAFFIC_NOTARY_ISSUER`). Then Apple notarizes the app and the disk image, and both are stapled, so OpenTraffic opens without any warning.
+- In CI the certificate and API key come from the repository's secrets (see `.github/workflows/release.yml`), and a tag only publishes if the build is notarized.
 
 It also writes `dist/release/appcast.xml`, the update feed, and signs both the feed and the disk image with the update key. That key is the "Private key for signing Sparkle updates" item (account `medda-systems`) in the release maintainer's Keychain; keep an exported copy somewhere safe, because installed copies only accept updates signed with it.
 
