@@ -21,7 +21,7 @@ extension AppStore {
     func missingExecutableMessage(for provider: TunnelProvider) -> String {
         switch provider {
         case .cloudflare: OpenTrafficError.cloudflaredMissing.localizedDescription
-        case .tailscale: "Tailscale isn't installed. Install the Tailscale app from tailscale.com/download, or choose its CLI in Settings."
+        case .tailscale: "Tailscale isn't installed. Install it in one click in OpenTraffic → Settings → Tailscale, or run `opentraffic install tailscale`."
         case .ngrok: "ngrok isn't installed. Install it in one click in OpenTraffic → Settings → ngrok, or run `opentraffic install ngrok`."
         case .opentunnel: "OpenTunnel isn't installed. Install it in one click in OpenTraffic → Settings → OpenTunnel, or run `opentraffic install opentunnel`."
         }

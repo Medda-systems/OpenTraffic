@@ -12,10 +12,13 @@ OpenTraffic shares through other companies' free tools. When one is missing, the
 | `cloudflared` | Cloudflare's GitHub releases | The published SHA-256 and Cloudflare's Developer ID signature |
 | `opentunnel` | Anomaly's GitHub releases | The published SHA-256 |
 | `ngrok` | ngrok's download server | ngrok's Developer ID signature |
+| Tailscale | Tailscale's download server (`pkgs.tailscale.com`) | The published SHA-256, and Tailscale's Developer ID Installer signature and Apple notarization |
 
-A download that doesn't pass its checks isn't installed. Tools go in OpenTraffic's own folder, `~/Library/Application Support/OpenTraffic/Tools`, so nothing else on your Mac changes and no password is needed. From the command line: `opentraffic install cloudflared` (or `opentunnel`, `ngrok`).
+A download that doesn't pass its checks isn't installed. The command-line tools go in OpenTraffic's own folder, `~/Library/Application Support/OpenTraffic/Tools`, so nothing else on your Mac changes and no password is needed. From the command line: `opentraffic install cloudflared` (or `opentunnel`, `ngrok`, `tailscale`).
 
-**Tailscale** is a Mac app, so **Get from App Store** opens its page; sign in to it, turn on HTTPS certificates for your tailnet, and OpenTraffic finds it. **ngrok** also needs your free account: paste your authtoken from the ngrok dashboard into OpenTraffic once.
+**Tailscale** is a Mac app with a VPN, so it's installed the way Tailscale ships it outside the App Store: OpenTraffic downloads and checks Tailscale's installer, then opens it in Apple's Installer: click through Tailscale's steps and enter your Mac's password when macOS asks. Tailscale then opens: sign in, allow its VPN when macOS asks, and turn on HTTPS certificates for your tailnet. The **⋯** menu next to Install offers the App Store version or the Homebrew command (`brew install --cask tailscale-app`) instead.
+
+**ngrok** also needs your free account: paste your authtoken from the ngrok dashboard into OpenTraffic once.
 
 Tools you installed yourself keep working: OpenTraffic looks in `/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`, and `~/.local/bin` first (and for Tailscale, inside `/Applications/Tailscale.app`), then in its own folder. You can choose a different executable in Settings.
 

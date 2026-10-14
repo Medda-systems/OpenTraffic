@@ -158,7 +158,7 @@ struct ToolsSetupSection: View {
             ToolInstallRow(store: store, provider: .tailscale, purpose: "Private to your own devices, or public through Funnel.")
         } footer: {
             HStack(alignment: .top, spacing: Spacing.l) {
-                Text("Each tool comes from its maker's official release and is checked before it's installed, into OpenTraffic's own folder. Nothing else on your Mac changes, and no password is needed.")
+                Text("Each tool comes from its maker's official release and is checked before it's installed. The command-line tools go in OpenTraffic's own folder, with no password; Tailscale, a Mac app, opens in Apple's Installer.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.leading)

@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- **One-click tools:** OpenTraffic installs what it shares through for you. The setup assistant, Settings, and New Tunnel show an **Install** button for Cloudflare's, OpenTunnel's, and ngrok's tools that says what it downloads (version, size, where from, who signed it), shows its progress, and checks the download against its maker's published checksum or Developer ID signature before installing it into OpenTraffic's own folder. No Homebrew, Terminal, or password needed. ngrok's account connects by pasting your authtoken, and Tailscale opens in the App Store.
-- **`opentraffic install cloudflared`** (or `opentunnel`, `ngrok`) does the same from the command line, and `opentraffic doctor` says which to run.
+- **One-click tools:** OpenTraffic installs what it shares through for you. The setup assistant, Settings, and New Tunnel show an **Install** button for Cloudflare's, OpenTunnel's, and ngrok's tools that says what it downloads (version, size, where from, who signed it), shows its progress, and checks the download against its maker's published checksum or Developer ID signature before installing it into OpenTraffic's own folder. No Homebrew, Terminal, or password needed. ngrok's account connects by pasting your authtoken. Tailscale installs from its own signed, notarized installer, opened in Apple's Installer (or from the App Store or Homebrew, under ⋯).
+- **`opentraffic install cloudflared`** (or `opentunnel`, `ngrok`, `tailscale`) does the same from the command line, and `opentraffic doctor` says which to run.
 
 ## 1.0.6
 

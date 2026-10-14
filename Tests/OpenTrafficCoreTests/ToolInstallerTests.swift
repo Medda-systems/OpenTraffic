@@ -66,16 +66,47 @@ private let openTunnelRelease = Data(#"""
     }
 }
 
-@Test func onlyTailscaleIsLeftToTheAppStore() {
-    #expect(ManagedTools.canInstall(.cloudflare))
-    #expect(ManagedTools.canInstall(.opentunnel))
-    #expect(ManagedTools.canInstall(.ngrok))
-    #expect(!ManagedTools.canInstall(.tailscale))
+@Test func everyToolCanBeInstalled() {
+    for provider in TunnelProvider.allCases { #expect(ManagedTools.canInstall(provider)) }
     #expect(ExecutableLocator.commonPaths(for: .cloudflare).last == ManagedTools.path(for: .cloudflare).path)
+}
+
+@Test func tailscaleComesAsItsSignedPackage() {
+    let url = URL(string: "https://pkgs.tailscale.com/stable/Tailscale-1.104.1-macos.pkg")!
+    let checksum = Data("67EC55F18EE2AFAC0A8FB57F7811977F4AD6DF1DEBD4A187FA0DB3DBB5D401D5\n".utf8)
+    let release = ToolCatalog.tailscaleRelease(packageURL: url, size: 22_332_629, checksumFile: checksum)
+    #expect(release.version == "1.104.1")
+    #expect(release.sha256 == "67ec55f18ee2afac0a8fb57f7811977f4ad6df1debd4a187fa0db3dbb5d401d5")
+    #expect(release.teamID == "W5364U7YZB")
+    #expect(release.needsPassword)
+    #expect(release.host == "pkgs.tailscale.com")
+    // A missing or garbled checksum file isn't trusted.
+    #expect(ToolCatalog.tailscaleRelease(packageURL: url, size: 1, checksumFile: Data("<html>".utf8)).sha256 == nil)
+}
+
+@Test func refusesAPackageNotSignedByItsMaker() throws {
+    let folder = FileManager.default.temporaryDirectory.appending(path: "fake-pkg-\(UUID().uuidString)", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: folder.appending(path: "root"), withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let package = folder.appending(path: "fake.pkg")
+    try ToolInstaller.run("/usr/bin/pkgbuild", ["--root", folder.appending(path: "root").path, "--identifier", "dev.example.fake", "--version", "1", package.path])
+    #expect(throws: ToolInstallError.signature("Tailscale Inc.")) {
+        try ToolInstaller.verifyPackage(package, teamID: "W5364U7YZB", publisher: "Tailscale Inc.")
+    }
 }
 
 /// Installs the real tools from the internet. Run with OPENTRAFFIC_NETWORK_TESTS=1 and CFFIXED_USER_HOME
 /// set to a scratch folder, so they land there instead of in your Application Support.
+/// Downloads and checks Tailscale's real package, stopping before it would ask for a password.
+@Test(.enabled(if: ProcessInfo.processInfo.environment["OPENTRAFFIC_NETWORK_TESTS"] == "1"))
+func downloadsAndChecksTheRealTailscalePackage() async throws {
+    let release = try await ToolCatalog.latestRelease(for: .tailscale)
+    #expect(release.sha256 != nil)
+    // With no way to run the installer, it stops right after the package passed its checks.
+    await #expect(throws: ToolInstallError.notInstallable) { try await ToolInstaller.install(release) { _ in } }
+    print("checked Tailscale \(release.version ?? "?") from \(release.url.absoluteString)")
+}
+
 @Test(.enabled(if: ProcessInfo.processInfo.environment["OPENTRAFFIC_NETWORK_TESTS"] == "1"), arguments: [TunnelProvider.cloudflare, .opentunnel, .ngrok])
 func installsTheRealTool(_ provider: TunnelProvider) async throws {
     let release = try await ToolCatalog.latestRelease(for: provider)

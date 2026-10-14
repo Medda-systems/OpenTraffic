@@ -53,7 +53,7 @@ Shares are named by id or by name (case-insensitive); percent-encode names with 
 | POST | `/v1/projects/{name}/start`, `/stop` | | `{name, shares, running}` |
 | GET | `/v1/zones` | | `{zones: [{id, name}]}`: domains in the connected Cloudflare account |
 | GET | `/v1/tools` | | `{tools: [{name, provider, installed, path, version, installable}]}`: the tools OpenTraffic shares through |
-| POST | `/v1/tools/{name}/install` | | `{name, provider, installed, path, version, installable}`: installs `cloudflared`, `opentunnel`, or `ngrok` from its maker's official release (409 `not_installable` for Tailscale, 502 `install_failed` if a download fails its checks) |
+| POST | `/v1/tools/{name}/install` | | `{name, provider, installed, path, version, installable}`: installs `cloudflared`, `opentunnel`, `ngrok`, or `tailscale` from its maker's official release (Tailscale asks for the Mac's password in OpenTraffic; 502 `install_failed` if a download fails its checks or installing is cancelled) |
 | POST | `/mcp` | MCP JSON-RPC | MCP |
 
 Dates are ISO 8601. Errors are `{"error": {"code": "...", "message": "..."}}` with status 400, 401, 403, 404,

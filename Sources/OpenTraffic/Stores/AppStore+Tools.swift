@@ -58,7 +58,8 @@ extension AppStore {
                 release = try await ToolCatalog.latestRelease(for: provider)
                 toolReleases[provider] = release
             }
-            let installed = try await ToolInstaller.install(release) { [weak self] phase in
+            let expected = release.version
+            let installed = try await ToolInstaller.install(release, installPackage: { try await Self.installWithInstaller($0, expectedVersion: expected) }) { [weak self] phase in
                 Task { @MainActor in
                     guard let self, self.toolState(provider).isBusy else { return }
                     self.toolInstallStates[provider] = switch phase {
@@ -71,6 +72,11 @@ extension AppStore {
             toolInstallStates[provider] = .installed(version: installed.version)
             toolsRevision += 1
             if provider == .opentunnel { await refreshOpenTunnel() }
+            if provider == .tailscale {
+                // Signing in, and allowing its VPN, happen in Tailscale itself.
+                NSWorkspace.shared.open(ManagedTools.tailscaleApp)
+                await refreshTailscale()
+            }
             return true
         } catch {
             toolInstallStates[provider] = .failed(error.localizedDescription)
@@ -115,6 +121,36 @@ extension AppStore {
         NSWorkspace.shared.open(Self.tailscaleAppStore)
     }
 
+    static let tailscaleHomebrewCommand = "brew install --cask tailscale-app"
+
+    /// Opens a checked installer package in Apple's Installer, which shows the maker's install steps and
+    /// asks for the Mac's password in macOS's standard prompt, then waits until the app has arrived.
+    nonisolated static func installWithInstaller(_ package: URL, expectedVersion: String?) async throws {
+        guard let installer = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.installer") else {
+            throw ToolInstallError.doesNotRun("macOS's Installer wasn't found.")
+        }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        let running = try await NSWorkspace.shared.open([package], withApplicationAt: installer, configuration: configuration)
+        let infoPlist = ManagedTools.tailscaleApp.appending(path: "Contents/Info.plist")
+        func installedVersion() -> String? {
+            NSDictionary(contentsOf: infoPlist)?["CFBundleShortVersionString"] as? String
+        }
+        let before = installedVersion()
+        // Up to 20 minutes: people read the steps, or step away.
+        for _ in 0..<1200 {
+            try await Task.sleep(for: .seconds(1))
+            if let now = installedVersion(), now != before || now == expectedVersion { return }
+            if running.isTerminated {
+                // Closed: give the last files a moment, then it either arrived or was cancelled.
+                try await Task.sleep(for: .seconds(1))
+                if let now = installedVersion(), now != before || now == expectedVersion { return }
+                throw ToolInstallError.cancelled
+            }
+        }
+        throw ToolInstallError.cancelled
+    }
+
     // MARK: API
 
     func apiTool(_ provider: TunnelProvider) -> APITool {
@@ -134,13 +170,11 @@ extension AppStore {
         TunnelProvider.allCases.map(apiTool)
     }
 
-    /// Installing doesn't publish anything, so unlike sharing it doesn't ask first.
+    /// Installing doesn't publish anything, so unlike sharing it doesn't ask first (Tailscale's goes through
+    /// Apple's Installer, which asks for the Mac's password itself).
     func apiInstallTool(_ name: String) async throws -> APITool {
         guard let provider = TunnelProvider.allCases.first(where: { [$0.executableName, $0.rawValue].contains(name.lowercased()) }) else {
             throw OpenTrafficAPIError.notFound("No tool named “\(name)”. Use cloudflared, opentunnel, or ngrok.")
-        }
-        guard ManagedTools.canInstall(provider) else {
-            throw OpenTrafficAPIError(status: 409, code: "not_installable", message: "Tailscale is a Mac app: install it from the App Store (search for Tailscale), then sign in.")
         }
         if toolPath(provider) == nil {
             await installTool(provider)

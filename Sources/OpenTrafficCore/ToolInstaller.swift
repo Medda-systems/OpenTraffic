@@ -15,10 +15,14 @@ public enum ManagedTools {
         directory.appending(path: provider.executableName)
     }
 
-    /// Tailscale is a Mac app with a system extension, so it's installed from the App Store instead.
+    /// All four. Tailscale is the exception in where it goes: it's a Mac app with a system extension, so
+    /// its official installer package puts it in /Applications, after asking for the Mac's password.
     public static func canInstall(_ provider: TunnelProvider) -> Bool {
-        provider != .tailscale
+        true
     }
+
+    /// The Tailscale app, where its installer puts it.
+    public static let tailscaleApp = URL(fileURLWithPath: "/Applications/Tailscale.app")
 
     /// Set by tests and screenshots to pretend nothing is installed elsewhere on the Mac.
     public static var onlyManaged: Bool {
@@ -44,7 +48,7 @@ public enum ManagedTools {
 
 /// One downloadable build of a tool, as its maker publishes it.
 public struct ToolRelease: Sendable, Equatable {
-    public enum Archive: Sendable, Equatable { case tarGzip, zip }
+    public enum Archive: Sendable, Equatable { case tarGzip, zip, package }
 
     public let provider: TunnelProvider
     /// nil when the source doesn't say (ngrok); the installed tool reports it afterwards.
@@ -58,10 +62,13 @@ public struct ToolRelease: Sendable, Equatable {
     public let publisher: String
     public let teamID: String?
 
-    /// "github.com" or "ngrok.com", for saying where it comes from.
+    /// "github.com", "ngrok.com", or "pkgs.tailscale.com", for saying where it comes from.
     public var host: String {
         provider == .ngrok ? "ngrok.com" : (url.host ?? "")
     }
+
+    /// Installing it asks for the Mac's password (an installer package).
+    public var needsPassword: Bool { archive == .package }
 }
 
 public enum ToolInstallError: LocalizedError, Equatable {
@@ -71,6 +78,7 @@ public enum ToolInstallError: LocalizedError, Equatable {
     case checksumMismatch
     case signature(String)
     case doesNotRun(String)
+    case cancelled
 
     public var errorDescription: String? {
         switch self {
@@ -80,6 +88,7 @@ public enum ToolInstallError: LocalizedError, Equatable {
         case .checksumMismatch: "The download doesn't match the checksum its maker published, so it wasn't installed."
         case let .signature(publisher): "The download isn't signed by \(publisher), so it wasn't installed."
         case let .doesNotRun(message): "The tool was downloaded but doesn't run on this Mac: \(message)"
+        case .cancelled: "Installing was cancelled."
         }
     }
 }
@@ -116,8 +125,35 @@ public enum ToolCatalog {
             return ToolRelease(provider: .ngrok, version: nil, url: url, size: size.flatMap { $0 > 0 ? $0 : nil }, sha256: nil,
                                archive: .zip, publisher: "ngrok, Inc.", teamID: "TEX8MHRDQ9")
         case .tailscale:
-            throw ToolInstallError.notInstallable
+            // "latest" redirects to the versioned package, whose SHA-256 sits next to it.
+            var request = URLRequest(url: URL(string: "https://pkgs.tailscale.com/stable/Tailscale-latest-macos.pkg")!)
+            request.httpMethod = "HEAD"
+            request.timeoutInterval = 20
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200, let url = http.url else {
+                throw ToolInstallError.download("Tailscale's download server answered HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0).")
+            }
+            var checksumRequest = URLRequest(url: url.appendingPathExtension("sha256"))
+            checksumRequest.timeoutInterval = 20
+            let checksum = try? await session.data(for: checksumRequest).0
+            return tailscaleRelease(packageURL: url, size: http.expectedContentLength, checksumFile: checksum)
         }
+    }
+
+    static func tailscaleRelease(packageURL url: URL, size: Int64, checksumFile: Data?) -> ToolRelease {
+        let digest = checksumFile
+            .map { String(decoding: $0, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .flatMap { $0.count == 64 && $0.allSatisfy(\.isHexDigit) ? $0 : nil }
+        return ToolRelease(
+            provider: .tailscale,
+            version: version(in: url.lastPathComponent),
+            url: url,
+            size: size > 0 ? size : nil,
+            sha256: digest,
+            archive: .package,
+            publisher: "Tailscale Inc.",
+            teamID: "W5364U7YZB"
+        )
     }
 
     /// Picks this Mac's build out of a GitHub release (`/releases/latest`).
@@ -173,9 +209,12 @@ public enum ToolInstaller {
         public let path: URL
     }
 
+    /// `installPackage` runs a checked installer package with administrator rights (the app asks for the
+    /// Mac's password); only Tailscale needs it.
     public static func install(
         _ release: ToolRelease,
         session: URLSession = .shared,
+        installPackage: (@Sendable (URL) async throws -> Void)? = nil,
         progress: @escaping @Sendable (Phase) -> Void
     ) async throws -> Installed {
         let provider = release.provider
@@ -184,17 +223,32 @@ public enum ToolInstaller {
         defer { try? FileManager.default.removeItem(at: work) }
 
         progress(.downloading(received: 0, total: release.size))
-        let archive = try await download(release.url, to: work.appending(path: "download"), expected: release.size, session: session, progress: progress)
+        // Under its own name: Installer only opens a package whose name ends in .pkg.
+        let name = release.url.lastPathComponent.isEmpty ? "download" : release.url.lastPathComponent
+        let archive = try await download(release.url, to: work.appending(path: name), expected: release.size, session: session, progress: progress)
 
         progress(.verifying)
         if let expected = release.sha256, try sha256(of: archive) != expected {
             throw ToolInstallError.checksumMismatch
+        }
+        if release.archive == .package {
+            try verifyPackage(archive, teamID: release.teamID, publisher: release.publisher)
+            guard let installPackage else { throw ToolInstallError.notInstallable }
+            progress(.installing)
+            try await installPackage(archive)
+            let binary = ManagedTools.tailscaleApp.appending(path: "Contents/MacOS/Tailscale")
+            guard FileManager.default.isExecutableFile(atPath: binary.path) else {
+                throw ToolInstallError.doesNotRun("the installer finished, but Tailscale isn't in Applications.")
+            }
+            let info = NSDictionary(contentsOf: ManagedTools.tailscaleApp.appending(path: "Contents/Info.plist"))
+            return Installed(version: info?["CFBundleShortVersionString"] as? String ?? release.version ?? "", path: binary)
         }
         let unpacked = work.appending(path: "unpacked", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: unpacked, withIntermediateDirectories: true)
         switch release.archive {
         case .tarGzip: try run("/usr/bin/tar", ["-xzf", archive.path, "-C", unpacked.path])
         case .zip: try run("/usr/bin/ditto", ["-x", "-k", archive.path, unpacked.path])
+        case .package: break // installed above
         }
         guard let binary = FileManager.default.enumerator(at: unpacked, includingPropertiesForKeys: nil)?
             .compactMap({ $0 as? URL })
@@ -316,6 +370,18 @@ public enum ToolInstaller {
         }
         let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate)
         guard SecStaticCodeCheckValidity(code, flags, requirement) == errSecSuccess else {
+            throw ToolInstallError.signature(publisher)
+        }
+    }
+
+    /// An installer package must be signed with its maker's Developer ID Installer certificate and
+    /// notarized by Apple.
+    static func verifyPackage(_ package: URL, teamID: String?, publisher: String) throws {
+        let signature = (try? run("/usr/sbin/pkgutil", ["--check-signature", package.path], timeout: 30)) ?? ""
+        let assessment = (try? run("/usr/sbin/spctl", ["--assess", "--type", "install", "-v", package.path], timeout: 30)) ?? ""
+        guard signature.contains("signed by a developer certificate issued by Apple for distribution"),
+              teamID.map({ signature.contains("Developer ID Installer:") && signature.contains("(\($0))") }) ?? false,
+              assessment.contains("accepted") else {
             throw ToolInstallError.signature(publisher)
         }
     }

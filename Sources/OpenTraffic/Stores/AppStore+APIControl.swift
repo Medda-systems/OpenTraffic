@@ -195,7 +195,7 @@ extension AppStore {
         case .opentunnel:
             return openTunnelBlocker.map { openTunnelPath == nil ? "\($0) Run `opentraffic install opentunnel`." : $0 }
         case .tailscale:
-            return tailscaleBlocker.map { tailscalePath == nil ? "\($0) Get the Tailscale app from the App Store, then sign in." : $0 }
+            return tailscaleBlocker.map { tailscalePath == nil ? "\($0) Run `opentraffic install tailscale` (it asks for your Mac's password), then sign in to Tailscale." : $0 }
         }
     }
 

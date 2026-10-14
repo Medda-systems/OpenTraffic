@@ -72,20 +72,20 @@ struct ToolInstallRow: View {
                 caption("Checking it matches the published checksum…")
             }
         case .installing:
-            caption("Installing…")
+            caption(provider == .tailscale ? "Finish in the Installer window. It asks for your Mac's password…" : "Installing…")
         case let .installed(version):
             caption("Installed just now · \(provider.executableName) \(version)")
         case let .failed(message):
             Text(message).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
         case .idle:
-            if let path {
+            if provider == .tailscale, path != nil, let blocker = store.tailscaleBlocker {
+                caption("Installed · \(blocker) Open Tailscale to sign in.")
+            } else if let path {
                 caption(readyText(path))
             } else {
                 caption(purpose)
                 if let release = store.toolReleases[provider] {
                     caption(downloadSummary(release)).foregroundStyle(.tertiary)
-                } else if provider == .tailscale {
-                    caption("A free Mac app from Tailscale, from the App Store.").foregroundStyle(.tertiary)
                 }
             }
         }
@@ -97,16 +97,34 @@ struct ToolInstallRow: View {
             ProgressView().controlSize(.small).frame(width: 24)
         } else if case .failed = state {
             Button("Try Again") { Task { await store.installTool(provider) } }
+        } else if provider == .tailscale, path != nil, store.tailscaleBlocker != nil {
+            Button("Open Tailscale") { NSWorkspace.shared.open(ManagedTools.tailscaleApp) }
         } else if path != nil {
             Image(systemName: "checkmark.circle.fill")
                 .font(.title3)
                 .foregroundStyle(.green)
                 .accessibilityLabel("Ready")
-        } else if provider == .tailscale {
-            Button("Get from App Store") { store.openTailscaleInAppStore() }
         } else {
-            Button("Install") { Task { await store.installTool(provider) } }
-                .buttonStyle(InstallButtonStyle(prominent: recommended || prominent))
+            HStack(spacing: Spacing.xs) {
+                Button("Install") { Task { await store.installTool(provider) } }
+                    .buttonStyle(InstallButtonStyle(prominent: recommended || prominent))
+                if provider == .tailscale {
+                    // The same app, installed another way.
+                    Menu {
+                        Button("Get It from the App Store") { store.openTailscaleInAppStore() }
+                        Button("Copy Homebrew Command") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(AppStore.tailscaleHomebrewCommand, forType: .string)
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Other ways to install Tailscale")
+                }
+            }
         }
     }
 
@@ -123,6 +141,7 @@ struct ToolInstallRow: View {
         if let version = release.version { parts.append(version) }
         parts.append([release.size.map(megabytes), "from \(release.host)"].compactMap { $0 }.joined(separator: " "))
         parts.append(release.teamID != nil ? "signed by \(release.publisher)" : "checksum-verified")
+        if release.needsPassword { parts.append("asks for your Mac's password") }
         return parts.joined(separator: " · ")
     }
 
