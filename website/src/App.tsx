@@ -11,7 +11,8 @@ export default function App() {
     latestVersion().then(setVersion)
   }, [])
   return (
-    <div className="min-h-screen">
+    // "Top" is the page itself, above the sticky bar, so the logo link scrolls all the way up.
+    <div id="top" className="min-h-screen">
       <Nav />
       <main>
         <Hero version={version} />

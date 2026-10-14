@@ -59,7 +59,7 @@ function StarButton() {
 export function Hero({ version }: { version: string | null }) {
   const calm = useCalm()
   return (
-    <section id="top" className="relative overflow-hidden">
+    <section className="relative overflow-hidden">
       <div className="bg-dots pointer-events-none absolute inset-0 [mask-image:linear-gradient(to_bottom,black,transparent_85%)]" />
       <div className="relative mx-auto max-w-6xl px-6 pt-7 pb-16 md:pt-8">
         <motion.div
