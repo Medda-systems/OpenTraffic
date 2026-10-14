@@ -1011,8 +1011,12 @@ final class AppStore {
             tunnelHealth[id] = TunnelHealth(checks: checks)
             return
         }
+        // While a share is starting, its provider takes a moment to answer; that's not a failure yet.
+        let isNew = runtime.startedAt.map { Date().timeIntervalSince($0) < Self.newHostnameGracePeriod } ?? false
+        var localStatus: Int?
         switch await originReachabilityChecker.check(effectiveOrigin(for: definition).url) {
         case .reachable(let statusCode):
+            localStatus = statusCode
             checks.append(TunnelHealthCheck(kind: .localOrigin, state: .ok, detail: "Local service responded with HTTP \(statusCode)."))
         case .invalid(let message):
             checks.append(TunnelHealthCheck(kind: .localOrigin, state: .failed, detail: message))
@@ -1064,7 +1068,6 @@ final class AppStore {
             checks.append(TunnelHealthCheck(kind: .publicSite, state: .skipped, detail: "Start the tunnel to check the public site."))
         } else if let siteURLString, let siteURL = URL(string: siteURLString) {
             let host = siteURL.host ?? siteURLString
-            let isNew = runtime.startedAt.map { Date().timeIntervalSince($0) < Self.newHostnameGracePeriod } ?? false
             // A brand-new Quick Tunnel hostname takes a few seconds to appear in DNS. Asking the system
             // resolver too early makes macOS cache "not found" for minutes, so check public DNS first.
             if definition.kind.hasEphemeralURL, await SiteHealthChecker.probeDNS(host) == false {
@@ -1078,20 +1081,22 @@ final class AppStore {
                 return
             }
             let probe = await SiteHealthChecker.probePublicSite(siteURL)
+            let framework = PublicSiteBlockDetector.blockingFramework(probe: probe)
             if definition.protection.isProtected, let statusCode = probe.statusCode,
                statusCode == 401 || (200..<400).contains(statusCode) {
                 checks.append(TunnelHealthCheck(kind: .publicSite, state: .ok, detail: "Reachable. Visitors must sign in first (HTTP \(statusCode))."))
-            } else if let hint = PublicSiteBlockDetector.hint(hostname: host, probe: probe) {
-                checks.append(TunnelHealthCheck(
-                    kind: .publicSite,
-                    state: .failed,
-                    detail: hint,
-                    remedy: PublicSiteBlockDetector.blockingFramework(probe: probe).map(HealthRemedy.hostBlocked)
-                ))
+            } else if let framework, let hint = PublicSiteBlockDetector.hint(hostname: host, probe: probe) {
+                checks.append(TunnelHealthCheck(kind: .publicSite, state: .failed, detail: hint, remedy: .hostBlocked(framework)))
             } else if let statusCode = probe.statusCode, (200..<400).contains(statusCode) {
                 checks.append(TunnelHealthCheck(kind: .publicSite, state: .ok, detail: "Public site returned HTTP \(statusCode)."))
-            } else if let statusCode = probe.statusCode {
-                checks.append(TunnelHealthCheck(kind: .publicSite, state: .failed, detail: "Public site returned HTTP \(statusCode)."))
+            } else if let statusCode = probe.statusCode, statusCode == localStatus, !PublicSiteBlockDetector.isProviderError(probe: probe) {
+                // The app's own answer (an API with nothing at /, say) came through the tunnel.
+                checks.append(TunnelHealthCheck(kind: .publicSite, state: .ok, detail: "Reachable. It answers the same as the local server (HTTP \(statusCode))."))
+            } else if probe.statusCode != nil, isNew {
+                checks.append(TunnelHealthCheck(kind: .publicSite, state: .working, detail: "Waiting for \(definition.kind.provider.title) to start answering…"))
+                scheduleHealthRecheck(id)
+            } else if let hint = PublicSiteBlockDetector.hint(hostname: host, probe: probe) {
+                checks.append(TunnelHealthCheck(kind: .publicSite, state: .failed, detail: hint))
             } else if isNew {
                 checks.append(TunnelHealthCheck(
                     kind: .publicSite,
@@ -1115,17 +1120,29 @@ final class AppStore {
         } else {
             checks.append(TunnelHealthCheck(kind: .publicSite, state: .skipped, detail: "No public URL yet."))
         }
+        // Cloudflare's tunnel status is cached and lags a fresh start. If the public site already answers
+        // through the tunnel, it's serving; while starting, "inactive" just means "not registered yet".
+        if definition.kind.usesCloudflareAccount, let edge = checks.firstIndex(where: { $0.kind == .edge }), checks[edge].state == .failed {
+            if checks.contains(where: { $0.kind == .publicSite && $0.state == .ok }) {
+                checks[edge] = TunnelHealthCheck(kind: .edge, state: .ok, detail: "Serving traffic. Cloudflare's dashboard status catches up shortly.")
+            } else if isNew {
+                checks[edge] = TunnelHealthCheck(kind: .edge, state: .working, detail: "Registering with Cloudflare…")
+                scheduleHealthRecheck(id)
+            }
+        }
         tunnelHealth[id] = TunnelHealth(checks: checks)
     }
 
     /// How long a freshly started tunnel's public hostname gets before reachability failures count.
     private static let newHostnameGracePeriod: TimeInterval = 120
 
-    /// Rechecks soon, at most once at a time per tunnel, while a new hostname propagates.
+    /// Rechecks soon, at most once at a time per tunnel, while a share starts or a new hostname propagates:
+    /// every second at first (see `HealthRecheck`), so the app shows a share online as soon as it is.
     private func scheduleHealthRecheck(_ id: UUID) {
         guard scheduledHealthRechecks.insert(id).inserted else { return }
+        let elapsed = runtime(for: id).startedAt.map { Date().timeIntervalSince($0) }
         Task { [weak self] in
-            try? await Task.sleep(for: .seconds(8))
+            try? await Task.sleep(for: .seconds(HealthRecheck.delay(sinceStart: elapsed)))
             self?.scheduledHealthRechecks.remove(id)
             await self?.refreshHealth(for: id)
         }
@@ -1576,10 +1593,11 @@ final class AppStore {
                 throw OpenTrafficError.api("A DNS record for \(normalizedHostname) already exists and points to \(existing.content ?? "another target"). Choose to replace it, or pick another hostname.")
             }
             setSetupStep("create", to: .active)
-            let remote = try await client.createRemoteTunnel(name: name.nilIfBlank ?? normalizedHostname)
+            let shareName = name.nilIfBlank ?? normalizedHostname
+            let remote = try await client.createRemoteTunnel(uniquelyNamed: shareName)
             setSetupStep("create", to: .done)
             let definition = TunnelDefinition(
-                name: remote.name,
+                name: shareName,
                 kind: .remote,
                 localURL: service,
                 hostname: normalizedHostname,

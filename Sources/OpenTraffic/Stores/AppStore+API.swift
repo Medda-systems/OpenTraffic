@@ -296,6 +296,17 @@ extension AppStore {
     }
 
     /// Waits up to 30 seconds for a public URL (or a failure).
+    /// "Live" should mean the link works: waits (up to 15 s) for the public-site check to pass, or to find a
+    /// real problem, so the command doesn't print a URL that answers with the provider's error page.
+    func apiWaitUntilReachable(_ id: UUID) async {
+        await refreshHealth(for: id)
+        for _ in 0..<60 {
+            let site = tunnelHealth[id]?.checks.first(where: { $0.kind == .publicSite })?.state
+            if site == .ok || site == .failed || site == .skipped || runtime(for: id).state != .running { return }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+    }
+
     func apiWaitUntilLive(_ id: UUID) async throws -> APIShare {
         for _ in 0..<120 {
             guard let definition = definitions.first(where: { $0.id == id }) else { throw OpenTrafficAPIError.notFound("The share was removed.") }
@@ -305,7 +316,10 @@ extension AppStore {
                 throw OpenTrafficAPIError(status: 502, code: "start_failed", message: runtime(for: id).lastError ?? "The share failed to start.")
             }
             let runtime = runtime(for: id)
-            if runtime.state == .running, publicURL(for: definition) != nil { return apiShare(definition) }
+            if runtime.state == .running, publicURL(for: definition) != nil {
+                await apiWaitUntilReachable(id)
+                return apiShare(definition)
+            }
             try? await Task.sleep(for: .milliseconds(250))
         }
         guard let definition = definitions.first(where: { $0.id == id }) else { throw OpenTrafficAPIError.notFound("The share was removed.") }

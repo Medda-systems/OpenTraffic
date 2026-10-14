@@ -238,7 +238,14 @@ struct Context {
         if invocation.flag("copy"), let url = share.publicURL { Shell.run("/usr/bin/pbcopy", [], input: url) }
         switch share.state {
         case "running" where share.publicURL != nil:
-            say("\(style.bold(share.name)) is live at \(style.cyan(share.publicURL!))\(invocation.flag("copy") ? style.dim(" (copied)") : "")")
+            // Running, but the provider isn't answering on the URL yet (a replaced DNS record takes Cloudflare
+            // up to a minute or two): say so rather than "live".
+            if let site = share.health?.first(where: { $0.kind == "publicSite" }), site.state == "working" {
+                say("\(style.bold(share.name)) is starting at \(style.cyan(share.publicURL!))\(invocation.flag("copy") ? style.dim(" (copied)") : "")")
+                say(style.dim("  \(site.detail ?? "Waiting for the public URL to answer…") Check with `opentraffic status \"\(share.name)\"`."))
+            } else {
+                say("\(style.bold(share.name)) is live at \(style.cyan(share.publicURL!))\(invocation.flag("copy") ? style.dim(" (copied)") : "")")
+            }
             say(style.dim("  \(Format.via(share)) · \(Format.audience(share))\(share.collaboration ? " · live collaboration" : "")"))
         case "failed":
             throw CLIError.failed("“\(share.name)” failed to start: \(share.lastError ?? "see `opentraffic logs \(share.name)`").")

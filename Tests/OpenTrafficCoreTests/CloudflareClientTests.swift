@@ -505,3 +505,30 @@ private func dnsClient(_ transport: MutationTransport) -> CloudflareClient {
     let unnamedCatchAll = CloudflareTunnelConfiguration(ingress: [CloudflareIngress(service: "http://localhost:3000")])
     #expect(RemoteIngressMetadataResolver.matching(hostname: "landing.example.com", in: unnamedCatchAll)?.service == "http://localhost:3000")
 }
+
+/// Cloudflare refuses a tunnel name that's taken, until the name is free.
+private actor TakenNamesTransport: HTTPTransport {
+    let taken: Set<String>
+    var attempted: [String] = []
+    init(taken: Set<String>) { self.taken = taken }
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let body = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]) ?? [:]
+        let name = body["name"] as? String ?? ""
+        attempted.append(name)
+        let (status, json) = taken.contains(name)
+            ? (409, #"{"success":false,"errors":[{"code":1013,"message":"You already have a tunnel with this name"}],"result":null}"#)
+            : (200, #"{"success":true,"result":{"id":"new-id","name":"\#(name)","status":"inactive","config_src":"cloudflare"}}"#)
+        return (Data(json.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+    }
+
+    func names() -> [String] { attempted }
+}
+
+@Test func numbersATunnelNameThatIsAlreadyTaken() async throws {
+    let transport = TakenNamesTransport(taken: ["Orbit", "Orbit 2"])
+    let client = CloudflareClient(accountID: "account-id", token: "api-secret", baseURL: URL(string: "https://example.test/client/v4")!, transport: transport)
+    let tunnel = try await client.createRemoteTunnel(uniquelyNamed: "Orbit")
+    #expect(tunnel.name == "Orbit 3")
+    #expect(await transport.names() == ["Orbit", "Orbit 2", "Orbit 3"])
+}

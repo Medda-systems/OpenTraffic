@@ -99,6 +99,19 @@ public struct CloudflareClient: Sendable {
         ).result
     }
 
+    /// Tunnel names are unique per account, and removing a share leaves its tunnel in place, so a name can
+    /// already be taken (often by an earlier share of the same name): numbers it, as Finder does.
+    public func createRemoteTunnel(uniquelyNamed name: String) async throws -> CloudflareTunnel {
+        for attempt in 1...20 {
+            do {
+                return try await createRemoteTunnel(name: attempt == 1 ? name : "\(name) \(attempt)")
+            } catch where attempt < 20 && error.localizedDescription.localizedCaseInsensitiveContains("already have a tunnel with this name") {
+                continue
+            }
+        }
+        throw OpenTrafficError.api("Couldn't find a free tunnel name for “\(name)” in your Cloudflare account.")
+    }
+
     /// How to treat the rule's `originRequest.httpHostHeader` when (re)writing it.
     public enum HostHeaderChange: Sendable, Equatable {
         case keep

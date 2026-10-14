@@ -166,3 +166,17 @@ import Testing
     #expect(!CloudflareAddresses.contains("104.24.0.0x"))
     #expect(!CloudflareAddresses.contains("2001:db8::1"))
 }
+
+@Test func healthLooksAgainQuicklyWhileAShareStarts() {
+    #expect(HealthRecheck.delay(sinceStart: 2) == 1)
+    #expect(HealthRecheck.delay(sinceStart: 30) == 3)
+    #expect(HealthRecheck.delay(sinceStart: 90) == 8)
+    #expect(HealthRecheck.delay(sinceStart: nil) == 8)
+}
+
+@Test func tellsProviderErrorPagesFromTheAppsOwnAnswer() {
+    #expect(PublicSiteBlockDetector.isProviderError(probe: PublicSiteProbe(statusCode: 404, bodyExcerpt: "ERR_NGROK_3200: The endpoint is offline")))
+    #expect(PublicSiteBlockDetector.isProviderError(probe: PublicSiteProbe(statusCode: 530, bodyExcerpt: "error code: 1033")))
+    #expect(PublicSiteBlockDetector.isProviderError(probe: PublicSiteProbe(statusCode: 502, bodyExcerpt: "")))
+    #expect(!PublicSiteBlockDetector.isProviderError(probe: PublicSiteProbe(statusCode: 404, bodyExcerpt: #"{"error":"not found"}"#)))
+}

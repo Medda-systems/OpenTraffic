@@ -330,7 +330,26 @@ public enum CloudflareAddresses {
     }
 }
 
+/// How soon to look again while a share is starting: every second at first, then less often.
+public enum HealthRecheck {
+    public static func delay(sinceStart elapsed: TimeInterval?) -> TimeInterval {
+        guard let elapsed else { return 8 }
+        if elapsed < 20 { return 1 }
+        if elapsed < 60 { return 3 }
+        return 8
+    }
+}
+
 public enum PublicSiteBlockDetector {
+    /// The provider's own error page (no connector yet, tunnel offline), not the shared app's answer.
+    public static func isProviderError(probe: PublicSiteProbe) -> Bool {
+        let body = (probe.bodyExcerpt ?? "").lowercased()
+        let markers = ["err_ngrok", "ngrok-error", "error code: 1033", "error 1033", "argo tunnel error",
+                       "cloudflare tunnel error", "tunnel not found", "no tunnel", "opentunnel: no route",
+                       "route not found", "bad gateway"]
+        return markers.contains { body.contains($0) } || probe.statusCode == 502 || probe.statusCode == 530
+    }
+
     /// Which dev server rejected the public hostname, when the response says so.
     public static func blockingFramework(probe: PublicSiteProbe) -> BlockingFramework? {
         guard let statusCode = probe.statusCode, !(200..<400).contains(statusCode) else { return nil }

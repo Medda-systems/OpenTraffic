@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Online as soon as it's online:** a share now shows as online within about a second of its link working, instead of up to 45 seconds later (ngrok and custom domains) or 9 seconds (OpenTunnel). While a share starts, OpenTraffic checks every second, and a provider's "not ready yet" page no longer counts as a failure.
+- **`opentraffic share` and `start` say "live" only once the link answers**, and "starting" (with what it's waiting for) when the provider needs longer, such as a custom domain whose DNS record was just replaced.
+- **API servers look healthy:** a share whose server answers 404 (or anything else) at `/` shows as working when the public URL gives the same answer as the local server.
+- **Custom domains:** a share can reuse the name of one you removed; OpenTraffic numbers the Cloudflare tunnel if the name is taken, instead of failing with "You already have a tunnel with this name". A tunnel that's already serving no longer shows Cloudflare's lagging "inactive" status.
 - **One-click tools:** OpenTraffic installs what it shares through for you. The setup assistant, Settings, and New Tunnel show an **Install** button for Cloudflare's, OpenTunnel's, and ngrok's tools that says what it downloads (version, size, where from, who signed it), shows its progress, and checks the download against its maker's published checksum or Developer ID signature before installing it into OpenTraffic's own folder. No Homebrew, Terminal, or password needed. ngrok's account connects by pasting your authtoken. Tailscale installs from its own signed, notarized installer, opened in Apple's Installer (or from the App Store or Homebrew, under ⋯).
 - **`opentraffic install cloudflared`** (or `opentunnel`, `ngrok`, `tailscale`) does the same from the command line, and `opentraffic doctor` says which to run.
 
