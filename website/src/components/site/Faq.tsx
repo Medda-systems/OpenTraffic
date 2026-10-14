@@ -5,11 +5,19 @@ import { Reveal } from "./Reveal"
 const questions = [
   {
     q: "Is OpenTraffic free?",
-    a: "Yes. OpenTraffic is free and open source under the MIT License (the code is on GitHub). Cloudflare Quick Tunnels and OpenTunnel need no account at all; Tailscale and ngrok use your own accounts with them.",
+    a: "Yes. OpenTraffic costs nothing. Cloudflare Quick Tunnels and OpenTunnel need no account at all; Tailscale and ngrok use your own accounts with them.",
   },
   {
     q: "Do the people I share with need anything?",
     a: "Just a browser. They open the link; with live collaboration on, they see each other's cursors and can comment without signing up.",
+  },
+  {
+    q: "Is it open source?",
+    a: "Yes. The code is on GitHub under the MIT License, and issues and pull requests are welcome. The OpenTraffic name and logo are trademarks of Medda Systems AB.",
+  },
+  {
+    q: "Does it work with Vite, Next.js, and other dev servers?",
+    a: "Yes. Dev servers that reject unfamiliar hostnames get a one-click Host header fix, and apps that call an API on another local port work through the same share.",
   },
   {
     q: "Which way of sharing should I pick?",
@@ -60,6 +68,7 @@ export function Footer() {
         <nav className="flex flex-wrap gap-x-6 gap-y-2 md:ml-auto">
           <a className="hover:text-foreground" href="/docs">Docs</a>
           <a className="hover:text-foreground" href={links.source}>Source</a>
+          <a className="hover:text-foreground" href="/docs/changelog">Changelog</a>
           <a className="hover:text-foreground" href={links.releases}>Releases</a>
           <a className="hover:text-foreground" href={links.homebrewTap}>Homebrew tap</a>
           <a className="hover:text-foreground" href="/#install">Install</a>

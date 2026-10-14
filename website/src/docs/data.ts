@@ -1,6 +1,10 @@
 import catalog from './catalog.json'
 
+import changelog from '../../../CHANGELOG.md?raw'
+
 const files = import.meta.glob('./content/*.md', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+// The changelog page is the repository's CHANGELOG.md, without its own title.
+files['./content/changelog.md'] = changelog.replace(/^# .*\n+/, '')
 export const docs = catalog.map((page) => ({ ...page, body: files[`./content/${page.slug}.md`] }))
 export type Doc = (typeof docs)[number]
 export const groups = [...new Set(docs.map((page) => page.group))]

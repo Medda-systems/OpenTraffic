@@ -31,7 +31,7 @@ export function Agents() {
       <div className="mx-auto grid max-w-6xl gap-12 px-6 py-24 lg:grid-cols-2 lg:items-center">
         <Reveal>
           <Badge variant="outline" className="rounded-full">Skill · MCP</Badge>
-          <h2 className="mt-4 text-4xl md:text-5xl">Feedback your coding agent can act on.</h2>
+          <h2 className="mt-4 text-4xl md:text-5xl">Set up your coding agent.</h2>
           <p className="mt-4 text-lg text-muted-foreground">
             Claude Code, Codex, Cursor, opencode, and any MCP client can share your dev server, wait for comments, fix
             what people point at, reply in the thread, and resolve it — while you watch it happen on the page.
@@ -75,7 +75,7 @@ export function Install({ version }: { version: string | null }) {
       <div className="mx-auto max-w-3xl px-6 py-24">
         <Reveal className="text-center">
           <h2 className="text-4xl md:text-5xl">Install OpenTraffic</h2>
-          <p className="mt-4 text-lg text-muted-foreground">
+          <p className="mt-4 text-lg text-balance text-muted-foreground">
             Free for macOS 14 or later, on Apple silicon and Intel{version ? ` · version ${version}` : ""}. It updates itself after that.
           </p>
           <a href={links.source} className="mt-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">

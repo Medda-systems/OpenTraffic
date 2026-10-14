@@ -4,3 +4,4 @@
 /docs/introduction /docs 301
 # curl -fsSL https://opentraffic.dev/skill | sh
 /skill /skills/install.sh 302
+/changelog /docs/changelog 301

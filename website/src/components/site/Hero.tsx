@@ -1,8 +1,8 @@
 import { Download, Volume2, VolumeX } from "lucide-react"
 import { motion } from "motion/react"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
-import { links, media } from "@/lib/site"
+import { links, media, starCount } from "@/lib/site"
 import { CopyCommand } from "./CopyCommand"
 import { GitHubMark } from "./GitHubMark"
 import { useCalm } from "./Reveal"
@@ -18,23 +18,41 @@ export function Nav({ docs = false }: { docs?: boolean }) {
         </a>
         <nav className="ml-auto hidden items-center gap-7 text-sm font-medium text-foreground/80 lg:flex">
           <a href="/#features" className="hover:text-foreground">Features</a>
+          <a href="/#cli" className="hover:text-foreground">CLI</a>
           <a href="/#agents" className="hover:text-foreground">Coding agents</a>
           <a href="/#install" className="hover:text-foreground">Install</a>
           <a href="/docs" aria-current={docs ? "page" : undefined} className={docs ? "text-foreground underline underline-offset-8" : "hover:text-foreground"}>Docs</a>
-          <a href={links.releases} className="hover:text-foreground">Releases</a>
+          <a href="/docs/changelog" className="hover:text-foreground">Changelog</a>
         </nav>
         <div className="ml-auto flex items-center gap-2 sm:gap-3 lg:ml-0">
           <a href="/docs" aria-current={docs ? "page" : undefined} className="text-sm font-medium lg:hidden">Docs</a>
           <Button asChild size="sm" className="hidden rounded-full px-4 sm:inline-flex">
             <a href="/#install">Download</a>
           </Button>
-          <a href={links.source} aria-label="OpenTraffic on GitHub" className="text-foreground/80 hover:text-foreground">
-            <GitHubMark />
-          </a>
+          <StarButton />
           <ThemeToggle />
         </div>
       </div>
     </header>
+  )
+}
+
+/** "Star" on GitHub, with the count once GitHub's API answers. */
+function StarButton() {
+  const [stars, setStars] = useState<number | null>(null)
+  useEffect(() => {
+    starCount().then(setStars)
+  }, [])
+  return (
+    <a
+      href={links.source}
+      aria-label={!stars ? "OpenTraffic on GitHub" : `Star OpenTraffic on GitHub (${stars} stars)`}
+      className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-sm font-medium text-foreground/80 hover:bg-muted hover:text-foreground"
+    >
+      <GitHubMark className="size-4" />
+      <span className="hidden sm:inline">Star</span>
+      {!!stars && <span className="tabular-nums text-muted-foreground">{stars.toLocaleString("en")}</span>}
+    </a>
   )
 }
 
@@ -54,8 +72,8 @@ export function Hero({ version }: { version: string | null }) {
             Share localhost. <br className="hidden sm:block" />Collaborate live.
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg text-pretty text-muted-foreground md:text-xl">
-            OpenTraffic lives in your Mac's menu bar. Put the dev server you're running on a public URL in one click,
-            then watch your team point, comment, and follow along — and let your coding agent fix what they find.
+            Put your dev server on a public URL in one click. Your team points and comments, and your coding agent
+            fixes what they find.
           </p>
           <div className="mx-auto mt-6 flex max-w-xl flex-col items-stretch gap-3 sm:flex-row sm:items-center">
             <CopyCommand command={links.installCommand} className="flex-1" />
@@ -65,18 +83,16 @@ export function Hero({ version }: { version: string | null }) {
               </a>
             </Button>
           </div>
-          <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
-            <p>macOS 14 or later · Apple silicon and Intel · Free</p>
-            <a href={links.source} className="inline-flex items-center gap-1.5 rounded-full border bg-background/70 px-2.5 py-1 font-medium hover:text-foreground">
-              <GitHubMark className="size-3.5" /> Open source on GitHub
-            </a>
+          <p className="mt-4 text-sm text-muted-foreground">
+            For macOS 14 or later · Free and{" "}
+            <a href={links.source} className="underline underline-offset-4 hover:text-foreground">open source</a>
             {version && (
-              <a href={links.latestRelease} className="inline-flex items-center gap-1.5 rounded-full border bg-background/70 px-2.5 py-1 font-medium hover:text-foreground">
-                <span className="size-1.5 rounded-full bg-green-500" />
-                v{version} →
-              </a>
+              <>
+                {" · "}
+                <a href="/docs/changelog" className="underline underline-offset-4 hover:text-foreground">v{version}</a>
+              </>
             )}
-          </div>
+          </p>
         </motion.div>
 
         <motion.div

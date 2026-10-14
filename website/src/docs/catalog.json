@@ -154,5 +154,11 @@
     "title": "Privacy & local data",
     "group": "Help & trust",
     "description": "See network activity, storage locations, screenshot behavior, and uninstall steps."
+  },
+  {
+    "slug": "changelog",
+    "title": "Changelog",
+    "group": "Help & trust",
+    "description": "What changed in each version of OpenTraffic."
   }
 ]

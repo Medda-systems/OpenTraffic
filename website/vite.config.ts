@@ -5,6 +5,8 @@ import { defineConfig } from "vite"
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // The changelog page reads ../CHANGELOG.md.
+  server: { fs: { allow: [".."] } },
   resolve: {
     alias: { "@": path.resolve(import.meta.dirname, "./src") },
   },

@@ -34,3 +34,15 @@ export async function latestVersion(): Promise<string | null> {
     return null
   }
 }
+
+/** The source repository's star count, from GitHub's API (shown when it answers). */
+export async function starCount(): Promise<number | null> {
+  try {
+    const response = await fetch("https://api.github.com/repos/Medda-systems/OpenTraffic")
+    if (!response.ok) return null
+    const repo = (await response.json()) as { stargazers_count?: number }
+    return repo.stargazers_count ?? null
+  } catch {
+    return null
+  }
+}
