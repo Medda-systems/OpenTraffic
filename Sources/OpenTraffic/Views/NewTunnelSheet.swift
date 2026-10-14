@@ -228,12 +228,7 @@ private struct QuickTunnelPane: View {
                 }
                 if store.cloudflaredPath == nil {
                     Section {
-                        InlineMessage(
-                            severity: .warning,
-                            message: "cloudflared isn't installed. Install it with Homebrew (brew install cloudflared), download it from Cloudflare, or choose it in Settings."
-                        ) {
-                            Link("Download cloudflared", destination: URL(string: "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/")!)
-                        }
+                        ToolInstallRow(store: store, provider: .cloudflare, purpose: "Temporary URLs need Cloudflare's connector. One click installs it.", prominent: true)
                     }
                 }
             }

@@ -1,7 +1,8 @@
+import AppKit
 import SwiftUI
 import OpenTrafficCore
 
-/// First-run setup: install cloudflared, optionally connect Cloudflare, choose preferences.
+/// First-run setup: install the tools to share with (one click each), optionally connect Cloudflare, choose preferences.
 struct OnboardingView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var store: AppStore
@@ -14,7 +15,7 @@ struct OnboardingView: View {
 
         var title: String {
             switch self {
-            case .cloudflared: "Install cloudflared"
+            case .cloudflared: "Choose how you'll share"
             case .cloudflare: "Connect Cloudflare"
             case .preferences: "Finishing Touches"
             }
@@ -22,7 +23,7 @@ struct OnboardingView: View {
 
         var subtitle: String {
             switch self {
-            case .cloudflared: "OpenTraffic uses Cloudflare's connector to publish servers running on this Mac."
+            case .cloudflared: "OpenTraffic shares through these free tools. Install the ones you want now, or add more any time in Settings."
             case .cloudflare: "Optional. Needed only for stable hostnames on your own domain. Temporary URLs work without an account."
             case .preferences: "You can change these any time in Settings."
             }
@@ -51,7 +52,7 @@ struct OnboardingView: View {
             Form {
                 switch step {
                 case .cloudflared:
-                    CloudflaredSettingsSection(store: store)
+                    ToolsSetupSection(store: store)
                 case .cloudflare:
                     CloudflareConnectionView(store: store, mode: .inline)
                 case .preferences:
@@ -99,8 +100,12 @@ struct OnboardingView: View {
             }
             .padding(Spacing.l)
         }
-        .frame(width: 600, height: 540)
+        .frame(width: 620, height: 600)
         .interactiveDismissDisabled()
+        // Tailscale comes from the App Store, so look again whenever OpenTraffic is back in front.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            store.toolsRevision += 1
+        }
     }
 
     private var isConnected: Bool {
@@ -130,5 +135,40 @@ private struct StepIndicator: View {
         }
         .accessibilityElement()
         .accessibilityLabel("Step \(current + 1) of \(count)")
+    }
+}
+
+/// The tools to share with, each installable in one click; the two that need no account can be
+/// installed together.
+struct ToolsSetupSection: View {
+    @Bindable var store: AppStore
+
+    private var missingFree: [TunnelProvider] {
+        [TunnelProvider.cloudflare, .opentunnel].filter { store.toolPath($0) == nil }
+    }
+
+    var body: some View {
+        Section {
+            ToolInstallRow(store: store, provider: .cloudflare, purpose: "Temporary trycloudflare.com URLs, or your own domain. No account needed.", recommended: true)
+            ToolInstallRow(store: store, provider: .opentunnel, purpose: "A lasting address that stays the same every time. No account needed.")
+            ToolInstallRow(store: store, provider: .ngrok, purpose: "Your ngrok domain, with a request inspector and password protection. Free account.")
+            if store.ngrokPath != nil, !store.ngrokAuthtokenConfigured {
+                NgrokConnectRow(store: store)
+            }
+            ToolInstallRow(store: store, provider: .tailscale, purpose: "Private to your own devices, or public through Funnel.")
+        } footer: {
+            HStack(alignment: .top, spacing: Spacing.l) {
+                Text("Each tool comes from its maker's official release and is checked before it's installed, into OpenTraffic's own folder. Nothing else on your Mac changes, and no password is needed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                if missingFree.count == 2 {
+                    Button("Install Cloudflare and OpenTunnel") { Task { await store.installTools(missingFree) } }
+                        .disabled(missingFree.contains { store.toolState($0).isBusy })
+                }
+            }
+        }
     }
 }

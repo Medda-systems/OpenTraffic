@@ -105,6 +105,14 @@ final class AppAPIBackend: OpenTrafficAPIBackend {
     func zones() async throws -> [APIZone] {
         try await store.apiZones()
     }
+
+    func tools() async -> [APITool] {
+        await store.apiTools()
+    }
+
+    func installTool(_ name: String) async throws -> APITool {
+        try await store.apiInstallTool(name)
+    }
 }
 
 enum APIStatus: Equatable {

@@ -1,10 +1,23 @@
 ## Requirements
 
 - macOS 14 or newer
-- `cloudflared` for Cloudflare shares
-- Optional: the Tailscale app for tailnet shares, the `ngrok` CLI for ngrok shares, the `opentunnel` CLI (`brew install anomalyco/tap/opentunnel`) for OpenTunnel shares
+- The tool for each way of sharing you use: `cloudflared` (Cloudflare), `opentunnel` (OpenTunnel), `ngrok`, or the Tailscale app. OpenTraffic installs the first three for you, in one click (see below).
 
-OpenTraffic looks for these in `/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`, and `~/.local/bin`, and for Tailscale also in the CLI inside `/Applications/Tailscale.app`. You can choose a different executable in Settings. Tailscale shares need the Tailscale app signed in, with HTTPS certificates turned on for the tailnet.
+## Tools for sharing
+
+OpenTraffic shares through other companies' free tools. When one is missing, the setup assistant, Settings, and New Tunnel show an **Install** button that says what it downloads: the version, the size, where from, and who signed it.
+
+| Tool | Downloaded from | Checked with |
+| --- | --- | --- |
+| `cloudflared` | Cloudflare's GitHub releases | The published SHA-256 and Cloudflare's Developer ID signature |
+| `opentunnel` | Anomaly's GitHub releases | The published SHA-256 |
+| `ngrok` | ngrok's download server | ngrok's Developer ID signature |
+
+A download that doesn't pass its checks isn't installed. Tools go in OpenTraffic's own folder, `~/Library/Application Support/OpenTraffic/Tools`, so nothing else on your Mac changes and no password is needed. From the command line: `opentraffic install cloudflared` (or `opentunnel`, `ngrok`).
+
+**Tailscale** is a Mac app, so **Get from App Store** opens its page; sign in to it, turn on HTTPS certificates for your tailnet, and OpenTraffic finds it. **ngrok** also needs your free account: paste your authtoken from the ngrok dashboard into OpenTraffic once.
+
+Tools you installed yourself keep working: OpenTraffic looks in `/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`, and `~/.local/bin` first (and for Tailscale, inside `/Applications/Tailscale.app`), then in its own folder. You can choose a different executable in Settings.
 
 ## Install OpenTraffic
 
@@ -31,7 +44,7 @@ Or download it:
 1. Download [`OpenTraffic.dmg`](https://github.com/Medda-systems/OpenTraffic-releases/releases/latest/download/OpenTraffic.dmg) (every version and its checksum are on the [releases page](https://github.com/Medda-systems/OpenTraffic-releases/releases)) and open it.
 2. Drag **OpenTraffic** onto **Applications**.
 3. Open OpenTraffic from Applications. It's signed by Medda Systems and notarized by Apple, so it opens without any warning.
-4. Install `cloudflared` for Cloudflare shares, either with `brew install cloudflared` or from [Cloudflare's downloads](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/). Tailscale, ngrok, and OpenTunnel are optional.
+4. The setup assistant offers the [tools for sharing](#tools-for-sharing): click **Install** next to Cloudflare (and OpenTunnel, if you like). Tailscale and ngrok are optional.
 
 Every way of installing also gives you the [`opentraffic` command](/docs/cli): the installer links it right away, and OpenTraffic links it whenever it runs from Applications (in `/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin`). Run `opentraffic setup` once to start using it. Settings → General → **Install the opentraffic command** turns this off.
 

@@ -6,7 +6,8 @@ import OpenTrafficCore
 /// which ones it added, and stops the service when none are left.
 extension AppStore {
     var openTunnelPath: URL? {
-        ExecutableLocator.resolve(.opentunnel)
+        _ = toolsRevision
+        return ExecutableLocator.resolve(.opentunnel)
     }
 
     /// Why OpenTunnel sharing can't be used right now, or nil when it's ready.

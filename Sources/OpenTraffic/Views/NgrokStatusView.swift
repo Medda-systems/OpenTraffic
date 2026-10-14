@@ -16,25 +16,18 @@ struct NgrokStatusView: View {
 
     var body: some View {
         Section {
-            row(
-                "ngrok CLI",
-                ok: store.ngrokPath != nil,
-                detail: store.ngrokPath?.path ?? "Not installed. Install it with Homebrew: brew install ngrok"
-            ) {
-                if store.ngrokPath == nil {
-                    CopyButton(text: "brew install ngrok", label: "Copy Install Command", iconOnly: false)
-                }
-            }
-            row(
-                "Authtoken",
-                ok: store.ngrokAuthtokenConfigured,
-                detail: store.ngrokAuthtokenConfigured
-                    ? "Configured in ngrok's own config file. OpenTraffic reuses it and never edits that file."
-                    : "Copy your authtoken from the ngrok dashboard, then run the command below in Terminal."
-            ) {
-                if !store.ngrokAuthtokenConfigured {
-                    Button("Open Dashboard…") { NSWorkspace.shared.open(NgrokLinks.authtoken) }
-                    CopyButton(text: "ngrok config add-authtoken ", label: "Copy Command", iconOnly: false)
+            ToolInstallRow(store: store, provider: .ngrok, purpose: "ngrok's agent, for your ngrok domain. Needs a free ngrok account.", prominent: true)
+            if store.ngrokPath != nil {
+                if store.ngrokAuthtokenConfigured {
+                    row(
+                        "Authtoken",
+                        ok: true,
+                        detail: "Configured in ngrok's own config file. OpenTraffic reuses it."
+                    ) {
+                        EmptyView()
+                    }
+                } else {
+                    NgrokConnectRow(store: store)
                 }
             }
         } header: {

@@ -135,6 +135,11 @@ final class AppStore {
             GlobalHotKeys.shared.setEnabled(globalHotKeysEnabled)
         }
     }
+    /// Where installing each tool is up to (see AppStore+Tools), the newest release of each, and a counter
+    /// bumped after an install so views that look tools up on disk check again.
+    var toolInstallStates: [TunnelProvider: ToolInstallState] = [:]
+    var toolReleases: [TunnelProvider: ToolRelease] = [:]
+    var toolsRevision = 0
     /// Whether the Cloudflare token may manage Access applications (nil: unknown).
     var cloudflareAccessPermission: Bool?
     /// Cloudflare refused an Access change with this token (it may still read Access). Reset with the token.
@@ -521,7 +526,8 @@ final class AppStore {
     }
 
     var cloudflaredPath: URL? {
-        ExecutableLocator.resolve(.cloudflare, customPath: customCloudflaredPath)
+        _ = toolsRevision
+        return ExecutableLocator.resolve(.cloudflare, customPath: customCloudflaredPath)
     }
 
     func effectiveOrigin(for definition: TunnelDefinition) -> EffectiveOrigin {

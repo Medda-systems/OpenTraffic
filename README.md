@@ -99,13 +99,7 @@ brew install --cask opentraffic
 
 </details>
 
-**2. Add a way to share.** Cloudflare's temporary URLs need `cloudflared`:
-
-```sh
-brew install cloudflared
-```
-
-OpenTunnel, Tailscale, and ngrok are optional; OpenTraffic tells you what's missing when you pick one.
+**2. Pick how to share.** The first time OpenTraffic opens, it offers the tools it shares through (Cloudflare, OpenTunnel, ngrok, Tailscale), each one click to install from its maker's official release, checked before it's installed.
 
 **3. Share.** Click the menu bar icon and press **Share** next to your dev server. That's it.
 

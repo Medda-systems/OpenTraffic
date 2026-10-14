@@ -44,10 +44,12 @@ enum NgrokSupport {
 
 extension AppStore {
     var ngrokPath: URL? {
-        ExecutableLocator.resolve(.ngrok)
+        _ = toolsRevision
+        return ExecutableLocator.resolve(.ngrok)
     }
 
     var ngrokAuthtokenConfigured: Bool {
+        _ = toolsRevision
         guard let text = try? String(contentsOf: NgrokAgent.defaultConfigURL, encoding: .utf8) else { return false }
         return NgrokAgent.hasAuthtoken(configText: text)
     }

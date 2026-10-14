@@ -14,6 +14,7 @@ Run `opentraffic doctor`.
 - **`command not found`:** OpenTraffic isn't installed, or the command isn't on the PATH. Tell the user to install it from https://opentraffic.dev (one line: `curl -fsSL https://opentraffic.dev/install | sh`). Don't install it yourself without asking.
 - **Exit code 3** (OpenTraffic isn't reachable or set up): ask the user to run `opentraffic setup` and click **Allow** in OpenTraffic. You can run `opentraffic setup` yourself, but only the user can click Allow.
 - Otherwise `doctor` lists which ways of sharing are ready, and why the others aren't. Use only ready ones.
+- **A tool is missing** (`doctor` says to run `opentraffic install cloudflared`, `opentunnel`, or `ngrok`): run it, and tell the user it downloads that tool from its maker. ngrok also needs the user's account: ask them to connect it in OpenTraffic → Settings → ngrok. Tailscale is an App Store app only the user can install.
 
 Every command takes `--json`. Prefer it, and read the exit status: `0` worked, `1` refused or failed (the message on stderr says why), `2` wrong command line, `3` OpenTraffic not reachable.
 

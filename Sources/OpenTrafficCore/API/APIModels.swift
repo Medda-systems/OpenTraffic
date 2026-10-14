@@ -136,6 +136,26 @@ public struct APIProject: Codable, Equatable, Sendable {
     }
 }
 
+/// A tool OpenTraffic shares through (cloudflared, opentunnel, ngrok, tailscale), and whether it's there.
+public struct APITool: Codable, Equatable, Sendable {
+    public let name: String
+    public let provider: String
+    public let installed: Bool
+    public let path: String?
+    public let version: String?
+    /// Whether `POST /v1/tools/{name}/install` can install it (not Tailscale, an App Store app).
+    public let installable: Bool
+
+    public init(name: String, provider: String, installed: Bool, path: String?, version: String?, installable: Bool) {
+        self.name = name
+        self.provider = provider
+        self.installed = installed
+        self.path = path
+        self.version = version
+        self.installable = installable
+    }
+}
+
 /// A domain in the connected Cloudflare account, for custom-domain shares.
 public struct APIZone: Codable, Equatable, Sendable {
     public let id: String
@@ -367,6 +387,9 @@ public protocol OpenTrafficAPIBackend: Sendable {
     func startProject(_ name: String, client: String) async throws -> APIProject
     func stopProject(_ name: String) async throws -> APIProject
     func zones() async throws -> [APIZone]
+    func tools() async -> [APITool]
+    /// Downloads and installs a tool from its maker's official release.
+    func installTool(_ name: String) async throws -> APITool
 }
 
 extension OpenTrafficAPIBackend {
@@ -390,6 +413,8 @@ extension OpenTrafficAPIBackend {
     public func startProject(_ name: String, client: String) async throws -> APIProject { throw unsupported }
     public func stopProject(_ name: String) async throws -> APIProject { throw unsupported }
     public func zones() async throws -> [APIZone] { throw unsupported }
+    public func tools() async -> [APITool] { [] }
+    public func installTool(_ name: String) async throws -> APITool { throw unsupported }
 }
 
 public struct APIEvent: Codable, Equatable, Sendable {

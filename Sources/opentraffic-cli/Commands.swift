@@ -87,6 +87,7 @@ enum Commands {
         CommandSpec(name: "domains", group: "This Mac", usage: "domains", summary: "Domains in your Cloudflare account, for --via domain"),
         // OpenTraffic
         CommandSpec(name: "doctor", group: "OpenTraffic", usage: "doctor", summary: "Check OpenTraffic, its API, and each way of sharing"),
+        CommandSpec(name: "install", group: "OpenTraffic", usage: "install <cloudflared|opentunnel|ngrok>", summary: "Install a tool to share with, from its maker's official release", arguments: 1...1),
         CommandSpec(name: "setup", group: "OpenTraffic", usage: "setup", summary: "Turn on OpenTraffic's local API for this command (asks in OpenTraffic once)"),
         CommandSpec(name: "show", group: "OpenTraffic", usage: "show [share]", summary: "Open OpenTraffic's window", arguments: 0...1),
         CommandSpec(name: "help", group: "OpenTraffic", usage: "help [command]", summary: "Help for every command, or one", arguments: 0...1),
@@ -151,6 +152,7 @@ struct Context {
         case "domains": try await domains()
         case "doctor": try await doctor()
         case "setup": try await setup()
+        case "install": try await install()
         case "show": try show()
         case "help": try help()
         case "version": say(Self.version)
@@ -612,6 +614,16 @@ struct Context {
     }
 
     // MARK: OpenTraffic
+
+    func install() async throws {
+        let name = args[0].lowercased() == "cloudflare" ? "cloudflared" : args[0].lowercased()
+        if !json, name != "tailscale" { say(style.dim("Installing \(name) from its maker's official release…")) }
+        let (tool, raw) = try await client.call("POST", "/v1/tools/\(name.pathEncoded)/install", as: Tool.self)
+        if json { return say(JSON.pretty(raw)) }
+        let detail = [tool.version.map { "\(tool.name) \($0)" }, tool.path].compactMap { $0 }.joined(separator: " · ")
+        say("\(style.green("✓")) \(tool.name) is ready\(detail.isEmpty ? "" : style.dim(" (\(detail))"))")
+        if name == "ngrok" { say(style.dim("Connect your ngrok account in OpenTraffic → Settings → ngrok.")) }
+    }
 
     func doctor() async throws {
         let location = client.location

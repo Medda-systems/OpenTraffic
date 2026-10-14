@@ -5,7 +5,8 @@ import OpenTrafficCore
 /// applies them with the CLI, remembers exactly what it applied, and removes only that.
 extension AppStore {
     var tailscalePath: URL? {
-        ExecutableLocator.resolve(.tailscale, customPath: customTailscalePath)
+        _ = toolsRevision
+        return ExecutableLocator.resolve(.tailscale, customPath: customTailscalePath)
     }
 
     func executablePath(for provider: TunnelProvider) -> URL? {
@@ -21,8 +22,8 @@ extension AppStore {
         switch provider {
         case .cloudflare: OpenTrafficError.cloudflaredMissing.localizedDescription
         case .tailscale: "Tailscale isn't installed. Install the Tailscale app from tailscale.com/download, or choose its CLI in Settings."
-        case .ngrok: "ngrok isn't installed. Install it with Homebrew (`brew install ngrok`)."
-        case .opentunnel: "OpenTunnel isn't installed. Install it with Homebrew (`\(OpenTunnel.installCommand)`) or from opentunnel.xyz."
+        case .ngrok: "ngrok isn't installed. Install it in one click in OpenTraffic → Settings → ngrok, or run `opentraffic install ngrok`."
+        case .opentunnel: "OpenTunnel isn't installed. Install it in one click in OpenTraffic → Settings → OpenTunnel, or run `opentraffic install opentunnel`."
         }
     }
 

@@ -15,34 +15,33 @@ struct OpenTunnelStatusView: View {
 
     var body: some View {
         Section {
-            HStack(spacing: Spacing.m) {
-                Image(systemName: headline.symbol)
-                    .font(.title2)
-                    .foregroundStyle(headline.tint)
-                    .frame(width: 28)
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    Text(headline.title).fontWeight(.semibold)
-                    Text(headline.detail)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+            // Missing, the install row says everything; the status headline is for an installed OpenTunnel.
+            if store.openTunnelPath != nil {
+                HStack(spacing: Spacing.m) {
+                    Image(systemName: headline.symbol)
+                        .font(.title2)
+                        .foregroundStyle(headline.tint)
+                        .frame(width: 28)
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        Text(headline.title).fontWeight(.semibold)
+                        Text(headline.detail)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    Spacer()
+                    if isRefreshing {
+                        ProgressView().controlSize(.small)
+                    }
+                    Button("Check Again", systemImage: "arrow.clockwise", action: refresh)
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .disabled(isRefreshing)
+                        .help("Check OpenTunnel again")
                 }
-                Spacer()
-                if isRefreshing {
-                    ProgressView().controlSize(.small)
-                }
-                Button("Check Again", systemImage: "arrow.clockwise", action: refresh)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .disabled(isRefreshing)
-                    .help("Check OpenTunnel again")
             }
             if store.openTunnelPath == nil {
-                HStack {
-                    CopyButton(text: OpenTunnel.installCommand, label: "Copy Install Command", iconOnly: false)
-                    Link("opentunnel.xyz", destination: OpenTunnelLinks.website)
-                    Spacer()
-                }
+                ToolInstallRow(store: store, provider: .opentunnel, purpose: "A lasting opentunnel.xyz address, encrypted until it reaches your Mac. No account needed.", prominent: true)
             } else {
                 LabeledContent("Address") {
                     Text(store.openTunnelHostname ?? "Created with the first share")

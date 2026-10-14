@@ -64,5 +64,6 @@ Every command takes `--json`. Exit status: `0` worked, `1` failed or refused, `2
 | `opentraffic domains` | Domains in the connected Cloudflare account. |
 | `opentraffic doctor` | Whether OpenTraffic, its API, and each way of sharing are ready. |
 | `opentraffic setup` | Turn on the local API (the user confirms in OpenTraffic). |
+| `opentraffic install <cloudflared\|opentunnel\|ngrok>` | Install a tool to share with, from its maker's official release. |
 | `opentraffic show [share]` | Open OpenTraffic's window. |
 | `opentraffic help [command]` | Help. |

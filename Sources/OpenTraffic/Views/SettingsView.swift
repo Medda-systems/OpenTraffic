@@ -172,26 +172,8 @@ struct CloudflaredSettingsSection: View {
 
     var body: some View {
         Section {
-            LabeledContent("Status") {
-                if let path = store.cloudflaredPath?.path {
-                    Label(path, systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .help(path)
-                } else {
-                    Label("Not installed", systemImage: "xmark.circle.fill")
-                        .foregroundStyle(.red)
-                }
-            }
-            .id(refreshToken)
-            if store.cloudflaredPath == nil {
-                InlineMessage(severity: .info, message: "Install cloudflared with Homebrew or download it from Cloudflare, then check again.") {
-                    CopyButton(text: "brew install cloudflared", label: "Copy Install Command", iconOnly: false)
-                    Link("Download", destination: URL(string: "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/")!)
-                    Button("Check Again") { refreshToken += 1 }
-                }
-            }
+            ToolInstallRow(store: store, provider: .cloudflare, purpose: "Cloudflare's connector, for temporary URLs and your own domain.", prominent: true)
+                .id(refreshToken)
             LabeledContent("Custom location") {
                 HStack {
                     TextField("Custom location", text: $store.customCloudflaredPath, prompt: Text("Automatic"))
@@ -202,7 +184,7 @@ struct CloudflaredSettingsSection: View {
         } header: {
             Text("cloudflared")
         } footer: {
-            Text("OpenTraffic looks in /opt/homebrew/bin, /usr/local/bin, /opt/local/bin, and ~/.local/bin unless you choose a location.")
+            Text("OpenTraffic uses cloudflared from /opt/homebrew/bin, /usr/local/bin, /opt/local/bin, or ~/.local/bin, then the copy it installed itself, unless you choose a location.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

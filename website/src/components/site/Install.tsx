@@ -133,9 +133,9 @@ export function Install({ version }: { version: string | null }) {
           <div className="mt-6 flex items-start gap-3 rounded-2xl border border-dashed p-5 text-sm text-muted-foreground">
             <ShieldCheck className="mt-0.5 size-5 shrink-0 text-foreground" />
             <p>
-              Cloudflare shares need <a className="underline underline-offset-4" href={links.cloudflared}>cloudflared</a>{" "}
-              (<span className="font-mono">brew install cloudflared</span>). Tailscale, ngrok, and OpenTunnel are optional —
-              OpenTraffic tells you what's missing when you pick them.
+              OpenTraffic shares through Cloudflare's, OpenTunnel's, and ngrok's free tools, and installs the ones you pick in
+              one click, from each maker's official release, checked before they're installed.{" "}
+              <a className="underline underline-offset-4" href="/docs/installation#tools-for-sharing">How it works</a>
             </p>
           </div>
         </Reveal>

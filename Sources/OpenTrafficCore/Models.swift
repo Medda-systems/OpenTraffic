@@ -543,7 +543,7 @@ public enum OpenTrafficError: LocalizedError, Sendable {
         case .invalidLocalURL:
             "Enter a valid http:// or https:// local URL."
         case .cloudflaredMissing:
-            "cloudflared was not found. Install it with Homebrew (`brew install cloudflared`) or from developers.cloudflare.com, or choose its executable in Settings."
+            "cloudflared isn't installed. Install it in one click in OpenTraffic → Settings → Cloudflare, or run `opentraffic install cloudflared`."
         case .accountNotConfigured:
             "Add your Cloudflare account ID and API token in Settings."
         case .remoteTunnelMissingID:

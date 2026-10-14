@@ -93,6 +93,7 @@ opentraffic stop --all
 | `domains` | Domains in your Cloudflare account. |
 | `doctor` | Checks OpenTraffic, its API, and whether each way of sharing is ready (and why not). |
 | `setup` | Turns on the local API. |
+| `install <cloudflared\|opentunnel\|ngrok>` | Installs a tool to share with, from its maker's official release, checked before it's installed (see [Installation](/docs/installation#tools-for-sharing)). Does nothing if it's already there. |
 | `show [share]` | Opens OpenTraffic's window. |
 | `help [command]`, `version` | Help and version. |
 

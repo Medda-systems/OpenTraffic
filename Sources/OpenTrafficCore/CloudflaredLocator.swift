@@ -9,6 +9,12 @@ public enum ExecutableLocator {
             // The Mac App Store and standalone Tailscale apps ship the CLI inside the bundle.
             paths.append("/Applications/Tailscale.app/Contents/MacOS/Tailscale")
         }
+        // Last, the copy OpenTraffic installed itself, so one you installed yourself always wins.
+        if ManagedTools.canInstall(provider) {
+            paths = (ManagedTools.onlyManaged ? [] : paths) + [ManagedTools.path(for: provider).path]
+        } else if ManagedTools.onlyManaged {
+            paths = []
+        }
         return paths
     }
 

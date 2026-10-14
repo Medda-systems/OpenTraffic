@@ -21,9 +21,9 @@ extension AppStore {
             running: definitions.filter { isActive($0.id) }.count,
             providers: [
                 provider("quick", cloudflaredMissing, warning: quickWarning),
-                provider("opentunnel", openTunnelBlocker),
-                provider("tailscale", tailscaleBlocker),
-                provider("ngrok", ngrokBlocker),
+                provider("opentunnel", hintedBlocker(.opentunnel)),
+                provider("tailscale", hintedBlocker(.tailscale)),
+                provider("ngrok", hintedBlocker(.ngrok)),
                 provider("domain", cloudflaredMissing ?? (hasSavedAPIToken ? nil : "No Cloudflare account is connected. Add an API token in Settings → Cloudflare.")),
             ],
             publishesWithoutAsking: apiAllowsPublishingWithoutAsking
@@ -185,6 +185,20 @@ extension AppStore {
 
     /// Why a new share of this kind can't be made yet (what the New Tunnel sheet shows as "Not set up"),
     /// or, with `funnel`, why a Tailscale share can't be public.
+    /// Why a provider can't be used, with what to do about it (for the command line and agents).
+    func hintedBlocker(_ provider: TunnelProvider) -> String? {
+        switch provider {
+        case .cloudflare:
+            return cloudflaredPath == nil ? missingExecutableMessage(for: .cloudflare) : nil
+        case .ngrok:
+            return ngrokBlocker.map { ngrokPath == nil ? "\($0) Run `opentraffic install ngrok`, then connect your account in OpenTraffic → Settings → ngrok." : "\($0) Connect your account in OpenTraffic → Settings → ngrok." }
+        case .opentunnel:
+            return openTunnelBlocker.map { openTunnelPath == nil ? "\($0) Run `opentraffic install opentunnel`." : $0 }
+        case .tailscale:
+            return tailscaleBlocker.map { tailscalePath == nil ? "\($0) Get the Tailscale app from the App Store, then sign in." : $0 }
+        }
+    }
+
     private func apiBlocker(for kind: TunnelKind, funnel: Bool = false) async -> String? {
         // Tailscale's status may not have been read yet, or be older than a change in the tailnet.
         if kind == .tailscale, tailscaleStatus == nil || (funnel && tailscaleStatus?.funnelEnabled != true) {
@@ -195,10 +209,10 @@ extension AppStore {
             if cloudflaredPath == nil { return missingExecutableMessage(for: .cloudflare) }
             // A network that filters api.trycloudflare.com can't get a temporary address (cached check).
             return kind == .quick ? await checkQuickTunnelNetwork().value.warning : nil
-        case .ngrok: return ngrokBlocker.map { "\($0) Set it up in OpenTraffic → Settings → ngrok." }
-        case .opentunnel: return openTunnelBlocker.map { "\($0) \(OpenTunnel.installCommand)" }
+        case .ngrok: return hintedBlocker(.ngrok)
+        case .opentunnel: return hintedBlocker(.opentunnel)
         case .tailscale:
-            if let blocker = tailscaleBlocker { return blocker }
+            if let blocker = hintedBlocker(.tailscale) { return blocker }
             guard funnel, tailscaleStatus?.funnelEnabled != true else { return nil }
             return "Funnel isn't enabled for this Mac, so it can't share publicly. Allow Funnel in your tailnet's access controls (OpenTraffic → Settings → Tailscale links to them), or share on your tailnet only."
         }

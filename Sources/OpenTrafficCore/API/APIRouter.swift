@@ -109,6 +109,14 @@ struct APIRouter: Sendable {
             default: throw OpenTrafficAPIError.routeNotFound
             }
         }
+        if segments == ["v1", "tools"] {
+            try allow("GET")
+            return .json(ToolsBody(tools: await backend.tools()))
+        }
+        if segments.count == 4, segments[0] == "v1", segments[1] == "tools", segments[3] == "install" {
+            try allow("POST")
+            return .json(try await backend.installTool(segments[2]))
+        }
         if segments == ["v1", "shares"] {
             if method == "GET" { return .json(SharesBody(shares: await backend.listShares())) }
             try allow("POST")
@@ -210,6 +218,7 @@ struct APIRouter: Sendable {
     private struct ServicesBody: Encodable { let services: [APILocalService] }
     private struct ZonesBody: Encodable { let zones: [APIZone] }
     private struct ProjectsBody: Encodable { let projects: [APIProject] }
+    private struct ToolsBody: Encodable { let tools: [APITool] }
     private struct DeletedBody: Encodable { let deleted: Bool }
     private struct ReplyBody: Decodable { let text: String }
 

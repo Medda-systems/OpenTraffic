@@ -1,10 +1,6 @@
 ## Before you begin
 
-Install [OpenTraffic](/docs/installation), then install the Cloudflare connector for this walkthrough:
-
-```sh
-brew install cloudflared
-```
+Install [OpenTraffic](/docs/installation). The first time it opens, click **Install** next to Cloudflare in the setup assistant; this walkthrough uses Cloudflare's temporary URLs. (Already set up? It's in Settings → Cloudflare, or run `opentraffic install cloudflared`.)
 
 Start your existing web app and check that its local URL opens in your browser. This guide uses `http://localhost:5173`; substitute the port your app actually uses.
 

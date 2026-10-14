@@ -93,6 +93,16 @@ struct LocalService: Decodable {
     let sharedAs: String?
 }
 
+struct Tool: Decodable {
+    let name: String
+    let installed: Bool
+    let path: String?
+    let version: String?
+    let installable: Bool
+}
+
+struct ToolsBody: Decodable { let tools: [Tool] }
+
 struct Project: Decodable {
     let name: String
     let shares: [String]
