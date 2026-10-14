@@ -25,10 +25,7 @@
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-111"></a>
 </p>
 
-<p align="center">
-  <a href="https://opentraffic.dev/media/promo.mp4"><img src="docs/images/demo.gif" width="800" alt="OpenTraffic: share a dev server from the menu bar, collaborate with live cursors and comments, protect it with a password, and drive it all from the terminal"></a>
-  <br><sub><a href="https://opentraffic.dev/media/promo.mp4">Watch it with sound</a></sub>
-</p>
+https://github.com/user-attachments/assets/00eb4fc0-341c-45c6-a664-2b6b361f3a1b
 
 ## Features
 
