@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.12
+
+- **Agent marks in Settings are white in dark mode too:** the Claude Code, Codex, Cursor, and opencode marks in Settings → Integrations → Agent for comments now follow the menu's text colour like the rest of the menu; 1.0.11 fixed the other menus but not this one.
+
 ## 1.0.11
 
 - **Menu icons are really white in dark mode now:** 1.0.10's fix didn't reach the released app. The Claude Code, Codex, Cursor, and opencode marks in Settings → Integrations, and the Cloudflare, OpenTunnel, Tailscale, and ngrok marks in the New, New Tunnel, and Share menus, now follow the menu's text colour: white in dark mode, black in light mode.

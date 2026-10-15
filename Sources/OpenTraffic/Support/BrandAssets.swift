@@ -35,6 +35,20 @@ enum BrandAssets {
         return image
     }
 
+    /// `image` drawn in the text colour of whatever draws it (white in a dark menu, black in a light
+    /// one) rather than as a template. A tinted picker's menu (built against the macOS 26 SDK) draws
+    /// template images of our own black; this one it leaves alone.
+    static func inTextColor(_ image: NSImage) -> NSImage {
+        let colored = NSImage(size: image.size, flipped: false) { rect in
+            image.draw(in: rect)
+            NSColor.labelColor.set()
+            rect.fill(using: .sourceAtop)
+            return true
+        }
+        colored.accessibilityDescription = image.accessibilityDescription
+        return colored
+    }
+
     /// A coding agent's mark as a template image; nil outside the app bundle.
     static func agentMark(_ brand: AgentBrand) -> NSImage? {
         if let cached = agentMarks[brand] { return cached }

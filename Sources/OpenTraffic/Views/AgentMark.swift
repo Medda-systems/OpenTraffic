@@ -31,8 +31,8 @@ struct AgentMark: View {
     }
 }
 
-/// An agent's mark in a menu. Menus draw template images in their text colour (white in dark mode),
-/// like the system symbols beside them; a coloured or resized mark would stay a dark picture.
+/// An agent's mark in a picker's menu, in the menu's text colour (white in dark mode) like the
+/// titles beside it. See `BrandAssets.inTextColor`.
 struct AgentMenuIcon: View {
     let name: String
 
@@ -40,7 +40,7 @@ struct AgentMenuIcon: View {
         let image = AgentBrand(agentName: name).flatMap { BrandAssets.agentMark($0, points: 16) }
             ?? BrandAssets.symbolMark("sparkles", points: 16)
         if let image {
-            Image(nsImage: image).renderingMode(.template)
+            Image(nsImage: BrandAssets.inTextColor(image))
         } else {
             Image(systemName: "sparkles")
         }
