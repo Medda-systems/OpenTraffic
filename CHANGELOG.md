@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.8
 
 - **The command line and coding agents just work:** `opentraffic` and the MCP bridge are now part of OpenTraffic itself. They talk to the app over a private connection that only OpenTraffic's own signed tools can use, so there's no `opentraffic setup`, no token, no Integrations switch to turn on, and no "Allow" dialog before sharing. If OpenTraffic isn't running, they start it in the background. Other apps still use the local API, with its token, and still ask.
 
