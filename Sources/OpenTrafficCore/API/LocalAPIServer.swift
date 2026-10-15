@@ -7,7 +7,10 @@ import os
 /// OpenTraffic's local API: REST under `/v1`, MCP at `/mcp`, on 127.0.0.1 only.
 ///
 /// Every request needs the bearer token, a `Host` naming this server on the loopback address, and no
-/// `Origin` header, so web pages (including DNS-rebinding ones) can't use it. Handlers run as tasks,
+/// `Origin` header, so web pages (including DNS-rebinding ones) can't use it. The same API also listens
+/// on a private Unix socket (`init(trustedSocketPath:…)`) for OpenTraffic's own command-line tool and MCP
+/// bridge: a connection is let in only if macOS says the caller is one of them (`TrustedCallerVerifier`),
+/// and its requests run as trusted (`APITrust`), with no token. Handlers run as tasks,
 /// so a long poll holds only its own connection. See specs/collab-plan.md, "Local API, MCP and webhooks".
 public final class LocalAPIServer: Sendable {
     public static let defaultPort = 47777
@@ -26,12 +29,33 @@ public final class LocalAPIServer: Sendable {
     private let requestedPort: Int
     private let state: OSAllocatedUnfairLock<State>
     let router: APIRouter
+    /// Listening on the private socket for OpenTraffic's own tools, rather than on TCP.
+    private let trustedSocketPath: String?
+    private let isTrustedCaller: (@Sendable (audit_token_t) -> Bool)?
 
     public init(port: Int, token: String, backend: any OpenTrafficAPIBackend, events: APIEventLog) {
         requestedPort = port
         state = OSAllocatedUnfairLock(initialState: State(token: token))
         router = APIRouter(backend: backend, events: events)
+        trustedSocketPath = nil
+        isTrustedCaller = nil
     }
+
+    /// The private channel for OpenTraffic's own tools, at `trustedSocketPath`.
+    public init(
+        trustedSocketPath: String,
+        backend: any OpenTrafficAPIBackend,
+        events: APIEventLog,
+        isTrustedCaller: @escaping @Sendable (audit_token_t) -> Bool = TrustedCallerVerifier().isTrusted(auditToken:)
+    ) {
+        requestedPort = 0
+        state = OSAllocatedUnfairLock(initialState: State(token: ""))
+        router = APIRouter(backend: backend, events: events)
+        self.trustedSocketPath = trustedSocketPath
+        self.isTrustedCaller = isTrustedCaller
+    }
+
+    var isTrustedChannel: Bool { trustedSocketPath != nil }
 
     /// The port it listens on, once started.
     public var port: Int? { state.withLock { $0.port } }
@@ -44,6 +68,7 @@ public final class LocalAPIServer: Sendable {
     /// Starts listening and returns the port (pass 0 to the initializer for any free port).
     public func start() async throws -> Int {
         if let port { return port }
+        if let trustedSocketPath, let isTrustedCaller { return try await startTrusted(at: trustedSocketPath, isTrustedCaller) }
         let bootstrap = ServerBootstrap(group: Self.group)
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .childChannelOption(ChannelOptions.socketOption(.tcp_nodelay), value: 1)
@@ -60,6 +85,34 @@ public final class LocalAPIServer: Sendable {
             $0.port = port
         }
         return port
+    }
+
+    /// Listens on the private socket (only this user can open it), letting in only OpenTraffic's own tools.
+    private func startTrusted(at path: String, _ isTrustedCaller: @escaping @Sendable (audit_token_t) -> Bool) async throws -> Int {
+        try FileManager.default.createDirectory(at: URL(fileURLWithPath: path).deletingLastPathComponent(), withIntermediateDirectories: true)
+        let bootstrap = ServerBootstrap(group: Self.group)
+            .childChannelInitializer { [self] channel in
+                // The caller's audit token, from the kernel: who is really on the other end.
+                guard let provider = channel as? SocketOptionProvider else { return channel.close() }
+                let token: EventLoopFuture<audit_token_t> = provider.unsafeGetSocketOption(
+                    level: NIOBSDSocket.OptionLevel(rawValue: SOL_LOCAL),
+                    name: NIOBSDSocket.Option(rawValue: LOCAL_PEERTOKEN)
+                )
+                return token.flatMap { token in
+                    guard isTrustedCaller(token) else { return channel.close() }
+                    return channel.eventLoop.makeCompletedFuture {
+                        try channel.pipeline.syncOperations.configureHTTPServerPipeline(withErrorHandling: true)
+                        try channel.pipeline.syncOperations.addHandler(APIConnectionHandler(server: self))
+                    }
+                }
+            }
+        let channel = try await bootstrap.bind(unixDomainSocketPath: path, cleanupExistingSocketFile: true).get()
+        chmod(path, 0o600)
+        state.withLock {
+            $0.server = channel
+            $0.port = 0
+        }
+        return 0
     }
 
     /// Stops listening and closes open connections, including long polls.
@@ -86,6 +139,8 @@ public final class LocalAPIServer: Sendable {
 
     /// Why a request may not be answered, if it may not.
     fileprivate func rejection(of head: HTTPRequestHead) -> APIResponse? {
+        // The private socket checked who's calling when they connected.
+        if isTrustedChannel { return nil }
         let (token, port) = state.withLock { ($0.token, $0.port) }
         if head.headers.contains(name: "origin") {
             return .error(OpenTrafficAPIError(status: 403, code: "forbidden", message: "Requests from web pages aren't accepted"))
@@ -196,10 +251,13 @@ private final class APIConnectionHandler: ChannelInboundHandler {
             let router = server.router
             let request = (method: head.method.rawValue, uri: head.uri, body: Data(body.readableBytesView))
             let client = LocalAPIServer.clientName(head.headers.first(name: "x-opentraffic-client"))
+            let trusted = server.isTrustedChannel
             let loop = context.eventLoop
             let handler = NIOLoopBound(self, eventLoop: loop)
             task = Task {
-                let response = await router.respond(method: request.method, uri: request.uri, body: request.body, client: client)
+                let response = await APITrust.$isTrusted.withValue(trusted) {
+                    await router.respond(method: request.method, uri: request.uri, body: request.body, client: client)
+                }
                 loop.execute {
                     handler.value.task = nil
                     handler.value.write(response, for: head)

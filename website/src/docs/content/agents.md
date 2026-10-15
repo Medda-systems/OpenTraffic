@@ -1,8 +1,6 @@
-## Enable the local API
+## Before you start
 
-Open **Settings → Integrations → Allow apps on this Mac to use OpenTraffic**. Keep OpenTraffic running. Use the exact setup shown there if your app is installed outside `/Applications` or you changed the API port.
-
-The bridge reads your local API token automatically. Do not paste the token into a project or a public configuration file.
+There's nothing to turn on. The `opentraffic-mcp` bridge comes with OpenTraffic and connects to it privately, without a token, and starts OpenTraffic in the background when it isn't running. **Settings → Integrations** shows the exact setup for your app, with the right path if OpenTraffic isn't in `/Applications`.
 
 ## Claude Code
 
@@ -64,15 +62,15 @@ tool_timeout_sec = 330
 
 - **stdio:** command `/Applications/OpenTraffic.app/Contents/MacOS/opentraffic-mcp`, no arguments, optionally
   `OPENTRAFFIC_CLIENT` in the environment.
-- **Streamable HTTP:** `http://127.0.0.1:47777/mcp` with the header `Authorization: Bearer <token>` (and
+- **Streamable HTTP:** turn on **Settings → Integrations → Allow apps on this Mac**, then use `http://127.0.0.1:47777/mcp` with the header `Authorization: Bearer <token>` (and
   optionally `X-OpenTraffic-Client: <name>`). JSON responses only, no sessions; protocol `2025-06-18` or `2025-03-26`.
 
 ## Try the connection
 
-Ask your agent: “List my OpenTraffic shares.” Once that works, ask it to share a running dev server and collect feedback. OpenTraffic asks before publishing unless publishing without confirmation has been allowed in Settings.
+Ask your agent: “List my OpenTraffic shares.” Once that works, ask it to share a running dev server and collect feedback. The bridge doesn't ask you before publishing, so your agent shares only what you ask it to.
 
 A useful review instruction is: “Read the open comments for Orbit, inspect the relevant screenshots, fix the issues in this project, verify the changes, then reply and resolve each completed comment.”
 
 ## Troubleshooting
 
-If the bridge cannot connect, check that OpenTraffic is running, the local API is enabled, and the installation path is correct. If `wait_for_feedback` times out in your client, lower `timeout_seconds` or increase the client’s tool timeout. See [MCP reference](/docs/mcp) for the complete tool list.
+If the bridge cannot connect, check that OpenTraffic is installed at the path in your configuration and opens normally. If `wait_for_feedback` times out in your client, lower `timeout_seconds` or increase the client’s tool timeout. See [MCP reference](/docs/mcp) for the complete tool list.

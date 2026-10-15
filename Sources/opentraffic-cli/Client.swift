@@ -1,4 +1,5 @@
 import Foundation
+import OpenTrafficSocket
 
 /// A failure the command-line tool reports, with its exit status.
 enum CLIError: Error {
@@ -70,10 +71,13 @@ struct AppLocation {
     }
 }
 
-/// Talks to OpenTraffic's local API, starting the app in the background when it isn't running.
+/// Talks to OpenTraffic, starting it in the background (no window) when it isn't running. It uses the
+/// app's private socket, where OpenTraffic checks that this is its own signed tool: no setup, token, or
+/// confirmations. An older OpenTraffic without the socket is reached through its HTTP API instead.
 final class Client: Sendable {
     let location: AppLocation
     private let session: URLSession
+    let socketPath = AppSocket.path()
 
     init(location: AppLocation) {
         self.location = location
@@ -120,8 +124,23 @@ final class Client: Sendable {
     }
 
     private func send(_ method: String, _ path: String, body: Data?) async throws -> Response {
+        let socket = socketPath
+        do {
+            let answer = try await Task.detached {
+                try AppSocket.send(method, path, body: body, client: "opentraffic command", socketPath: socket)
+            }.value
+            return Response(status: answer.status, body: answer.body)
+        } catch AppSocket.Failure.broken(let message) {
+            throw CLIError.unavailable(message)
+        } catch {
+            // No socket: an older OpenTraffic, reached through its HTTP API.
+            return try await sendOverHTTP(method, path, body: body)
+        }
+    }
+
+    private func sendOverHTTP(_ method: String, _ path: String, body: Data?) async throws -> Response {
         guard let token = location.token else {
-            throw CLIError.unavailable("OpenTraffic's API token wasn't found at \(location.tokenFile.path). Run `opentraffic setup`.")
+            throw CLIError.unavailable("OpenTraffic isn't answering. Open it (and update it, if it's older than 1.0.8), then try again.")
         }
         guard let url = URL(string: "http://127.0.0.1:\(location.port)\(path)") else { throw CLIError.usage("Invalid request path.") }
         var request = URLRequest(url: url)
@@ -157,20 +176,17 @@ final class Client: Sendable {
         }
     }
 
-    /// Makes sure the API answers: starts OpenTraffic in the background if it's set up but not running.
+    /// Makes sure OpenTraffic answers, starting it in the background (no window) if it isn't running.
     func ensureReachable() async throws {
         if await answers() { return }
-        guard location.apiEnabled else {
-            throw CLIError.unavailable("OpenTraffic's local API is off, and the opentraffic command needs it. Run `opentraffic setup` to turn it on.")
+        if !isAppRunning { try launchInBackground() }
+        for _ in 0..<80 {
+            if await answers() { return }
+            try await Task.sleep(for: .milliseconds(250))
         }
-        if !isAppRunning {
-            try launchInBackground()
-            for _ in 0..<80 {
-                if await answers() { return }
-                try await Task.sleep(for: .milliseconds(250))
-            }
-        }
-        throw CLIError.unavailable("OpenTraffic isn't answering on 127.0.0.1:\(location.port). Check Settings → Integrations in OpenTraffic.")
+        throw CLIError.unavailable(location.appURL == nil
+            ? "OpenTraffic isn't answering. Is it installed in Applications? Get it at https://opentraffic.dev"
+            : "OpenTraffic isn't answering. Quit it and run the command again, or update OpenTraffic.")
     }
 
     var isAppRunning: Bool {
@@ -212,20 +228,10 @@ final class Client: Sendable {
         }
     }
 
-    /// Turns on the local API: OpenTraffic asks the user first.
+    /// Nothing to turn on any more: just makes sure OpenTraffic is running and answers.
     func setUp() async throws -> Bool {
-        if await answers() { return true }
-        if !isAppRunning {
-            try launchInBackground()
-            for _ in 0..<40 where !isAppRunning { try await Task.sleep(for: .milliseconds(250)) }
-            try await Task.sleep(for: .seconds(1))
-        }
-        if !location.apiEnabled { try openLink("opentraffic://enable-api") }
-        for _ in 0..<480 {
-            if await answers() { return true }
-            try await Task.sleep(for: .milliseconds(250))
-        }
-        return false
+        try await ensureReachable()
+        return true
     }
 }
 

@@ -2,15 +2,9 @@
 
 The `opentraffic` command comes with the app. The [installer](/docs/installation) links it into your PATH, and OpenTraffic itself keeps it linked whenever it runs from Applications, whichever way you installed it, in the first of `/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin` that can take it. The link points into the app, so updates update the command too. An `opentraffic` that isn't OpenTraffic's is never replaced, and removing OpenTraffic with Homebrew removes the link. **Settings → General → Install the opentraffic command** turns it off (and removes the link).
 
-Then run, once:
+There's nothing to set up: the command is part of OpenTraffic. It talks to the app over a private connection that only OpenTraffic's own signed tools can use, so it needs no token, doesn't depend on **Settings → Integrations**, and never asks you to confirm anything, including sharing. Check everything with `opentraffic doctor`.
 
-```sh
-opentraffic setup
-```
-
-This turns on OpenTraffic's local API, which the command uses; OpenTraffic asks you to confirm. Check everything with `opentraffic doctor`.
-
-The command talks to OpenTraffic over its local API. If OpenTraffic isn't running, the command starts it in the background: in the menu bar, without opening its window or taking focus. Shares still run in the app, so the menu bar and the app's windows always show what the command did, and the other way around.
+If OpenTraffic isn't running, the command starts it in the background: in the menu bar, without opening its window or taking focus. Shares still run in the app, so the menu bar and the app's windows always show what the command did, and the other way around.
 
 ## Everyday use
 
@@ -124,6 +118,6 @@ Shortcuts, Raycast, and other apps can also use links. They don't print anything
 | `opentraffic://copy?name=Orbit` | Copy the public URL |
 | `opentraffic://show` | Open the app window |
 | `opentraffic://project?name=Demo&action=start` | Start a project |
-| `opentraffic://enable-api` | Turn on the local API (always asks) |
+| `opentraffic://enable-api` | Turn on the local API for other apps (always asks) |
 
 Percent-encode values with spaces or special characters. Links that share or start something ask for confirmation unless **Allow automation without confirmation** is on in General settings; any app or web page can open a link, so turn that on only if it fits how you work.

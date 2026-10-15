@@ -23,6 +23,8 @@ private final class Bridge: @unchecked Sendable {
         process.executableURL = try bridgeBinary()
         process.environment = [
             "OPENTRAFFIC_API_PORT": String(port),
+            // Not the app's real private socket: this test talks to its own server over HTTP.
+            "OPENTRAFFIC_SOCKET": "/tmp/ot-test-no-such.sock",
             "OPENTRAFFIC_API_TOKEN_FILE": tokenFile.path,
             "OPENTRAFFIC_CLIENT": "Bridge Test",
         ]

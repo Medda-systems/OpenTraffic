@@ -56,7 +56,7 @@ export function Agents() {
               </div>
             ))}
             <p className="text-xs text-muted-foreground">
-              The skill teaches your agent the <span className="font-mono">opentraffic</span> command (<a className="underline underline-offset-4" href="/docs/agent-skill">more</a>); the MCP server adds tools like waiting for feedback. Run <span className="font-mono">opentraffic setup</span> once first.
+              The skill teaches your agent the <span className="font-mono">opentraffic</span> command (<a className="underline underline-offset-4" href="/docs/agent-skill">more</a>); the MCP server adds tools like waiting for feedback. Both work right away and never wait for you to click Allow.
             </p>
           </div>
         </Reveal>

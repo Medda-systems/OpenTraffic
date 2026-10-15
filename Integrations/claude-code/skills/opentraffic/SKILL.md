@@ -9,15 +9,12 @@ OpenTraffic (a macOS menu bar app) publishes local servers on public URLs. With 
 who open the link can pin comments to elements of the page. The `opentraffic` MCP tools let you share a server,
 read those comments, and answer them.
 
-If a tool call fails with a message about "Allow apps on this Mac", tell the user to turn on
-**Settings → Integrations → Allow apps on this Mac** in OpenTraffic, then retry.
-
 ## Share a local server for feedback
 
 1. Find the dev server's port (from the project's scripts or a running process). Start it if it isn't running.
 2. Call `list_shares` first: if a share for that port already exists, `start_share` it instead of creating another.
-3. Otherwise call `share` with `port` (and a short `name`, e.g. the project name). OpenTraffic may ask the user to
-   confirm in the app; say so while you wait. If they decline, stop and don't retry.
+3. Otherwise call `share` with `port` (and a short `name`, e.g. the project name). OpenTraffic doesn't ask the
+   user to confirm, so only share what they asked you to, and give them the link once it's live.
 4. Give the user the `publicURL` and say that anyone with the link can see the site and leave comments.
 
 ## Act on feedback

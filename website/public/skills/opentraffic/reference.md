@@ -63,7 +63,7 @@ Every command takes `--json`. Exit status: `0` worked, `1` failed or refused, `2
 | `opentraffic projects` / `project start\|stop <name>` | Shares grouped to start and stop together. |
 | `opentraffic domains` | Domains in the connected Cloudflare account. |
 | `opentraffic doctor` | Whether OpenTraffic, its API, and each way of sharing are ready. |
-| `opentraffic setup` | Turn on the local API (the user confirms in OpenTraffic). |
+| `opentraffic setup` | Start OpenTraffic if it isn't running and check it answers. Nothing else to set up. |
 | `opentraffic install <cloudflared\|opentunnel\|ngrok\|tailscale>` | Install a tool to share with, from its maker's official release (Tailscale asks the user for their Mac's password). |
 | `opentraffic show [share]` | Open OpenTraffic's window. |
 | `opentraffic help [command]` | Help. |

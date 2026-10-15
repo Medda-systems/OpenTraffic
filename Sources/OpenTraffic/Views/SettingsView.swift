@@ -216,7 +216,7 @@ private struct CommandLineToolRow: View {
             if let problem {
                 InlineMessage(severity: .warning, message: problem)
             } else if let installedPath {
-                Text("Linked at \(installedPath). Run `opentraffic setup` once, then `opentraffic help`.")
+                Text("Linked at \(installedPath). Run `opentraffic help` to see what it does.")
             } else if !OpenTrafficCommandLink.isInstalledCopy {
                 Text("Available once OpenTraffic is in the Applications folder.")
             } else {

@@ -1,5 +1,7 @@
 ## Authentication
 
+This API is for your own apps and scripts. The `opentraffic` [command](/docs/cli) and the [MCP bridge](/docs/mcp) don't use it: they're part of OpenTraffic and need no token.
+
 Enable the local API in Settings → Integrations. The default base URL is `http://127.0.0.1:47777`. Every request requires `Authorization: Bearer <token>`. Read the token from `~/Library/Application Support/OpenTraffic/api-token`, a file readable only by your user.
 
 Send `X-OpenTraffic-Client` to identify your integration. Requests containing an `Origin` header are rejected: this API is for local applications and scripts, not browser JavaScript. Do not expose or tunnel the API port.

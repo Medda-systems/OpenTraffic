@@ -13,6 +13,31 @@ struct IntegrationsSettingsView: View {
     var body: some View {
         Form {
             Section {
+                Picker("App", selection: $setup) {
+                    ForEach(AppStore.MCPSetup.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Text(store.mcpSetupText(setup))
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .padding(Spacing.s)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.small))
+                HStack {
+                    Text(setupHint).font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    CopyButton(text: store.mcpSetupText(setup), label: "Copy", iconOnly: false)
+                }
+            } header: {
+                Text("Coding agents (MCP)")
+            } footer: {
+                Text("The bridge is part of OpenTraffic, like the opentraffic command: it needs no token or local API, and doesn't ask before sharing. Any other MCP client can run the same command"
+                    + (store.apiEnabled ? ", or connect to http://127.0.0.1:\(String(store.apiPort))/mcp with the token as a Bearer header." : "."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Allow apps on this Mac to use OpenTraffic", isOn: $store.apiEnabled)
                 if store.apiEnabled {
                     LabeledContent("Status") { statusText }
@@ -38,38 +63,14 @@ struct IntegrationsSettingsView: View {
                     Toggle("Apps can share without asking", isOn: $store.apiAllowsPublishingWithoutAsking)
                 }
             } header: {
-                Text("Local API")
+                Text("Local API for other apps")
             } footer: {
-                Text("Coding agents and your own apps can start and stop shares, read live-collaboration feedback, reply, and resolve comments. Only apps running on this Mac as you can connect, using the token; web pages can't. Unless allowed above, OpenTraffic asks before an app makes anything public.")
+                Text("Your own apps and scripts can start and stop shares, read live-collaboration feedback, reply, and resolve comments. Only apps running on this Mac as you can connect, using the token; web pages can't. Unless allowed above, OpenTraffic asks before an app makes anything public. The opentraffic command and the MCP bridge don't need this.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             if store.apiEnabled {
-                Section {
-                    Picker("App", selection: $setup) {
-                        ForEach(AppStore.MCPSetup.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    Text(store.mcpSetupText(setup))
-                        .font(.caption.monospaced())
-                        .textSelection(.enabled)
-                        .padding(Spacing.s)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.small))
-                    HStack {
-                        Text(setupHint).font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        CopyButton(text: store.mcpSetupText(setup), label: "Copy", iconOnly: false)
-                    }
-                } header: {
-                    Text("Coding agents (MCP)")
-                } footer: {
-                    Text("Any other MCP client can run the same command, or connect to http://127.0.0.1:\(String(store.apiPort))/mcp with the token as a Bearer header.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
                 Section {
                     if store.webhookEndpoints.isEmpty {
                         Text("No webhooks yet.").foregroundStyle(.secondary)

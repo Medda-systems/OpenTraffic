@@ -15,6 +15,7 @@ final class FakeAPIBackend: OpenTrafficAPIBackend, @unchecked Sendable {
     private var shares: [APIShare]
     private var comments: [CollabComment]
     private var recordedClients: [String] = []
+    private var recordedTrust: [Bool] = []
     private var declineShares = false
 
     init() {
@@ -47,12 +48,19 @@ final class FakeAPIBackend: OpenTrafficAPIBackend, @unchecked Sendable {
     /// Client names passed to calls that take one, in order.
     var clients: [String] { lock.withLock { recordedClients } }
 
+    /// Whether each of those calls ran as trusted (OpenTraffic's own tools, over the private socket).
+    var trust: [Bool] { lock.withLock { recordedTrust } }
+
     func declineNewShares() {
         lock.withLock { declineShares = true }
     }
 
     private func record(_ client: String) {
-        lock.withLock { recordedClients.append(client) }
+        let trusted = APITrust.isTrusted
+        lock.withLock {
+            recordedClients.append(client)
+            recordedTrust.append(trusted)
+        }
     }
 
     func listShares() async -> [APIShare] { lock.withLock { shares } }

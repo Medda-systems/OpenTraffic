@@ -88,7 +88,7 @@ enum Commands {
         // OpenTraffic
         CommandSpec(name: "doctor", group: "OpenTraffic", usage: "doctor", summary: "Check OpenTraffic, its API, and each way of sharing"),
         CommandSpec(name: "install", group: "OpenTraffic", usage: "install <cloudflared|opentunnel|ngrok|tailscale>", summary: "Install a tool to share with, from its maker's official release (Tailscale asks for your Mac's password)", arguments: 1...1),
-        CommandSpec(name: "setup", group: "OpenTraffic", usage: "setup", summary: "Turn on OpenTraffic's local API for this command (asks in OpenTraffic once)"),
+        CommandSpec(name: "setup", group: "OpenTraffic", usage: "setup", summary: "Start OpenTraffic if needed and check it answers (there's nothing to set up)"),
         CommandSpec(name: "show", group: "OpenTraffic", usage: "show [share]", summary: "Open OpenTraffic's window", arguments: 0...1),
         CommandSpec(name: "help", group: "OpenTraffic", usage: "help [command]", summary: "Help for every command, or one", arguments: 0...1),
         CommandSpec(name: "version", group: "OpenTraffic", usage: "version", summary: "This command's version"),
@@ -656,10 +656,7 @@ struct Context {
             return
         }
         if json { return say(JSON.pretty(response.body)) }
-        line(true, "OpenTraffic \(status.version) is running · API on 127.0.0.1:\(location.port) · \(Format.plural(status.shares, "share")), \(status.running) running")
-        line(status.publishesWithoutAsking ? true : nil, status.publishesWithoutAsking
-            ? "Apps may share without asking"
-            : "OpenTraffic asks before anything goes public. For unattended use, allow it in Settings → Integrations.")
+        line(true, "OpenTraffic \(status.version) is running · \(Format.plural(status.shares, "share")), \(status.running) running")
         let titles = ["quick": "Temporary URL (Cloudflare)", "opentunnel": "OpenTunnel", "tailscale": "Tailscale", "ngrok": "ngrok", "domain": "Your domain (Cloudflare)"]
         for provider in status.providers {
             let title = titles[provider.name] ?? provider.name
@@ -671,13 +668,11 @@ struct Context {
         }
     }
 
+    /// Kept for scripts written for earlier versions: the command needs no setup any more.
     func setup() async throws {
-        if !json, !(await client.answers()) { say("Turning on OpenTraffic's local API… confirm in OpenTraffic if it asks.") }
-        guard try await client.setUp() else {
-            throw CLIError.unavailable("OpenTraffic's local API didn't come on. Turn on Settings → Integrations → “Allow apps on this Mac to use OpenTraffic”, then run `opentraffic doctor`.")
-        }
+        _ = try await client.setUp()
         if json { return say(JSON.pretty(JSON.encode(["ready": true]))) }
-        say("\(style.green("✓")) Ready. Try `opentraffic services` or `opentraffic share 3000`.")
+        say("\(style.green("✓")) Ready, nothing to set up. Try `opentraffic services` or `opentraffic share 3000`.")
     }
 
     func show() throws {
@@ -716,7 +711,7 @@ struct Context {
           opentraffic share 8080 --via ngrok --password        Password protected
           opentraffic comments Orbit && opentraffic reply Orbit 015ec043 "Fixed"
 
-        `opentraffic help <command>` for its options; --json for scripts. First time: `opentraffic setup`.
+        `opentraffic help <command>` for its options; --json for scripts.
         """)
     }
 }

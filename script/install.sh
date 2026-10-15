@@ -106,7 +106,7 @@ link_command() {
   ln -sfn "${target}" "${link}" || return 0
   dir="$(dirname "${link}")"
   case ":${PATH}:" in
-    *":${dir}:"*) say "Linked the opentraffic command. Run \`opentraffic setup\` once, then \`opentraffic help\`." ;;
+    *":${dir}:"*) say "Linked the opentraffic command. Run \`opentraffic help\` to see what it does." ;;
     *) say "Linked the opentraffic command at ${link}. Add ${dir} to your PATH to use it." ;;
   esac
 }

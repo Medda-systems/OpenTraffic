@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import OpenTrafficCore
+import OpenTrafficSocket
 
 /// Answers OpenTraffic's local API (REST, MCP) from the app's state. Calls hop to the main actor.
 final class AppAPIBackend: OpenTrafficAPIBackend {
@@ -123,6 +124,23 @@ enum APIStatus: Equatable {
 
 extension AppStore {
     // MARK: Server
+
+    /// Opens the private socket the `opentraffic` command and the MCP bridge talk to OpenTraffic over.
+    /// It's always on (unlike the HTTP API for other apps): they're part of OpenTraffic, so they need no
+    /// setup, token, or confirmations.
+    func startTrustedChannel() {
+        guard trustedChannel == nil else { return }
+        let channel = LocalAPIServer(trustedSocketPath: AppSocket.path(), backend: AppAPIBackend(store: self), events: apiEvents)
+        trustedChannel = channel
+        Task {
+            do {
+                _ = try await channel.start()
+            } catch {
+                trustedChannel = nil
+                notice = AppNotice(.error, "The opentraffic command can't reach OpenTraffic: \(error.localizedDescription)")
+            }
+        }
+    }
 
     /// Starts, restarts, or stops the local API to match Settings.
     /// Applies API settings after any earlier apply has finished, so quick changes can't race.
@@ -329,6 +347,8 @@ extension AppStore {
     /// Publishing asks first, like opentraffic:// links, unless apps are allowed to publish without asking.
     /// `offMac`: the address is another device on the network, which always asks.
     func confirmAPIPublishing(_ description: String, client: String, offMac: Bool = false) throws {
+        // OpenTraffic's own command-line tool and MCP bridge are part of it: they don't ask.
+        guard !APITrust.isTrusted else { return }
         guard !apiAllowsPublishingWithoutAsking || offMac else { return }
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()

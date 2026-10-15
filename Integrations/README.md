@@ -1,14 +1,16 @@
 # OpenTraffic integrations
 
-OpenTraffic has a local API that coding agents and scripts can use to share local servers and work with the
-feedback people leave on them. It is off by default: turn on **Settings → Integrations → Allow apps on this Mac**.
+Coding agents and scripts can share local servers through OpenTraffic and work with the feedback people leave on
+them. The bundled `opentraffic` command and `opentraffic-mcp` bridge are part of the app and work with nothing to
+set up. Other apps use the local HTTP API, which is off by default: turn on **Settings → Integrations → Allow apps
+on this Mac**.
 
 - **MCP** for agents (Claude Code, Codex, opencode, Cursor, …), through the bundled `opentraffic-mcp` stdio
   bridge or directly over Streamable HTTP.
 - **REST** at `http://127.0.0.1:47777/v1/…` for scripts.
 - **Webhooks** that POST every event to a URL you choose.
 
-The API listens on 127.0.0.1 only. Every request needs the token in
+The HTTP API listens on 127.0.0.1 only. Every request needs the token in
 `~/Library/Application Support/OpenTraffic/api-token` (readable only by you; regenerate it in Settings), and
 requests from web pages (anything with an `Origin` header) are refused. Sharing a site (`share`, `start_share`)
 asks for confirmation in OpenTraffic unless you allowed that app in Settings; reading feedback, replying,
@@ -20,16 +22,14 @@ resolving and stopping don't ask.
 
 ## The bridge: `opentraffic-mcp`
 
-`opentraffic-mcp` speaks MCP over stdio and relays each message to OpenTraffic. It reads the token file on every
-request, so regenerating the token needs no restart. Environment:
+`opentraffic-mcp` speaks MCP over stdio and relays each message to OpenTraffic over a private connection that only
+OpenTraffic's own signed tools can use. Like the `opentraffic` command, it's part of the app: it needs no token,
+works with the local API off, and doesn't ask before sharing. If OpenTraffic isn't running, the bridge starts it in
+the background. Environment:
 
 | Variable | Default | |
 | --- | --- | --- |
-| `OPENTRAFFIC_CLIENT` | `MCP client` | The name OpenTraffic shows for the app (in confirmations and on replies). |
-| `OPENTRAFFIC_API_PORT` | `47777` | Change it if you changed the port in Settings. |
-| `OPENTRAFFIC_API_TOKEN_FILE` | `~/Library/Application Support/OpenTraffic/api-token` | |
-
-If OpenTraffic isn't running or the API is off, every call fails with a message saying how to turn it on.
+| `OPENTRAFFIC_CLIENT` | `MCP client` | The name OpenTraffic shows for the app (on replies and in the activity log). |
 
 ### Tools
 

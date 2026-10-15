@@ -89,6 +89,8 @@ final class AppStore {
     }
     var webhookStatuses: [UUID: WebhookDeliveryStatus] = [:]
     @ObservationIgnored var apiServer: LocalAPIServer?
+    /// The private channel for OpenTraffic's own command-line tool and MCP bridge (always on).
+    @ObservationIgnored var trustedChannel: LocalAPIServer?
     @ObservationIgnored lazy var webhookDispatcher = WebhookDispatcher(events: apiEvents)
     /// Apps may share and start tunnels through the API without OpenTraffic asking each time.
     var apiAllowsPublishingWithoutAsking: Bool {
@@ -409,6 +411,7 @@ final class AppStore {
             }
         }
         startWatchingLocalServices()
+        startTrustedChannel()
         webhookDispatcher.setEndpoints(webhookEndpoints)
         webhookDispatcher.setStatusHandler { [weak self] id, status in
             Task { @MainActor in self?.webhookStatuses[id] = status }
@@ -915,6 +918,10 @@ final class AppStore {
         if let server = apiServer {
             apiServer = nil
             Task { await server.stop() }
+        }
+        if let channel = trustedChannel {
+            trustedChannel = nil
+            Task { await channel.stop() }
         }
         for task in [statusPollingTask, discoveryPollingTask, healthPollingTask, localServicesTask] { task?.cancel() }
         for id in definitions.map(\.id) {

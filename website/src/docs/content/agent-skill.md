@@ -2,7 +2,7 @@
 
 The OpenTraffic skill teaches coding agents that support [Agent Skills](https://agentskills.io), such as Claude Code, Codex, and opencode, to use OpenTraffic. Ask your agent to share, preview, or demo what you're building, and it finds your dev server, shares it the way you asked, and gives you the link. Ask it to deal with feedback, and it reads the comments people pinned to the page, looks at the pictures of what they pointed at, fixes the code, replies, and resolves them. It also knows how to work out why a shared link isn't working.
 
-The skill uses the [`opentraffic` command](/docs/cli), which comes with OpenTraffic. Install [OpenTraffic](/docs/installation) and run `opentraffic setup` once before you use it.
+The skill uses the [`opentraffic` command](/docs/cli), which comes with OpenTraffic. Install [OpenTraffic](/docs/installation); there's nothing else to set up.
 
 ## Install
 

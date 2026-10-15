@@ -12,7 +12,7 @@ OpenTraffic is a macOS menu bar app that puts local web servers on public URLs (
 Run `opentraffic doctor`.
 
 - **`command not found`:** OpenTraffic isn't installed, or the command isn't on the PATH. Tell the user to install it from https://opentraffic.dev (one line: `curl -fsSL https://opentraffic.dev/install | sh`). Don't install it yourself without asking.
-- **Exit code 3** (OpenTraffic isn't reachable or set up): ask the user to run `opentraffic setup` and click **Allow** in OpenTraffic. You can run `opentraffic setup` yourself, but only the user can click Allow.
+- **Exit code 3** (OpenTraffic couldn't be started or isn't answering): the command starts OpenTraffic itself when it isn't running, so this is rare. Ask the user to open OpenTraffic, then retry.
 - Otherwise `doctor` lists which ways of sharing are ready, and why the others aren't. Use only ready ones.
 - **A tool is missing** (`doctor` says to run `opentraffic install cloudflared`, `opentunnel`, or `ngrok`): run it, and tell the user it downloads that tool from its maker. ngrok also needs the user's account: ask them to connect it in OpenTraffic → Settings → ngrok. `opentraffic install tailscale` makes macOS ask the user for their password, so only run it when they want Tailscale, and tell them to expect the dialog.
 
@@ -34,7 +34,7 @@ Every command takes `--json`. Prefer it, and read the exit status: `0` worked, `
    It prints the share once it's live (up to about 30 seconds); the URL is `.publicURL`. Sharing the same port the same way again starts the existing share instead of making a new one.
 4. **Give the user the link.** `opentraffic qr "<share>"` shows a QR code for phones. `opentraffic copy "<share>"` puts it on the clipboard.
 
-A share puts the user's local server on the internet. Only share what they asked you to. OpenTraffic asks the user to confirm before anything goes public unless they turned that off; if `share` seems to wait, tell them to answer OpenTraffic's prompt. If the user declines, the command fails with exit code 1: don't retry.
+A share puts the user's local server on the internet. The `opentraffic` command doesn't ask the user to confirm anything, so you are the check: only share what they asked you to, and tell them the link once it's live.
 
 ## Act on feedback
 

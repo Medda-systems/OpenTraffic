@@ -16,9 +16,12 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.0"),
     ],
     targets: [
+        // The private socket between the app and its own tools; Foundation only.
+        .target(name: "OpenTrafficSocket"),
         .target(
             name: "OpenTrafficCore",
             dependencies: [
+                "OpenTrafficSocket",
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
@@ -29,19 +32,21 @@ let package = Package(
             name: "OpenTraffic",
             dependencies: [
                 "OpenTrafficCore",
+                "OpenTrafficSocket",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             exclude: ["Resources"]
         ),
         // The stdio MCP bridge bundled in the app; Foundation only, so it stays small.
-        .executableTarget(name: "opentraffic-mcp"),
+        .executableTarget(name: "opentraffic-mcp", dependencies: ["OpenTrafficSocket"]),
         // The `opentraffic` command, a client of the local API bundled in the app; Foundation only too.
-        .executableTarget(name: "opentraffic-cli"),
+        .executableTarget(name: "opentraffic-cli", dependencies: ["OpenTrafficSocket"]),
         .testTarget(name: "OpenTrafficCLITests", dependencies: ["opentraffic-cli"]),
         .testTarget(
             name: "OpenTrafficCoreTests",
             dependencies: [
                 "OpenTrafficCore",
+                "OpenTrafficSocket",
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),

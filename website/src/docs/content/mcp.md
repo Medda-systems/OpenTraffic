@@ -1,15 +1,13 @@
 ## Stdio bridge
 
-`opentraffic-mcp` speaks MCP over stdio and relays each message to OpenTraffic. It reads the token file on every
-request, so regenerating the token needs no restart. Environment:
+`opentraffic-mcp` speaks MCP over stdio and relays each message to OpenTraffic over a private connection that only
+OpenTraffic's own signed tools can use. Like the `opentraffic` command, it's part of the app: it needs no token,
+works with the local API off, and doesn't ask before sharing. If OpenTraffic isn't running, the bridge starts it in
+the background. Environment:
 
 | Variable | Default | |
 | --- | --- | --- |
-| `OPENTRAFFIC_CLIENT` | `MCP client` | The name OpenTraffic shows for the app (in confirmations and on replies). |
-| `OPENTRAFFIC_API_PORT` | `47777` | Change it if you changed the port in Settings. |
-| `OPENTRAFFIC_API_TOKEN_FILE` | `~/Library/Application Support/OpenTraffic/api-token` | |
-
-If OpenTraffic isn't running or the API is off, every call fails with a message saying how to turn it on.
+| `OPENTRAFFIC_CLIENT` | `MCP client` | The name OpenTraffic shows for the app (on replies and in the activity log). |
 
 ### Tools
 

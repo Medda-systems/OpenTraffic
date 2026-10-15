@@ -49,7 +49,7 @@ Or download it:
 3. Open OpenTraffic from Applications. It's signed by Medda Systems and notarized by Apple, so it opens without any warning.
 4. The setup assistant offers the [tools for sharing](#tools-for-sharing): click **Install** next to Cloudflare (and OpenTunnel, if you like). Tailscale and ngrok are optional.
 
-Every way of installing also gives you the [`opentraffic` command](/docs/cli): the installer links it right away, and OpenTraffic links it whenever it runs from Applications (in `/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin`). Run `opentraffic setup` once to start using it. Settings → General → **Install the opentraffic command** turns this off.
+Every way of installing also gives you the [`opentraffic` command](/docs/cli): the installer links it right away, and OpenTraffic links it whenever it runs from Applications (in `/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin`). It works right away, with nothing to set up. Settings → General → **Install the opentraffic command** turns this off.
 
 OpenTraffic updates itself: it checks once a day, and **Check for Updates…** is in the app menu. Updates are signed with Medda Systems' key and verified before they're installed. Settings → General can turn the checks or background installs off.
 

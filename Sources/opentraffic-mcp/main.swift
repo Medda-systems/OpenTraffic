@@ -1,10 +1,13 @@
 import Foundation
+import OpenTrafficSocket
 
 // opentraffic-mcp — OpenTraffic's MCP server for clients that launch servers over stdio.
 //
-// Relays newline-delimited JSON-RPC from stdin to OpenTraffic's local API (POST /mcp) and writes each
-// reply to stdout as one line. Requests run concurrently, so a long wait_for_feedback doesn't hold up
-// anything else. Environment:
+// Relays newline-delimited JSON-RPC from stdin to OpenTraffic (POST /mcp) and writes each reply to stdout
+// as one line. Requests run concurrently, so a long wait_for_feedback doesn't hold up anything else.
+// It talks over OpenTraffic's private socket, where the app checks that this is its own signed bridge:
+// no setup, token, or confirmations, and it starts OpenTraffic in the background if it isn't running.
+// An older OpenTraffic without the socket is reached through its HTTP API. Environment:
 //   OPENTRAFFIC_API_PORT        the API's port (default 47777)
 //   OPENTRAFFIC_CLIENT          the name OpenTraffic shows for this app (default "MCP client")
 //   OPENTRAFFIC_API_TOKEN_FILE  the token file (default ~/Library/Application Support/OpenTraffic/api-token)
@@ -21,6 +24,33 @@ final class Output: @unchecked Sendable {
                 // The client went away.
                 exit(0)
             }
+        }
+    }
+}
+
+/// Starts this copy of OpenTraffic in the background (menu bar only, no window), once.
+enum AppLauncher {
+    nonisolated(unsafe) private static var launched = false
+    private static let lock = NSLock()
+
+    /// Whether it launched OpenTraffic now (so it's worth waiting for it to answer).
+    static func launchIfNeeded() -> Bool {
+        lock.withLock {
+            guard !launched else { return false }
+            launched = true
+            // …/OpenTraffic.app/Contents/MacOS/opentraffic-mcp
+            let app = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            // Only the bridge inside an app starts that app (not a development build, or a test).
+            guard app.pathExtension == "app" else { return false }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            process.arguments = ["-g", "-j", "-a", app.path, "--args", "--background"]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            guard (try? process.run()) != nil else { return false }
+            process.waitUntilExit()
+            return process.terminationStatus == 0
         }
     }
 }
@@ -61,6 +91,30 @@ struct Bridge: Sendable {
     /// Sends one message to OpenTraffic and writes its reply, if any.
     func relay(_ line: String) async {
         let message = Data(line.utf8)
+        let client = self.client
+        func overSocket() async throws -> AppSocket.Response {
+            try await Task.detached { try AppSocket.send("POST", "/mcp", body: message, client: client) }.value
+        }
+        var answer = try? await overSocket()
+        if answer == nil, AppLauncher.launchIfNeeded() {
+            for _ in 0..<80 where answer == nil {
+                try? await Task.sleep(for: .milliseconds(250))
+                answer = try? await overSocket()
+            }
+        }
+        if let answer {
+            if Self.isJSONRPC(answer.body) {
+                output.write(line: Self.singleLine(answer.body))
+            } else if !(200..<300).contains(answer.status) {
+                fail(message, "OpenTraffic answered HTTP \(answer.status): \(Self.errorMessage(in: answer.body) ?? "no details").")
+            }
+            return
+        }
+        await relayOverHTTP(message)
+    }
+
+    /// An older OpenTraffic, without the private socket: its HTTP API, with the token.
+    private func relayOverHTTP(_ message: Data) async {
         guard let token = readToken() else {
             fail(message, "OpenTraffic's API token wasn't found at \(tokenFile.path). \(Self.enableHint)")
             return
