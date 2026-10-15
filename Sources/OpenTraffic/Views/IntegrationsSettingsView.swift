@@ -46,7 +46,7 @@ struct IntegrationsSettingsView: View {
                 Picker("Agent", selection: $agentPreset) {
                     Text("None").tag(AgentPreset?.none)
                     ForEach(AgentPreset.allCases) { preset in
-                        Label { Text(preset.title) } icon: { AgentMark(name: preset.clientName) }
+                        Label { Text(preset.title) } icon: { AgentMenuIcon(name: preset.clientName) }
                             .tag(Optional(preset))
                     }
                 }

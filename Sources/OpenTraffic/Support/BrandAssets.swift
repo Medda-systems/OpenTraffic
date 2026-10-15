@@ -20,6 +20,21 @@ enum BrandAssets {
         return image
     }
 
+    /// A system symbol filling a `points` square like the agent marks do, as a template image (other
+    /// agents' mark in menus, beside the brands').
+    static func symbolMark(_ name: String, points: CGFloat) -> NSImage? {
+        guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: points, weight: .semibold)) else { return nil }
+        let image = NSImage(size: NSSize(width: points, height: points), flipped: false) { rect in
+            let scale = min(rect.width / symbol.size.width, rect.height / symbol.size.height)
+            let size = NSSize(width: symbol.size.width * scale, height: symbol.size.height * scale)
+            symbol.draw(in: NSRect(x: (rect.width - size.width) / 2, y: (rect.height - size.height) / 2, width: size.width, height: size.height))
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
     /// A coding agent's mark as a template image; nil outside the app bundle.
     static func agentMark(_ brand: AgentBrand) -> NSImage? {
         if let cached = agentMarks[brand] { return cached }

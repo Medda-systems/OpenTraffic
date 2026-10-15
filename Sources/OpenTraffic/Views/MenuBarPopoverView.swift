@@ -213,7 +213,7 @@ struct MenuBarPopoverView: View {
             Menu {
                 ForEach(NewTunnelKind.allCases) { kind in
                     Button { router.show(sheet: .newTunnel(kind)) } label: {
-                        Label { Text(kind.title) } icon: { Image(nsImage: BrandAssets.logo(kind.provider, style: .menu)) }
+                        Label { Text(kind.title) } icon: { Image(nsImage: BrandAssets.logo(kind.provider, style: .menu)).renderingMode(.template) }
                     }
                 }
             } label: {
@@ -328,7 +328,7 @@ private struct ShareableServiceRow: View {
 
     @ViewBuilder
     private func shareItem(_ title: String, provider: TunnelProvider, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Label { Text(title) } icon: { Image(nsImage: BrandAssets.logo(provider, style: .menu)) } }
+        Button(action: action) { Label { Text(title) } icon: { Image(nsImage: BrandAssets.logo(provider, style: .menu)).renderingMode(.template) } }
     }
 
     private var details: String {

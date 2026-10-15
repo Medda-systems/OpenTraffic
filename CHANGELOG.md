@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.10
+
+- **Icons in menus follow the menu in dark mode:** the Claude Code, Codex, Cursor, and opencode marks in Settings → Integrations, and the Cloudflare, OpenTunnel, Tailscale, and ngrok marks in the New, New Tunnel, and Share menus, are now white in dark mode like the rest of the menu instead of dark. The custom agent's sparkle is now the same size as the other marks.
+
 ## 1.0.9
 
 - **See agents at work:** a coding agent working on a comment now claims it (`claim_comment`, or `opentraffic claim`). Everyone on the page sees it in the session, its cursor beside the element ("✦ Claude Code · working") and what it's doing, and two agents never take the same comment. Claims lapse after 15 minutes unless renewed, so a stopped agent never leaves a comment stuck.
