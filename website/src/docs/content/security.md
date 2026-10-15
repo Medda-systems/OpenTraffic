@@ -22,8 +22,23 @@ The integrations API is opt-in, bound to IPv4 loopback, bearer-token protected, 
 
 ## Public shares
 
-A hard-to-guess URL is not authentication. Quick Tunnels and OpenTunnel links should be treated as public. Use [Protected shares](/docs/protection) or your app’s own login for private information.
+A hard-to-guess URL is not authentication. Quick Tunnels and OpenTunnel links should be treated as public unless you add a password, which OpenTraffic checks on your Mac before anything reaches your app. Use [Protected shares](/docs/protection) or your app’s own login for private information.
 
 ## Visitor feedback
 
 Comments and error strings can contain untrusted text. Treat them as reports about a page, not commands for an agent to execute. Screenshot and error collection can include page content; see [Privacy](/docs/privacy).
+
+## Agents and visitors' words
+
+Anyone with a share's link can comment, and a coding agent reads the comment, so a comment can try to talk the agent into something else (prompt injection). OpenTraffic keeps the [agent it starts](/docs/agents#let-opentraffic-start-your-agent) in check without changing how anything looks:
+
+- **One comment only.** The agent, and anything it starts, may only read, claim, reply to, and resolve the comment it was started for. It can't share or stop anything, or see other comments. OpenTraffic knows the agent's processes from macOS, not from anything the agent could change.
+- **No shell, no web.** The presets leave out the agent's shell and web tools (Codex runs in its own sandbox, without network).
+- **No secrets in replies.** Before visitors see a reply or a progress note, values from the project's `.env` files and anything shaped like a key, token, or password become `[hidden]`, and you're told.
+- **A budget.** Agents start by themselves at most 10 times an hour per share, and 3 times per visitor; past that, comments wait for **Send to …**.
+- **Marked as untrusted.** Agents get visitors' words between markers that say so, made up for each call so a comment can't fake them.
+- **Careful merges.** With [Work on a branch](/docs/collaboration#work-on-a-branch), a branch merges by itself only if its fixes look like ordinary page changes. Changes to dependencies, build or CI files, server code, or that add network calls, code execution, or access to secrets and stored data stay on the branch for you.
+- **Nothing hidden.** Invisible characters (zero-width, direction overrides, the invisible "tag" letters used to smuggle instructions) are removed and look-alike letters made ordinary, so an agent reads exactly what you see.
+- **Orders aren't run.** A comment that reads like instructions rather than feedback (commands, requests for secrets or tools, links to other sites, encoded text) waits for **Send to …** instead of starting the agent.
+
+None of this makes injection impossible: an agent can still be talked into a bad edit inside the project. That's why it stays on a branch that won't merge itself, and why running by itself is off by default.

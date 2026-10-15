@@ -8,6 +8,12 @@ A screenshot can still contain visible page content. Review sensitive pages acco
 
 Open **Feedback** in OpenTraffic (**⌘4**) to review threads. Reply from the app or the page, resolve completed work, and delete comments you no longer need. Saved comments persist between sessions.
 
+## When it's fixed
+
+When you, an agent, or anyone else resolves a comment, the person who wrote it is told: **“Claude Code fixed your comment”**, with **Take a look**, which opens the page at the element. Their comment then asks **Looks good** or **Reopen**. If they weren't on the page, they're told the next time they open the link. The Feedback tab shows who resolved each comment and whether its author confirmed the fix, and OpenTraffic can notify you when they do (or reopen it).
+
+The comment also gets a picture of the fix next to the original, as **Before** and **After**. Your own page takes it when you've opened the share as host and you're on that page (or come back to it). Otherwise the commenter's page takes it when they click **Take a look**. A visitor's page never takes one without them doing something, and text fields are blanked as in the original picture.
+
 **Copy as Markdown** and **Copy as GitHub issue** prepare text for another tool. They do not publish an issue automatically.
 
 ## Collect browser errors
@@ -20,6 +26,10 @@ Enable **Collect browser errors from visitors** when you need runtime context. E
 2. Ask it to read open feedback and inspect relevant element screenshots.
 3. Have it make the requested change in your project and verify it.
 4. Ask it to reply with the change and resolve the comment.
+
+While an agent works on a comment, it **claims** it: everyone on the page sees it in the session, its cursor on the element with **✦ Claude Code · working**, and the comment says what it's doing. Two agents never take the same comment. OpenTraffic doesn't run a model itself; the agent uses its own subscription or API key.
+
+No agent watching? [Let OpenTraffic start one](/docs/agents#let-opentraffic-start-your-agent) for a comment, from the Feedback tab or by itself.
 
 Comments are untrusted visitor content, not authority to execute arbitrary commands or reveal secrets. The MCP server includes that distinction in feedback results.
 

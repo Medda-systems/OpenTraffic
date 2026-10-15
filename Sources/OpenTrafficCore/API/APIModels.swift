@@ -7,11 +7,14 @@ public struct APIPerson: Codable, Equatable, Sendable {
     public let name: String
     public let path: String
     public let isHost: Bool
+    /// A coding agent working on a comment (absent for people).
+    public let isAgent: Bool?
 
-    public init(name: String, path: String, isHost: Bool) {
+    public init(name: String, path: String, isHost: Bool, isAgent: Bool? = nil) {
         self.name = name
         self.path = path
         self.isHost = isHost
+        self.isAgent = isAgent
     }
 }
 
@@ -50,13 +53,19 @@ public struct APIShare: Codable, Equatable, Sendable {
     public let stopsAt: Date?
     /// The connection path's latest checks, from the local service to the public URL.
     public let health: [APIHealthCheck]?
+    /// Collaboration: works on a branch of its own while running (see `TunnelDefinition.workOnBranch`).
+    public let branch: Bool?
+    /// The branch it's working on right now, and the one it merges back into when it stops.
+    public let branchName: String?
+    public let baseBranch: String?
 
     public init(
         id: UUID, name: String, provider: String, kind: String, state: String, localURL: String, publicURL: String?,
         collaboration: Bool, people: [APIPerson], openComments: Int, comments: Int,
         hostname: String? = nil, lastError: String? = nil, protection: String? = nil, project: String? = nil,
         autoStart: Bool? = nil, captureErrors: Bool? = nil, rewriteHostHeader: Bool? = nil, funnel: Bool? = nil,
-        stopsAt: Date? = nil, health: [APIHealthCheck]? = nil
+        stopsAt: Date? = nil, health: [APIHealthCheck]? = nil,
+        branch: Bool? = nil, branchName: String? = nil, baseBranch: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -79,6 +88,9 @@ public struct APIShare: Codable, Equatable, Sendable {
         self.funnel = funnel
         self.stopsAt = stopsAt
         self.health = health
+        self.branch = branch
+        self.branchName = branchName
+        self.baseBranch = baseBranch
     }
 }
 
@@ -214,8 +226,10 @@ public struct APIShareUpdate: Codable, Equatable, Sendable {
     public var rewriteHostHeader: Bool?
     /// "never", "15m", "1h", or "4h": stop by itself after that long.
     public var autoStop: String?
+    /// Work on a branch of its own while running (collaboration, in a git repository).
+    public var branch: Bool?
 
-    public init(name: String? = nil, url: String? = nil, collaboration: Bool? = nil, captureErrors: Bool? = nil, autoStart: Bool? = nil, project: String? = nil, rewriteHostHeader: Bool? = nil, autoStop: String? = nil) {
+    public init(name: String? = nil, url: String? = nil, collaboration: Bool? = nil, captureErrors: Bool? = nil, autoStart: Bool? = nil, project: String? = nil, rewriteHostHeader: Bool? = nil, autoStop: String? = nil, branch: Bool? = nil) {
         self.name = name
         self.url = url
         self.collaboration = collaboration
@@ -224,6 +238,7 @@ public struct APIShareUpdate: Codable, Equatable, Sendable {
         self.project = project
         self.rewriteHostHeader = rewriteHostHeader
         self.autoStop = autoStop
+        self.branch = branch
     }
 }
 
@@ -250,12 +265,16 @@ public struct APIProtection: Codable, Equatable, Sendable {
     /// The generated password, for "password".
     public let password: String?
     public let emails: [String]
+    /// The share's address with the password built in, for shares whose password OpenTraffic checks
+    /// (Quick Tunnels, OpenTunnel; any username works there, so `username` is nil). Nil until it has an address.
+    public let link: String?
 
-    public init(mode: String, username: String?, password: String?, emails: [String]) {
+    public init(mode: String, username: String?, password: String?, emails: [String], link: String? = nil) {
         self.mode = mode
         self.username = username
         self.password = password
         self.emails = emails
+        self.link = link
     }
 }
 
@@ -286,8 +305,10 @@ public struct APIShareRequest: Codable, Equatable, Sendable {
     public var funnel: Bool?
     /// False saves the share without starting it.
     public var start: Bool?
+    /// Work on a branch of its own while running (collaboration, in a git repository).
+    public var branch: Bool?
 
-    public init(port: Int? = nil, url: String? = nil, provider: String? = nil, name: String? = nil, collaboration: Bool? = nil, hostname: String? = nil, replaceDNS: Bool? = nil, funnel: Bool? = nil, start: Bool? = nil) {
+    public init(port: Int? = nil, url: String? = nil, provider: String? = nil, name: String? = nil, collaboration: Bool? = nil, hostname: String? = nil, replaceDNS: Bool? = nil, funnel: Bool? = nil, start: Bool? = nil, branch: Bool? = nil) {
         self.port = port
         self.url = url
         self.provider = provider
@@ -297,6 +318,7 @@ public struct APIShareRequest: Codable, Equatable, Sendable {
         self.replaceDNS = replaceDNS
         self.funnel = funnel
         self.start = start
+        self.branch = branch
     }
 }
 
@@ -320,8 +342,19 @@ public struct APIComment: Codable, Equatable, Sendable {
     public let hasScreenshot: Bool
     public let environment: CollabEnvironment?
     public let errors: [CollabErrorItem]
+    // Optional, so older clients and servers still decode.
+    /// "open", "working" (an app claimed it), "resolved", or "confirmed" (the commenter agreed with the fix).
+    public let status: String?
+    /// The app working on it, while `status` is "working".
+    public let claimedBy: String?
+    /// What that app last said it's doing.
+    public let progress: String?
+    public let resolvedBy: String?
+    public let resolvedAt: Date?
+    /// A picture of the element after it was resolved (get it with `which: after`).
+    public let hasAfterScreenshot: Bool?
 
-    public init(_ comment: CollabComment, shareID: UUID) {
+    public init(_ comment: CollabComment, shareID: UUID, claim: AgentClaim? = nil) {
         shareId = shareID
         id = comment.id
         author = comment.author
@@ -336,6 +369,25 @@ public struct APIComment: Codable, Equatable, Sendable {
         hasScreenshot = comment.screenshot != nil
         environment = comment.environment
         errors = comment.errors
+        let claim = comment.resolved ? nil : claim
+        status = comment.resolved ? (comment.confirmed ? "confirmed" : "resolved") : (claim == nil ? "open" : "working")
+        claimedBy = claim?.agent
+        progress = claim?.progress
+        resolvedBy = comment.resolved ? comment.resolvedBy : nil
+        resolvedAt = comment.resolved ? comment.resolvedAt : nil
+        hasAfterScreenshot = comment.afterScreenshot != nil
+    }
+}
+
+/// The process on the other end of an API connection, as far as it can be told: the private socket
+/// knows it from macOS; a TCP connection only by its port.
+public struct APICaller: Sendable {
+    public let pid: pid_t?
+    public let tcpPort: Int?
+
+    public init(pid: pid_t? = nil, tcpPort: Int? = nil) {
+        self.pid = pid
+        self.tcpPort = tcpPort
     }
 }
 
@@ -367,7 +419,19 @@ public protocol OpenTrafficAPIBackend: Sendable {
     func stopShare(_ share: String) async throws -> APIShare
     func comments(_ share: String, status: APICommentStatus) async throws -> [APIComment]
     func screenshot(_ share: String, commentID: String) async throws -> (data: Data, contentType: String)
+    /// The picture of the element after the comment was resolved.
+    func afterScreenshot(_ share: String, commentID: String) async throws -> (data: Data, contentType: String)
+    /// Claims a comment for `client` (or renews its claim), so others leave it alone and the session sees
+    /// it being worked on. Throws `.conflict` when another app holds it or it's resolved.
+    func claimComment(_ share: String, commentID: String, progress: String?, client: String) async throws -> APIComment
+    /// Gives up `client`'s claim without resolving the comment.
+    func releaseComment(_ share: String, commentID: String, client: String) async throws -> APIComment
+    /// The comment a caller is limited to, when it belongs to a run of the agent command OpenTraffic
+    /// started (see `AgentRunScope`); nil for anyone else.
+    func agentRunScope(for caller: APICaller) async -> AgentRunScope?
     func resolveComment(_ share: String, commentID: String, resolved: Bool) async throws -> APIComment
+    /// Like `resolveComment(_:commentID:resolved:)`, naming the app that resolved it (shown to the commenter).
+    func resolveComment(_ share: String, commentID: String, resolved: Bool, client: String) async throws -> APIComment
     func reply(_ share: String, commentID: String, text: String, client: String) async throws -> APIComment
     func errors(_ share: String) async throws -> [CollabErrorGroup]
     func logs(_ share: String, lines: Int) async throws -> [String]
@@ -395,6 +459,13 @@ public protocol OpenTrafficAPIBackend: Sendable {
 extension OpenTrafficAPIBackend {
     private var unsupported: OpenTrafficAPIError { OpenTrafficAPIError(status: 501, code: "not_supported", message: "This version of OpenTraffic doesn't support that.") }
     public func status() async -> APIAppStatus? { nil }
+    public func resolveComment(_ share: String, commentID: String, resolved: Bool, client: String) async throws -> APIComment {
+        try await resolveComment(share, commentID: commentID, resolved: resolved)
+    }
+    public func afterScreenshot(_ share: String, commentID: String) async throws -> (data: Data, contentType: String) { throw unsupported }
+    public func claimComment(_ share: String, commentID: String, progress: String?, client: String) async throws -> APIComment { throw unsupported }
+    public func releaseComment(_ share: String, commentID: String, client: String) async throws -> APIComment { throw unsupported }
+    public func agentRunScope(for caller: APICaller) async -> AgentRunScope? { nil }
     public func share(_ share: String) async throws -> APIShare {
         guard let found = await listShares().first(where: { $0.id.uuidString.caseInsensitiveCompare(share) == .orderedSame || $0.name.caseInsensitiveCompare(share) == .orderedSame }) else {
             throw OpenTrafficAPIError.notFound("No share named “\(share)”.")
@@ -426,6 +497,10 @@ public struct APIEvent: Codable, Equatable, Sendable {
         case commentCreated = "comment.created"
         case commentUpdated = "comment.updated"
         case commentDeleted = "comment.deleted"
+        /// An app started working on a comment (`comment.claimedBy`).
+        case commentClaimed = "comment.claimed"
+        /// An app stopped working on a comment without resolving it, or its claim ran out.
+        case commentReleased = "comment.released"
         case errorReported = "error.reported"
     }
 
@@ -451,8 +526,44 @@ public final class APIEventLog: @unchecked Sendable {
     private var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var released: Set<UUID> = []
     private var subscribers: [UUID: @Sendable (APIEvent) -> Void] = [:]
+    /// Apps waiting for feedback right now (MCP's `wait_for_feedback`), and when each share was last waited on.
+    private var watchers: [UUID: (share: UUID?, client: String)] = [:]
+    private var lastWatched: [UUID?: Date] = [:]
 
     public init() {}
+
+    // MARK: Watchers
+
+    /// How long after a wait ends its app still counts as watching: it's handling what it got and will wait again.
+    public static let watchGrace: TimeInterval = 90
+
+    /// Records that `client` is waiting for feedback on `share` (nil: every share) until `endWatching`.
+    public func beginWatching(share: UUID?, client: String) -> UUID {
+        let token = UUID()
+        lock.withLock { watchers[token] = (share, client) }
+        return token
+    }
+
+    public func endWatching(_ token: UUID, at date: Date = Date()) {
+        lock.withLock {
+            guard let watcher = watchers.removeValue(forKey: token) else { return }
+            lastWatched[watcher.share] = date
+        }
+    }
+
+    /// Whether an app is waiting for feedback on `share`, or was within `watchGrace`.
+    public func isWatched(_ share: UUID, now: Date = Date()) -> Bool {
+        lock.withLock {
+            if watchers.values.contains(where: { $0.share == nil || $0.share == share }) { return true }
+            let last = max(lastWatched[share] ?? .distantPast, lastWatched[nil] ?? .distantPast)
+            return now.timeIntervalSince(last) < Self.watchGrace
+        }
+    }
+
+    /// The apps waiting for feedback on `share` right now.
+    public func watchingClients(_ share: UUID) -> [String] {
+        lock.withLock { Array(Set(watchers.values.filter { $0.share == nil || $0.share == share }.map(\.client))).sorted() }
+    }
 
     /// The sequence number the next event will get; pass it as `since` to wait for anything new.
     public var cursor: Int { lock.withLock { nextSeq } }

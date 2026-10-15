@@ -78,6 +78,12 @@ final class Client: Sendable {
     let location: AppLocation
     private let session: URLSession
     let socketPath = AppSocket.path()
+    /// The name OpenTraffic shows for this command's replies and fixes: `OPENTRAFFIC_CLIENT` when an
+    /// agent runs it (OpenTraffic's agent command sets it), else "opentraffic command".
+    static let clientName: String = {
+        let name = ProcessInfo.processInfo.environment["OPENTRAFFIC_CLIENT"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? "opentraffic command" : name
+    }()
 
     init(location: AppLocation) {
         self.location = location
@@ -127,7 +133,7 @@ final class Client: Sendable {
         let socket = socketPath
         do {
             let answer = try await Task.detached {
-                try AppSocket.send(method, path, body: body, client: "opentraffic command", socketPath: socket)
+                try AppSocket.send(method, path, body: body, client: Self.clientName, socketPath: socket)
             }.value
             return Response(status: answer.status, body: answer.body)
         } catch AppSocket.Failure.broken(let message) {
@@ -148,7 +154,7 @@ final class Client: Sendable {
         request.httpBody = body
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("opentraffic command", forHTTPHeaderField: "X-OpenTraffic-Client")
+        request.setValue(Self.clientName, forHTTPHeaderField: "X-OpenTraffic-Client")
         do {
             let (data, response) = try await session.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0

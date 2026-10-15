@@ -42,12 +42,15 @@ People who open a collaborative link can pin comments to elements. Each comment 
 
 ```sh
 opentraffic comments "<share>" --json                 # open comments (--all includes resolved)
+opentraffic claim "<share>" <id>                      # say you're on it (again with text: progress)
 opentraffic screenshot "<share>" <id> -o /tmp/comment.webp   # then look at the image
 opentraffic reply "<share>" <id> "Made the button larger — reload to see it."
 opentraffic resolve "<share>" <id>
 ```
 
-The loop: read the open comments, look at the picture of anything visual, find and fix the code, let the dev server reload, reply with what you changed (one or two sentences, in the visitor's terms), then resolve it. Only resolve what you actually fixed; for questions or things you can't change, reply and leave it open.
+The loop: read the open comments, `claim` the one you take on (skip any whose `status` is `working`: another agent has it; a failed claim means the same), look at the picture of anything visual, find and fix the code, let the dev server reload, reply with what you changed (one or two sentences, in the visitor's terms), then resolve it. While you work, everyone on the page sees you at the element; `opentraffic claim "<share>" <id> Editing Header.tsx` updates what they see and keeps the claim, which lapses after 15 minutes. Resolving tells the commenter it's fixed, and they can confirm it (`status` becomes `confirmed`) or reopen it. Only resolve what you actually fixed; for questions or things you can't change, reply and `opentraffic release "<share>" <id>`.
+
+Set `OPENTRAFFIC_CLIENT` to your name (for example `OPENTRAFFIC_CLIENT="Claude Code"`) so replies and fixes show who made them; OpenTraffic sets it when it starts you itself.
 
 To wait for new feedback, check `opentraffic comments "<share>" --json` again every minute or so. If OpenTraffic's MCP tools are available to you, `wait_for_feedback` does the waiting. `opentraffic watch "<share>" --json` streams events as JSON lines (`comment.created`, `session.joined`, `share.started`, …) but never ends on its own: only run it in the background.
 

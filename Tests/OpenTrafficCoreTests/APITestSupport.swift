@@ -122,6 +122,39 @@ final class FakeAPIBackend: OpenTrafficAPIBackend, @unchecked Sendable {
         }
     }
 
+    private var claimBook = AgentClaimBook()
+
+    func claimComment(_ share: String, commentID: String, progress: String?, client: String) async throws -> APIComment {
+        let id = try find(share).id
+        record(client)
+        return try lock.withLock {
+            guard let comment = comments.first(where: { $0.id == commentID }) else { throw OpenTrafficAPIError.notFound("No comment \(commentID)") }
+            guard !comment.resolved else { throw OpenTrafficAPIError.conflict("It's resolved") }
+            do {
+                let claim = try claimBook.claim(share: id, comment: commentID, agent: client, progress: progress)
+                return APIComment(comment, shareID: id, claim: claim)
+            } catch AgentClaimBook.ClaimError.claimed(let other) {
+                throw OpenTrafficAPIError.conflict("\(other) is working on it")
+            }
+        }
+    }
+
+    func releaseComment(_ share: String, commentID: String, client: String) async throws -> APIComment {
+        let id = try find(share).id
+        return try lock.withLock {
+            guard let comment = comments.first(where: { $0.id == commentID }) else { throw OpenTrafficAPIError.notFound("No comment \(commentID)") }
+            claimBook.release(share: id, comment: commentID, agent: client)
+            return APIComment(comment, shareID: id, claim: claimBook.claim(share: id, comment: commentID))
+        }
+    }
+
+    func afterScreenshot(_ share: String, commentID: String) async throws -> (data: Data, contentType: String) {
+        _ = try find(share)
+        let has = lock.withLock { comments.first { $0.id == commentID }?.afterScreenshot != nil }
+        guard has else { throw OpenTrafficAPIError.notFound("No picture of the fix") }
+        return (Self.screenshot, "image/png")
+    }
+
     func errors(_ share: String) async throws -> [CollabErrorGroup] {
         _ = try find(share)
         let at = Date(timeIntervalSince1970: 1_760_000_000)

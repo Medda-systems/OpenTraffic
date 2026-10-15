@@ -114,7 +114,7 @@ extension AppStore {
 
     /// Stops a running tunnel and starts it again once it has fully stopped.
     func restart(_ id: UUID) async {
-        stop(id)
+        stop(id, endingSession: false)
         for _ in 0..<50 where runtime(for: id).state == .stopping {
             try? await Task.sleep(for: .milliseconds(200))
         }

@@ -14,7 +14,10 @@ import Testing
 }
 
 @Test func protectionOptionsFollowProvider() {
-    #expect(TunnelKind.quick.protectionOptions.isEmpty)
+    // OpenTraffic's proxy checks the password for shares that can't be configured.
+    #expect(TunnelKind.quick.protectionOptions == [.none, .password])
+    #expect(TunnelKind.opentunnel.protectionOptions == [.none, .password])
+    #expect(TunnelKind.quick.passwordInProxy && TunnelKind.opentunnel.passwordInProxy && !TunnelKind.ngrok.passwordInProxy)
     #expect(TunnelKind.tailscale.protectionOptions.isEmpty)
     #expect(TunnelKind.ngrok.protectionOptions == [.none, .password, .google, .github])
     #expect(TunnelKind.remote.protectionOptions == [.none, .cloudflareEmail])

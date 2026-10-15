@@ -22,6 +22,8 @@ enum Commands {
             Options:
               --name NAME      What to call it (default: the page title or localhost:PORT)
               --collab         Live collaboration: cursors, comments, follow mode (quick, opentunnel)
+              --branch         With --collab: work on a branch of its own while it runs (a commit per
+                               fixed comment), merged back when it stops if that's clean
               --hostname HOST  domain: the hostname to serve. ngrok: a domain reserved in your account
               --replace-dns    domain: take over a hostname that already has a DNS record
               --funnel         tailscale: public on the internet through Funnel
@@ -32,7 +34,7 @@ enum Commands {
             Sharing an existing share's address starts that share. OpenTraffic asks before anything goes
             public, unless you allow apps to share without asking in Settings → Integrations.
             """,
-            flags: ["collab", "replace-dns", "funnel", "password", "save", "copy"], options: ["via", "name", "hostname", "user"], arguments: 1...1
+            flags: ["collab", "branch", "replace-dns", "funnel", "password", "save", "copy"], options: ["via", "name", "hostname", "user"], arguments: 1...1
         ),
         CommandSpec(name: "start", group: "Shares", usage: "start <share>", summary: "Start a saved share; prints its public URL", flags: ["copy"], arguments: 1...1),
         CommandSpec(name: "stop", group: "Shares", usage: "stop <share> | stop --all", summary: "Stop a share, or every running one", flags: ["all"], arguments: 0...1),
@@ -46,18 +48,21 @@ enum Commands {
               --url PORT|URL         The local server (stop the share first)
               --collab on|off        Live collaboration
               --errors on|off        Collect visitors' browser errors (collaboration)
+              --branch on|off        Work on a branch while it runs, merged back when it stops (collaboration)
               --autostart on|off     Start whenever its local server is running
               --project NAME         Put it in a project (--no-project to take it out)
               --host-header on|off   Send the local server's own host in the Host header (Vite, Next.js)
               --stop-after DURATION  Stop by itself: never, 15m, 1h, or 4h
             """,
-            flags: ["no-project"], options: ["url", "collab", "errors", "autostart", "project", "host-header", "stop-after"], arguments: 1...1
+            flags: ["no-project"], options: ["url", "collab", "errors", "branch", "autostart", "project", "host-header", "stop-after"], arguments: 1...1
         ),
         CommandSpec(
             name: "protect", group: "Shares", usage: "protect <share> password|google|github|email|off [email ...] [--user NAME]",
             summary: "Choose who can open a share",
             details: """
-              password [--user NAME]   A generated password (ngrok); prints it
+              password [--user NAME]   A generated password; prints it. Temporary and OpenTunnel
+                                       shares get OpenTraffic's sign-in page and a link with the
+                                       password built in (any username works there)
               google [email ...]       Sign in with Google (ngrok); only these emails, if given
               github [email ...]       Sign in with GitHub (ngrok); only these emails, if given
               email email ...          One-time codes by email (custom domains, Cloudflare Access)
@@ -65,7 +70,7 @@ enum Commands {
             """,
             options: ["user"], arguments: 2...50
         ),
-        CommandSpec(name: "password", group: "Shares", usage: "password <share> [--new]", summary: "Show a protected share's username and password, or make a new one", flags: ["new"], arguments: 1...1),
+        CommandSpec(name: "password", group: "Shares", usage: "password <share> [--new]", summary: "Show a protected share's password (and link with it built in), or make a new one", flags: ["new"], arguments: 1...1),
         // Links
         CommandSpec(name: "url", group: "Links", usage: "url <share> [path]", summary: "Print the public URL", arguments: 1...2),
         CommandSpec(name: "copy", group: "Links", usage: "copy <share> [path]", summary: "Copy the public URL to the clipboard", arguments: 1...2),
@@ -76,7 +81,9 @@ enum Commands {
         CommandSpec(name: "reply", group: "Feedback", usage: "reply <share> <comment> <text>", summary: "Reply to a comment", arguments: 3...200),
         CommandSpec(name: "resolve", group: "Feedback", usage: "resolve <share> <comment> [--reopen]", summary: "Resolve a comment (or reopen it)", flags: ["reopen"], arguments: 2...2),
         CommandSpec(name: "delete-comment", group: "Feedback", usage: "delete-comment <share> <comment> [--yes]", summary: "Delete a comment", flags: ["yes"], arguments: 2...2),
-        CommandSpec(name: "screenshot", group: "Feedback", usage: "screenshot <share> <comment> [-o FILE]", summary: "Save the picture of what a comment points at", options: ["output"], arguments: 2...2),
+        CommandSpec(name: "claim", group: "Feedback", usage: "claim <share> <comment> [progress]", summary: "Say you're working on a comment (again, to update progress); others leave it alone", arguments: 2...200),
+        CommandSpec(name: "release", group: "Feedback", usage: "release <share> <comment>", summary: "Stop working on a comment you claimed, without resolving it", arguments: 2...2),
+        CommandSpec(name: "screenshot", group: "Feedback", usage: "screenshot <share> <comment> [--after] [-o FILE]", summary: "Save the picture of what a comment points at (--after: once fixed)", flags: ["after"], options: ["output"], arguments: 2...2),
         CommandSpec(name: "errors", group: "Feedback", usage: "errors <share>", summary: "Browser errors visitors ran into", arguments: 1...1),
         CommandSpec(name: "logs", group: "Feedback", usage: "logs <share> [-n LINES] [-f]", summary: "The share's log; -f keeps following it", flags: ["follow"], options: ["lines"], arguments: 1...1),
         CommandSpec(name: "watch", group: "Feedback", usage: "watch [share]", summary: "Follow what happens: shares starting, people joining, comments", arguments: 0...1),
@@ -141,6 +148,8 @@ struct Context {
         case "comments": try await comments()
         case "reply": try await reply()
         case "resolve": try await resolve()
+        case "claim": try await claim()
+        case "release": try await release()
         case "delete-comment": try await deleteComment()
         case "screenshot": try await screenshot()
         case "errors": try await errors()
@@ -204,6 +213,11 @@ struct Context {
         if share.collaboration {
             let people = share.people.isEmpty ? "nobody here now" : share.people.map(\.name).joined(separator: ", ")
             rows.append(("Collaboration", "on · \(people)"))
+            if let branch = share.branchName {
+                rows.append(("Branch", "\(branch) · merges into \(share.baseBranch ?? "its base") when stopped"))
+            } else if share.branch == true {
+                rows.append(("Branch", "a branch of its own while running"))
+            }
         }
         if share.comments > 0 { rows.append(("Comments", "\(share.openComments) open of \(share.comments)")) }
         if let project = share.project { rows.append(("Project", project)) }
@@ -271,7 +285,8 @@ struct Context {
             "provider": via,
             "name": invocation.options["name"],
             "hostname": invocation.options["hostname"],
-            "collaboration": invocation.flag("collab") ? true : nil,
+            "collaboration": invocation.flag("collab") || invocation.flag("branch") ? true : nil,
+            "branch": invocation.flag("branch") ? true : nil,
             "replaceDNS": invocation.flag("replace-dns") ? true : nil,
             "funnel": invocation.flag("funnel") ? true : nil,
             "start": invocation.flag("save") || password ? false : nil,
@@ -280,7 +295,7 @@ struct Context {
         let (created, createdRaw) = try await client.call("POST", "/v1/shares", body: body, as: Share.self)
         guard password else { return try announce(created, raw: createdRaw) }
         let (protection, _) = try await client.call("PUT", sharePath(created.id, "/protection"), body: ["mode": "password", "username": invocation.options["user"]], as: Protection.self)
-        let credentials = "  Username \(style.bold(protection.username ?? "guest"))   Password \(style.bold(protection.password ?? "—"))"
+        let credentials = credentialsLine(protection)
         if invocation.flag("save") {
             let (saved, raw) = try await client.get(sharePath(created.id), as: Share.self)
             return try announce(saved, raw: raw, extra: credentials)
@@ -351,6 +366,7 @@ struct Context {
         if let url = options["url"] { changes["url"] = url }
         if let value = options["collab"] { changes["collaboration"] = try parseSwitch(value, option: "collab") }
         if let value = options["errors"] { changes["captureErrors"] = try parseSwitch(value, option: "errors") }
+        if let value = options["branch"] { changes["branch"] = try parseSwitch(value, option: "branch") }
         if let value = options["autostart"] { changes["autoStart"] = try parseSwitch(value, option: "autostart") }
         if let value = options["host-header"] { changes["rewriteHostHeader"] = try parseSwitch(value, option: "host-header") }
         if let value = options["stop-after"] { changes["autoStop"] = value }
@@ -384,13 +400,20 @@ struct Context {
         switch protection.mode {
         case "password":
             say("Password protected.")
-            say("  Username \(style.bold(protection.username ?? "guest"))   Password \(style.bold(protection.password ?? "—"))")
+            say(credentialsLine(protection))
+            if let link = protection.link { say("  Link with the password built in: \(link)") }
         case "google", "github", "email":
             let how = ["google": "Google sign-in", "github": "GitHub sign-in", "email": "Email codes"][protection.mode] ?? protection.mode
             say("\(how)\(protection.emails.isEmpty ? " (anyone with an account)" : " for \(protection.emails.joined(separator: ", "))").")
         default:
             say("Anyone with the link can open it.")
         }
+    }
+
+    /// Shares whose password OpenTraffic checks take any username, so there's none to show.
+    func credentialsLine(_ protection: Protection) -> String {
+        let password = "Password \(style.bold(protection.password ?? "—"))"
+        return protection.username.map { "  Username \(style.bold($0))   \(password)" } ?? "  \(password)"
     }
 
     func password() async throws {
@@ -449,7 +472,9 @@ struct Context {
             var meta = Format.ago(comment.createdAt)
             if let environment = comment.environment { meta += " · \(environment.browser), \(environment.os), \(environment.viewport)" }
             if comment.hasScreenshot { meta += " · picture" }
-            if comment.resolved { meta += " · resolved" }
+            if comment.resolved { meta += comment.resolvedBy.map { " · resolved by \($0)" } ?? " · resolved" }
+            if comment.status == "confirmed" { meta += " (confirmed)" }
+            if let agent = comment.claimedBy { meta += " · \(agent) is on it" + (comment.progress.map { ": \($0)" } ?? "") }
             let target = comment.label.map { " on “\($0)”" } ?? ""
             say("\(style.yellow(comment.id))  \(style.bold(comment.author))\(target) \(style.dim("at \(comment.path) · \(meta)"))")
             say("  \(comment.text)")
@@ -476,6 +501,22 @@ struct Context {
         say(reopen ? "Reopened \(comment.author)'s comment." : "Resolved \(comment.author)'s comment.")
     }
 
+    func claim() async throws {
+        let progress = args.dropFirst(2).joined(separator: " ")
+        let (comment, raw) = try await client.call(
+            "POST", sharePath(args[0], "/comments/\(args[1].pathEncoded)/claim"),
+            body: progress.isEmpty ? [:] : ["progress": progress], as: Comment.self
+        )
+        if json { return say(JSON.pretty(raw)) }
+        say("Working on \(comment.author)'s comment\(comment.progress.map { ": \($0)" } ?? ""). Claim it again within 15 minutes to keep it.")
+    }
+
+    func release() async throws {
+        let (comment, raw) = try await client.call("DELETE", sharePath(args[0], "/comments/\(args[1].pathEncoded)/claim"), as: Comment.self)
+        if json { return say(JSON.pretty(raw)) }
+        say("Released \(comment.author)'s comment.")
+    }
+
     func deleteComment() async throws {
         try confirm("Delete comment \(args[1]) on “\(args[0])”?")
         try await client.request("DELETE", sharePath(args[0], "/comments/\(args[1].pathEncoded)"))
@@ -484,10 +525,11 @@ struct Context {
     }
 
     func screenshot() async throws {
-        let response = try await client.request("GET", sharePath(args[0], "/comments/\(args[1].pathEncoded)/screenshot"))
+        let after = invocation.flag("after")
+        let response = try await client.request("GET", sharePath(args[0], "/comments/\(args[1].pathEncoded)/screenshot\(after ? "?which=after" : "")"))
         let data = response.body
         let ext = data.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "png" : (data.count > 12 && data[8..<12] == Data("WEBP".utf8)) ? "webp" : "jpg"
-        let path = invocation.options["output"] ?? "\(args[0].replacingOccurrences(of: "/", with: "-"))-\(args[1]).\(ext)"
+        let path = invocation.options["output"] ?? "\(args[0].replacingOccurrences(of: "/", with: "-"))-\(args[1])\(after ? "-after" : "").\(ext)"
         do {
             try data.write(to: URL(fileURLWithPath: (path as NSString).expandingTildeInPath))
         } catch {
@@ -555,7 +597,14 @@ struct Context {
                 case "session.joined": "\(style.green("+")) \(event.peer?.name ?? "Someone") joined \(name)"
                 case "session.left": "\(style.dim("−")) \(event.peer?.name ?? "Someone") left \(name)"
                 case "comment.created": "\(style.yellow("●")) \(event.comment?.author ?? "Someone") commented on \(name): \(event.comment?.text ?? "")"
-                case "comment.updated": "\(style.yellow("●")) A comment on \(name) changed\(event.comment?.resolved == true ? " (resolved)" : "")"
+                case "comment.updated":
+                    switch event.comment?.status {
+                    case "confirmed": "\(style.green("✓")) \(event.comment?.author ?? "Someone") confirmed the fix on \(name)"
+                    case "resolved": "\(style.green("●")) A comment on \(name) was resolved\(event.comment?.resolvedBy.map { " by \($0)" } ?? "")"
+                    default: "\(style.yellow("●")) A comment on \(name) changed\(event.comment?.resolved == true ? " (resolved)" : "")"
+                    }
+                case "comment.claimed": "\(style.cyan("✦")) \(event.comment?.claimedBy ?? "An agent") is working on a comment on \(name)"
+                case "comment.released": "\(style.dim("✦")) Nobody is working on a comment on \(name) any more"
                 case "comment.deleted": "\(style.dim("●")) A comment on \(name) was deleted"
                 case "error.reported": "\(style.red("!")) \(name): \(event.error?.message ?? "a browser error")"
                 default: "\(event.type) \(name)"

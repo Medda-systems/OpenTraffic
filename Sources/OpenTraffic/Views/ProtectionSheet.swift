@@ -2,9 +2,13 @@ import SwiftUI
 import OpenTrafficCore
 
 extension ShareProtection {
-    var summary: String {
+    var summary: String { summary(for: nil) }
+
+    /// Shares whose password OpenTraffic checks take any username, so it isn't shown.
+    func summary(for kind: TunnelKind?) -> String {
         switch self {
         case .none: "Anyone with the link"
+        case .password where kind?.passwordInProxy == true: "Password protected"
         case .password(let username): "Password protected (\(username))"
         case .login(let provider, let emails):
             emails.isEmpty ? "Sign in with \(provider.title)" : "Sign in with \(provider.title) · \(emails.count) allowed"
@@ -88,6 +92,19 @@ struct ProtectionSheet: View {
                 Text("No sign-in. Anyone who has the link can open your local service.")
                     .foregroundStyle(.secondary)
             }
+        case .password where tunnel.kind.passwordInProxy:
+            Section {
+                Text("Visitors see an OpenTraffic sign-in page and enter the password once. You can also send a link with the password built in.")
+                    .foregroundStyle(.secondary)
+                if restartsForPassword {
+                    InlineMessage(severity: .info, message: "The share restarts to add the password, which gives it a new address.")
+                }
+            } footer: {
+                Text("OpenTraffic generates a strong password, keeps it in your Keychain, and checks it on this Mac before anything reaches your local service. Scripts can send it as a basic-auth password with any username.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         case .password:
             Section {
                 TextField("Username", text: $username)
@@ -132,16 +149,14 @@ struct ProtectionSheet: View {
     }
 
     private var unsupportedMessage: String {
-        switch tunnel.kind {
-        case .tailscale:
-            tunnel.tailscalePublic
-                ? "Public Funnel shares can't add a password. Share privately instead: only devices on your tailnet can open it."
-                : "Private Tailscale shares are already limited to devices signed in to your tailnet."
-        case .opentunnel:
-            "OpenTunnel shares can't add a password or sign-in. Anyone with the link can open them, and the tunnel's address appears in public certificate logs, so put sign-in in the app itself."
-        default:
-            "Temporary URLs can't be protected. Use ngrok (password or sign-in) or your own domain (email codes) instead."
-        }
+        tunnel.tailscalePublic
+            ? "Public Funnel shares can't add a password. Share privately instead: only devices on your tailnet can open it."
+            : "Private Tailscale shares are already limited to devices signed in to your tailnet."
+    }
+
+    /// A running Quick Tunnel with nothing in front of it restarts (new address) to get the password.
+    private var restartsForPassword: Bool {
+        tunnel.kind == .quick && store.isActive(tunnel.id) && store.collabProxies[tunnel.id] == nil && currentProtection == .none
     }
 
     private func title(for option: ProtectionOption) -> String {
@@ -157,6 +172,7 @@ struct ProtectionSheet: View {
     private var validationProblem: String? {
         switch option {
         case .password:
+            guard !tunnel.kind.passwordInProxy else { return nil }
             return username.nilIfBlank == nil || username.contains(":") ? "Enter a username without a colon." : nil
         case .google, .github:
             return EmailList.parse(emails) == nil ? "Check the email addresses." : nil
@@ -172,6 +188,7 @@ struct ProtectionSheet: View {
         let list = EmailList.parse(emails) ?? []
         switch option {
         case .none: return .none
+        case .password where tunnel.kind.passwordInProxy: return .password(username: "guest")
         case .password: return .password(username: username.trimmingCharacters(in: .whitespaces))
         case .google: return .login(.google, allowedEmails: list)
         case .github: return .login(.github, allowedEmails: list)
@@ -216,24 +233,28 @@ struct SharePasswordRow: View {
     var body: some View {
         HStack(spacing: Spacing.s) {
             Image(systemName: "key.fill").foregroundStyle(.secondary)
-            Text(username).monospaced()
+            if !tunnel.kind.passwordInProxy { Text(username).monospaced() }
             Text(revealed ? (store.sharePassword(for: tunnel.id) ?? "—") : "••••••••••")
                 .monospaced()
                 .textSelection(.enabled)
                 .foregroundStyle(revealed ? .primary : .secondary)
-            Button(revealed ? "Hide" : "Show") { revealed.toggle() }
+            Button(revealed ? "Hide Password" : "Show Password", systemImage: revealed ? "eye.slash" : "eye") { revealed.toggle() }
+                .labelStyle(.iconOnly)
+                .contentTransition(.symbolEffect(.replace))
                 .buttonStyle(.borderless)
+                .help(revealed ? "Hide the password" : "Show the password")
             CopyButton(label: "Copy Password", concealed: true) { store.sharePassword(for: tunnel.id) }
                 .buttonStyle(.borderless)
-            Button("New Password…") { confirmingNewPassword = true }
+            Button("New Password…", systemImage: "arrow.triangle.2.circlepath") { confirmingNewPassword = true }
+                .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
-                .help("Replace the password; the old one stops working")
+                .help("New password: the old one stops working")
         }
         .font(.callout)
         .confirmationDialog("Replace the password for “\(tunnel.name)”?", isPresented: $confirmingNewPassword) {
             Button("New Password", role: .destructive) { Task { await store.regenerateSharePassword(for: tunnel.id) } }
         } message: {
-            Text("Anyone using the current password is locked out\(store.isActive(tunnel.id) ? ", and the share restarts briefly" : "").")
+            Text("Anyone using the current password is locked out\(store.isActive(tunnel.id) && !tunnel.kind.passwordInProxy ? ", and the share restarts briefly" : ""). Links with the old password built in stop working too.")
         }
     }
 }

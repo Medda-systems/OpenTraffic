@@ -35,12 +35,12 @@ opentraffic stop --all
 | `start <share>` / `stop <share>` / `stop --all` / `restart <share>` | Start, stop, restart. |
 | `remove <share> [--yes]` (`rm`) | Remove a share with its settings and comments. Asks first on a terminal; scripts pass `--yes`. |
 | `rename <share> <new name>` | Rename. |
-| `set <share> [options]` | `--url PORT\|URL` (stop it first), `--collab on\|off`, `--errors on\|off`, `--autostart on\|off`, `--project NAME` / `--no-project`, `--host-header on\|off`, `--stop-after never\|15m\|1h\|4h`. |
-| `protect <share> password [--user NAME]` | Protect an ngrok share with a generated password; prints it. |
+| `set <share> [options]` | `--url PORT\|URL` (stop it first), `--collab on\|off`, `--errors on\|off`, `--branch on\|off`, `--autostart on\|off`, `--project NAME` / `--no-project`, `--host-header on\|off`, `--stop-after never\|15m\|1h\|4h`. |
+| `protect <share> password [--user NAME]` | Protect a share with a generated password; prints it. Temporary and OpenTunnel shares get OpenTraffic's sign-in page (any username works there). |
 | `protect <share> google\|github [email …]` | Sign in with Google or GitHub (ngrok), optionally only for these emails. |
 | `protect <share> email <email …>` | One-time email codes for a custom domain (Cloudflare Access). |
 | `protect <share> off` | Anyone with the link. |
-| `password <share> [--new]` | Show the username and password, or make a new password. |
+| `password <share> [--new]` | Show the password (with the username, and for temporary and OpenTunnel shares the link with the password built in), or make a new password. |
 
 `share` options:
 
@@ -53,6 +53,7 @@ opentraffic stop --all
 | `--via domain --hostname HOST [--replace-dns]` | A hostname in your Cloudflare account (`opentraffic domains` lists them). `--replace-dns` takes over a hostname that already has a DNS record, as in the New Tunnel sheet. |
 | `--name NAME` | What to call it. |
 | `--collab` | Live collaboration (temporary URLs and OpenTunnel). |
+| `--branch` | Live collaboration, and [work on a branch](/docs/collaboration#work-on-a-branch) while it runs. |
 | `--save` | Save without starting. |
 | `--copy` | Copy the public URL to the clipboard. |
 
@@ -71,9 +72,11 @@ opentraffic stop --all
 | --- | --- |
 | `comments <share> [--resolved \| --all]` | Comments with their element, browser, picture, and replies. |
 | `reply <share> <comment> <text>` | Reply. |
-| `resolve <share> <comment> [--reopen]` | Resolve, or reopen. |
+| `resolve <share> <comment> [--reopen]` | Resolve, or reopen. The commenter is told it's fixed. |
+| `claim <share> <comment> [progress]` | Say you're working on it, so other agents leave it alone and the session sees it; again to update the progress and keep the claim (it lapses after 15 minutes). |
+| `release <share> <comment>` | Stop working on a comment you claimed, without resolving it. |
 | `delete-comment <share> <comment> [--yes]` | Delete. |
-| `screenshot <share> <comment> [-o FILE]` | Save the picture of what the comment points at. |
+| `screenshot <share> <comment> [--after] [-o FILE]` | Save the picture of what the comment points at; `--after`, the picture of it once fixed. |
 | `errors <share>` | Browser errors visitors ran into. |
 | `logs <share> [-n LINES] [-f]` | The share's log; `-f` keeps following it. |
 | `watch [share]` | Follow events as they happen: shares starting and stopping, people joining, comments, errors. |

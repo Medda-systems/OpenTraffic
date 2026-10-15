@@ -16,6 +16,7 @@
   const COLLAPSED_KEY = "__opentraffic_collab_collapsed";
   const CLIENT_KEY = "__opentraffic_collab_client";
   const RESOLVED_KEY = "__opentraffic_collab_show_resolved";
+  const FIXES_KEY = "__opentraffic_collab_fixes_seen"; // localStorage: fixes we've told this person about
   const SESSION_KEY = "__opentraffic_collab"; // sessionStorage: follow/lead state across reloads
   const FULL_CLOSE = 1013; // "try again later": the session has as many people as it allows
   const FULL_RETRY = 30000;
@@ -35,10 +36,28 @@
   const ERRORS_KEPT = 20;
   const ERRORS_RECENT = 120000; // errors attached to a comment: the last 2 minutes
   const SHOT_TIMEOUT = 1500; // screenshot render + upload, then the comment goes without one
+  const AFTER_SETTLE = 1500; // let hot reload apply a fix before picturing it
+  const AFTER_GAP = 2200; // hub: one picture of a fix per 2 s
+  const FIXES_KEPT = 100;
+  const MAX_PROGRESS = 120;
   const SHOT_MAX_BYTES = 600 * 1024;
   const UPLOAD_PATH = "/__opentraffic/upload";
   const ATTACHMENT_PATH = "/__opentraffic/attachments/";
   const SVG_NS = "http://www.w3.org/2000/svg";
+  // Marks of the coding agents OpenTraffic knows, on a 24x24 grid: Claude, Cursor and OpenCode from
+  // Simple Icons (CC0), Codex from Lobe Icons (MIT); trademarks of their owners, shown only to say which
+  // agent is at work. Unknown agents get a sparkle.
+  const AGENT_MARKS = {
+    claude: "m 4.7144 15.9555 4.7174 -2.6471 .079 -.2307 -.079 -.1275 h -.2307 l -.7893 -.0486 -2.6956 -.0729 -2.3375 -.0971 -2.2646 -.1214 -.5707 -.1215 -.5343 -.7042 .0546 -.3522 .4797 -.3218 .686 .0608 1.5179 .1032 2.2767 .1578 1.6514 .0972 2.4468 .255 h .3886 l .0546 -.1579 -.1336 -.0971 -.1032 -.0972 L 6.973 9.8356 l -2.55 -1.6879 -1.3356 -.9714 -.7225 -.4918 -.3643 -.4614 -.1578 -1.0078 .6557 -.7225 .8803 .0607 .2246 .0607 .8925 .686 1.9064 1.4754 2.4893 1.8336 .3643 .3035 .1457 -.1032 .0182 -.0728 -.164 -.2733 -1.3539 -2.4467 -1.445 -2.4893 -.6435 -1.032 -.17 -.6194 c -.0607 -.255 -.1032 -.4674 -.1032 -.7285 L 6.287 .1335 6.6997 0 l .9957 .1336 .419 .3642 .6192 1.4147 1.0018 2.2282 1.5543 3.0296 .4553 .8985 .2429 .8318 .091 .255 h .1579 v -.1457 l .1275 -1.706 .2368 -2.0947 .2307 -2.6957 .0789 -.7589 .3764 -.9107 .7468 -.4918 .5828 .2793 .4797 .686 -.0668 .4433 -.2853 1.8517 -.5586 2.9021 -.3643 1.9429 h .2125 l .2429 -.2429 .9835 -1.3053 1.6514 -2.0643 .7286 -.8196 .85 -.9046 .5464 -.4311 h 1.0321 l .759 1.1293 -.34 1.1657 -1.0625 1.3478 -.8804 1.1414 -1.2628 1.7 -.7893 1.36 .0729 .1093 .1882 -.0183 2.8535 -.607 1.5421 -.2794 1.8396 -.3157 .8318 .3886 .091 .3946 -.3278 .8075 -1.967 .4857 -2.3072 .4614 -3.4364 .8136 -.0425 .0304 .0486 .0607 1.5482 .1457 .6618 .0364 h 1.621 l 3.0175 .2247 .7892 .522 .4736 .6376 -.079 .4857 -1.2142 .6193 -1.6393 -.3886 -3.825 -.9107 -1.3113 -.3279 h -.1822 v .1093 l 1.0929 1.0686 2.0035 1.8092 2.5075 2.3314 .1275 .5768 -.3218 .4554 -.34 -.0486 -2.2039 -1.6575 -.85 -.7468 -1.9246 -1.621 h -.1275 v .17 l .4432 .6496 2.3436 3.5214 .1214 1.0807 -.17 .3521 -.6071 .2125 -.6679 -.1214 -1.3721 -1.9246 L 14.38 17.959 l -1.1414 -1.9428 -.1397 .079 -.674 7.2552 -.3156 .3703 -.7286 .2793 -.6071 -.4614 -.3218 -.7468 .3218 -1.4753 .3886 -1.9246 .3157 -1.53 .2853 -1.9004 .17 -.6314 -.0121 -.0425 -.1397 .0182 -1.4328 1.9672 -2.1796 2.9446 -1.7243 1.8456 -.4128 .164 -.7164 -.3704 .0667 -.6618 .4008 -.5889 2.386 -3.0357 1.4389 -1.882 .929 -1.0868 -.0062 -.1579 h -.0546 l -6.3385 4.1164 -1.1293 .1457 -.4857 -.4554 .0608 -.7467 .2307 -.2429 1.9064 -1.3114 Z",
+    codex: "M 8.086 .457 a 6.105 6.105 0 0 1 3.046 -.415 c 1.333 .153 2.521 .72 3.564 1.7 a .117 .117 0 0 0 .107 .029 c 1.408 -.346 2.762 -.224 4.061 .366 l .063 .03 .154 .076 c 1.357 .703 2.33 1.77 2.918 3.198 .278 .679 .418 1.388 .421 2.126 a 5.655 5.655 0 0 1 -.18 1.631 .167 .167 0 0 0 .04 .155 5.982 5.982 0 0 1 1.578 2.891 c .385 1.901 -.01 3.615 -1.183 5.14 l -.182 .22 a 6.063 6.063 0 0 1 -2.934 1.851 .162 .162 0 0 0 -.108 .102 c -.255 .736 -.511 1.364 -.987 1.992 -1.199 1.582 -2.962 2.462 -4.948 2.451 -1.583 -.008 -2.986 -.587 -4.21 -1.736 a .145 .145 0 0 0 -.14 -.032 c -.518 .167 -1.04 .191 -1.604 .185 a 5.924 5.924 0 0 1 -2.595 -.622 6.058 6.058 0 0 1 -2.146 -1.781 c -.203 -.269 -.404 -.522 -.551 -.821 a 7.74 7.74 0 0 1 -.495 -1.283 6.11 6.11 0 0 1 -.017 -3.064 .166 .166 0 0 0 .008 -.074 .115 .115 0 0 0 -.037 -.064 5.958 5.958 0 0 1 -1.38 -2.202 5.196 5.196 0 0 1 -.333 -1.589 6.915 6.915 0 0 1 .188 -2.132 c .45 -1.484 1.309 -2.648 2.577 -3.493 .282 -.188 .55 -.334 .802 -.438 .286 -.12 .573 -.22 .861 -.304 a .129 .129 0 0 0 .087 -.087 A 6.016 6.016 0 0 1 5.635 2.31 C 6.315 1.464 7.132 .846 8.086 .457 z m -.804 7.85 a .848 .848 0 0 0 -1.473 .842 l 1.694 2.965 -1.688 2.848 a .849 .849 0 0 0 1.46 .864 l 1.94 -3.272 a .849 .849 0 0 0 .007 -.854 l -1.94 -3.393 z m 5.446 6.24 a .849 .849 0 0 0 0 1.695 h 4.848 a .849 .849 0 0 0 0 -1.696 h -4.848 z",
+    cursor: "M 11.503 .131 1.891 5.678 a .84 .84 0 0 0 -.42 .726 v 11.188 c 0 .3 .162 .575 .42 .724 l 9.609 5.55 a 1 1 0 0 0 .998 0 l 9.61 -5.55 a .84 .84 0 0 0 .42 -.724 V 6.404 a .84 .84 0 0 0 -.42 -.726 L 12.497 .131 a 1.01 1.01 0 0 0 -.996 0 M 2.657 6.338 h 18.55 c .263 0 .43 .287 .297 .515 L 12.23 22.918 c -.062 .107 -.229 .064 -.229 -.06 V 12.335 a .59 .59 0 0 0 -.295 -.51 l -9.11 -5.257 c -.109 -.063 -.064 -.23 .061 -.23",
+    opencode: "M 22 24 H 2 V 0 h 20 z M 17 4.8 H 7 v 14.4 h 10 z",
+  };
+  // Brand colours that read on any background (the hub gives Claude Code's cursor the same one).
+  const AGENT_COLORS = { claude: "#D97757", codex: "#3941FF" };
+  const AGENT_COLOR = "#bf5af2"; // everyone else's, as the hub's
+  const agentColor = (name) => AGENT_COLORS[agentBrand(name)] || AGENT_COLOR;
+  const SPARKLE = "M12 2.5l2.3 6.2 6.2 2.3-6.2 2.3L12 19.5l-2.3-6.2L3.5 11l6.2-2.3z";
 
   // #region helpers (pure validators and formatters)
   const MAX_DEPTH = 8;
@@ -110,6 +129,9 @@
       color: hexColor(p.color),
       path: typeof p.path === "string" ? pathOnly(p.path).slice(0, 512) : "",
       isHost: p.isHost === true,
+      // A coding agent working on a comment; its cursor rests on that comment's element.
+      isAgent: p.isAgent === true,
+      at: p.isAgent === true && p.at && typeof p.at === "object" ? cleanPos(p.at) : null,
     };
   }
 
@@ -161,6 +183,17 @@
       screenshot: validId(c.screenshot) ? c.screenshot : null,
       env: cleanEnv(c.env),
       errors: Array.isArray(c.errors) ? c.errors.slice(0, ERRORS_PER_MESSAGE).map(cleanErrorItem).filter(Boolean) : [],
+      mine: c.mine === true, // we wrote it
+      // Who resolved it ("" when unknown), whether that's an agent or the commenter, and whether
+      // the commenter agreed with the fix; `after` pictures the element once fixed.
+      resolvedBy: c.resolved === true ? cleanName(c.resolvedBy) : "",
+      resolvedByAgent: c.resolved === true && c.resolvedByAgent === true,
+      resolvedByAuthor: c.resolved === true && c.resolvedByAuthor === true,
+      confirmed: c.resolved === true && c.confirmed === true,
+      after: c.resolved === true && validId(c.after) ? c.after : null,
+      claim: c.resolved !== true && c.claim && typeof c.claim === "object" && cleanName(c.claim.agent)
+        ? { agent: cleanName(c.claim.agent), progress: oneLine(c.claim.progress, MAX_PROGRESS) }
+        : null,
     });
   }
 
@@ -498,6 +531,19 @@
   let replyFor = null; // comment whose reply draft is in the reply box
   const replyDrafts = new Map(); // comment id -> unsent reply text
   const failedShots = new Set(); // attachment ids whose image didn't load
+  const forceShow = new Set(); // resolved comments shown anyway (we're looking at their fix)
+  const fixQueue = []; // ids of our comments someone fixed, to tell us about
+  let toastId = null; // the fix the notice is about
+  let captureChain = Promise.resolve(); // pictures of fixes, one at a time
+  const capturing = new Set();
+  const seenFixes = new Set((() => {
+    try {
+      const v = JSON.parse(getItem("localStorage", FIXES_KEY) || "[]");
+      return Array.isArray(v) ? v.filter(validId).slice(-FIXES_KEPT) : [];
+    } catch {
+      return [];
+    }
+  })());
   // welcome.features.errors: this share collects browser errors. null until the first welcome:
   // errors are collected from the start and only sent once a welcome says the share wants them.
   let errorsOn = null;
@@ -602,7 +648,7 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
   background: var(--line); white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; cursor: text; }
 .actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 8px; }
 .note { margin-right: auto; color: #ff9f0a; font-size: 11px; font-weight: 600; }
-.act { padding: 4px 10px; border-radius: 7px; background: var(--line); font: 600 12px/1.3 var(--tb-font); }
+.act { padding: 4px 10px; border-radius: 7px; background: var(--line); font: 600 12px/1.3 var(--tb-font); white-space: nowrap; }
 .act.primary { background: var(--accent); color: #fff; }
 .act.danger { background: #ff3b30; color: #fff; }
 .act:disabled { opacity: .45; cursor: default; }
@@ -624,10 +670,36 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
 .agent { flex: none; max-width: 130px; padding: 1px 6px; border-radius: 6px; background: rgba(191,90,242,.16); color: #a54bd6;
   font-size: 10px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .replybox { min-height: 36px; margin-top: 8px; }
+/* Beside the comment's pin rather than under it. */
+.cursor.by-agent { margin: -12px 0 0 26px; }
+.cursor.by-agent .tag { display: flex; align-items: center; gap: 4px; font-style: italic; }
+.mark { display: inline-block; flex: none; vertical-align: -2px; }
+.av .mark { display: block; }
+.ttitle { display: flex; align-items: center; gap: 6px; }
+.agent .mark { margin-right: 3px; vertical-align: -1px; }
+.pin.working::before { content: ""; position: absolute; inset: -5px; border-radius: inherit; border: 2px solid var(--agent, #bf5af2);
+  animation: tb-work 1.6s ease-in-out infinite; pointer-events: none; }
+@keyframes tb-work { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+.fixline { margin-top: 8px; padding: 4px 7px; border-radius: 7px; background: rgba(48,209,88,.14); color: #1f8a3a;
+  font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.fixline.working { background: color-mix(in srgb, var(--agent, #bf5af2) 15%, transparent); color: color-mix(in srgb, var(--agent, #bf5af2) 78%, black); }
+/* On an 8px grid: 8px padding and gap, two rows of 16px text, and a 20px mark centred on them. */
+.fixline { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 8px; }
+.fixline .mark { flex: none; width: 20px; height: 20px; margin: 0; }
+.fixline .lines { min-width: 0; }
+.fixline .t1 { font-weight: 700; line-height: 16px; }
+.fixline .t2 { font-weight: 500; line-height: 16px; opacity: .85; overflow-wrap: anywhere; }
+.cap { margin-top: 8px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.cap + .shot { margin-top: 3px; }
+.toast { left: auto; top: auto; right: 16px; bottom: 64px; width: 300px; }
+.toast .ttitle { font-weight: 700; }
+.toast .ttext { margin-top: 3px; color: var(--muted); overflow-wrap: anywhere; max-height: 3.6em; overflow: hidden; }
 .errs { flex: none; display: flex; align-items: center; gap: 4px; color: #ff9f0a; font-size: 11px; font-weight: 600; white-space: nowrap; cursor: help; }
 .errs svg { display: block; flex: none; }
 @media (prefers-color-scheme: dark) {
   .agent { background: rgba(191,90,242,.28); color: #da8fff; }
+  .fixline { background: rgba(48,209,88,.2); color: #5be07f; }
+  .fixline.working { background: color-mix(in srgb, var(--agent, #bf5af2) 26%, transparent); color: color-mix(in srgb, var(--agent, #bf5af2) 55%, white); }
 }
 @media (max-width: 520px) {
   .pill { gap: 5px; }
@@ -636,6 +708,7 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
 }
 @media (prefers-reduced-motion: reduce) {
   .cursor, .track, .track::after { transition: none; }
+  .pin.working::before { animation: none; opacity: .8; }
   .ring { transform: scale(.6); animation: tb-fade 1.5s ease-in forwards; }
   .ring + .ring { display: none; }
 }
@@ -668,6 +741,31 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
     }
     return svg;
   }
+  // Which agent a name belongs to, as the hub decides it ("Claude Code", "cursor-agent", …), or null.
+  function agentBrand(name) {
+    const n = String(name || "").toLowerCase();
+    if (n.includes("opencode")) return "opencode";
+    if (n.includes("claude")) return "claude";
+    if (n.includes("codex")) return "codex";
+    if (n.includes("cursor")) return "cursor";
+    return null;
+  }
+
+  // The agent's mark (a sparkle when OpenTraffic has none), filled with the text colour, or with
+  // `tinted`, the brand's colour where it has one.
+  function agentMark(name, size, tinted) {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    for (const [k, v] of [["viewBox", "0 0 24 24"], ["width", size], ["height", size], ["aria-hidden", "true"], ["fill", "currentColor"]]) svg.setAttribute(k, v);
+    svg.classList.add("mark");
+    if (tinted) css(svg, { color: agentColor(name) });
+    const p = document.createElementNS(SVG_NS, "path");
+    p.setAttribute("d", AGENT_MARKS[agentBrand(name)] || SPARKLE);
+    // Codex's ">_" is cut out by the even-odd rule; Claude's overlapping rays need the default one.
+    if (agentBrand(name) === "codex") p.setAttribute("fill-rule", "evenodd");
+    svg.append(p);
+    return svg;
+  }
+
   const BUBBLE_PATH = "M5 4.5h14a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5h-7.5l-4.5 3.5v-3.5h-2a1.5 1.5 0 0 1-1.5-1.5v-9a1.5 1.5 0 0 1 1.5-1.5z";
   const stop = (e) => e.stopPropagation();
   const narrow = window.matchMedia("(max-width: 520px)");
@@ -774,6 +872,16 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
   const bShotImg = h("img");
   bShotImg.alt = "Screenshot of the commented element";
   bShotImg.decoding = "async"; // attached only while a comment with a screenshot is open
+  const bFix = h("div", "fixline"); // who's working on it, or who fixed it
+  const bShotCap = h("div", "cap", "Before");
+  const bAfterCap = h("div", "cap", "After");
+  const bAfter = h("a", "shot");
+  bAfter.target = "_blank";
+  bAfter.rel = "noopener noreferrer";
+  bAfter.title = "Open the picture of the fix in a new tab";
+  const bAfterImg = h("img");
+  bAfterImg.alt = "The commented element after the fix";
+  bAfterImg.decoding = "async";
   const bEnv = h("div", "envline");
   const bThread = h("div", "thread");
   bThread.setAttribute("role", "list");
@@ -785,15 +893,29 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
   replyArea.setAttribute("aria-label", "Reply");
   const replyNote = h("span", "note");
   const resolveBtn = button("act");
+  const confirmBtn = button("act primary", "Looks good", "The fix works");
   const deleteBtn = button("act");
   const replyBtn = button("act primary", "Reply", "Send reply");
   const bActions = h("div", "actions");
-  bActions.append(replyNote, resolveBtn, deleteBtn, replyBtn);
-  bubble.append(bMeta, bLabel, bText, bShot, bEnv, bThread, replyArea, bActions);
+  bActions.append(replyNote, resolveBtn, deleteBtn, confirmBtn, replyBtn);
+  bubble.append(bMeta, bLabel, bText, bFix, bShotCap, bShot, bAfterCap, bAfter, bEnv, bThread, replyArea, bActions);
   bubble.hidden = replyNote.hidden = bShot.hidden = bEnv.hidden = bThread.hidden = true;
+  bFix.hidden = bShotCap.hidden = bAfterCap.hidden = bAfter.hidden = confirmBtn.hidden = true;
+
+  // "Fixed: take a look", for the person whose comment it was.
+  const toast = h("div", "pop toast");
+  toast.setAttribute("role", "status");
+  const tTitle = h("div", "ttitle");
+  const tText = h("div", "ttext");
+  const tLater = button("act", "Later", "Dismiss");
+  const tLook = button("act primary", "Take a look");
+  const tActions = h("div", "actions");
+  tActions.append(tLater, tLook);
+  toast.append(tTitle, tText, tActions);
+  toast.hidden = true;
 
   if (styleEl) root.append(styleEl);
-  root.append(pinLayer, layer, composer, bubble, pill);
+  root.append(pinLayer, layer, composer, bubble, toast, pill);
 
   // Appended to <html>, not <body>, which SPAs may replace; re-attached if removed.
   function mount() {
@@ -801,11 +923,14 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
   }
 
   const HOST_MARK = " \u00b7 host";
+  const AGENT_MARK = " \u00b7 agent";
+  const role = (p) => (p.isHost ? HOST_MARK : p.isAgent ? AGENT_MARK : "");
   const describe = (p) =>
-    p.name + (p === me ? " (you)" : "") + (p.isHost ? HOST_MARK : "") + " \u2014 " + (p.path || "/");
+    p.name + (p === me ? " (you)" : "") + role(p) + " \u2014 " + (p.path || "/");
 
   function avatar(p) {
-    const a = h("span", "av", initials(p.name));
+    const a = h("span", "av", p.isAgent ? null : initials(p.name));
+    if (p.isAgent) a.append(agentMark(p.name, 17));
     css(a, { background: p.color, color: textOn(p.color) });
     a.title = describe(p);
     return a;
@@ -834,7 +959,7 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
           const dot = h("span", "dot");
           css(dot, { background: p.color });
           row.title = describe(p);
-          row.append(dot, h("span", "who", p.name + (p === me ? " (you)" : "") + (p.isHost ? HOST_MARK : "")), h("span", "where", p.path || "/"));
+          row.append(dot, h("span", "who", p.name + (p === me ? " (you)" : "") + role(p)), h("span", "where", p.path || "/"));
           return row;
         })
       );
@@ -877,7 +1002,7 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
   if (narrow.addEventListener) narrow.addEventListener("change", render);
 
   // Keep overlay interactions from reaching the page's own handlers.
-  for (const el of [pill, pinLayer, composer, bubble]) for (const t of ["click", "pointerdown", "mousedown"]) el.addEventListener(t, stop);
+  for (const el of [pill, pinLayer, composer, bubble, toast]) for (const t of ["click", "pointerdown", "mousedown"]) el.addEventListener(t, stop);
   avatarsEl.addEventListener("click", () => {
     listOpen = !listOpen;
     render();
@@ -1051,7 +1176,8 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
 
   function paintCursor(c, peer) {
     c.arrow.setAttribute("fill", peer.color);
-    c.tag.textContent = peer.name;
+    if (peer.isAgent) c.tag.replaceChildren(agentMark(peer.name, 14), document.createTextNode(peer.name + " \u00b7 working"));
+    else c.tag.textContent = peer.name;
     css(c.tag, { background: peer.color, color: textOn(peer.color) });
   }
 
@@ -1075,14 +1201,30 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
   let sweepTimer = 0;
   function sweep() {
     const now = Date.now();
-    for (const [id, c] of cursors) if (now - c.at > CURSOR_TTL) dropCursor(id);
+    for (const [id, c] of cursors) if (!c.agent && now - c.at > CURSOR_TTL) dropCursor(id);
     if (!cursors.size) { clearInterval(sweepTimer); sweepTimer = 0; }
+  }
+
+  // An agent's cursor rests on the element of the comment it's working on, for as long as it is.
+  function showAgent(peer) {
+    if (!peer.isAgent || !peer.at) return;
+    let c = cursors.get(peer.id);
+    if (!c) {
+      c = makeCursor(peer);
+      c.agent = true;
+      c.el.classList.add("by-agent");
+      cursors.set(peer.id, c);
+      layer.append(c.el);
+    } else paintCursor(c, peer);
+    Object.assign(c, peer.at);
+    mount();
+    place(peer.id, c);
   }
 
   function onCursor(m) {
     const peer = peers.get(m.id);
     const pos = cleanPos(m);
-    if (!peer || !pos) return;
+    if (!peer || !pos || peer.isAgent) return;
     let c = cursors.get(m.id);
     if (!c) {
       c = makeCursor(peer);
@@ -1104,19 +1246,116 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
       const c = cleanComment(raw);
       if (c) comments.set(c.id, c);
     }
+    // Fixes made while we were away, oldest first.
+    [...comments.values()].sort((a, b) => a.createdAt - b.createdAt).forEach(announceFix);
     renderPins();
   }
 
   function upsertComment(raw) {
     const c = cleanComment(raw);
     if (!c) return;
-    if (!comments.has(c.id) && comments.size >= MAX_COMMENTS) comments.delete(comments.keys().next().value);
+    const before = comments.get(c.id);
+    if (!before && comments.size >= MAX_COMMENTS) comments.delete(comments.keys().next().value);
     comments.set(c.id, c);
+    if (!before || !before.resolved) announceFix(c);
+    if (!c.resolved) forceShow.delete(c.id);
     renderPins();
+    if (toastId === c.id && (!c.resolved || c.confirmed)) hideToast();
   }
 
   function removeComment(id) {
-    if (typeof id === "string" && comments.delete(id)) renderPins();
+    if (typeof id !== "string" || !comments.delete(id)) return;
+    forceShow.delete(id);
+    if (toastId === id) hideToast();
+    renderPins();
+  }
+
+  // ---------------------------------------------------------------- fixes
+
+  // Someone else resolved our comment: say so once (per browser), with a way to go and see.
+  function announceFix(c) {
+    if (!c.mine || !c.resolved || c.resolvedByAuthor || c.confirmed || !c.resolvedBy || seenFixes.has(c.id)) return;
+    if (toastId === c.id || fixQueue.includes(c.id)) return;
+    fixQueue.push(c.id);
+    if (!toastId) showNextFix();
+  }
+
+  function showNextFix() {
+    toastId = null;
+    while (fixQueue.length) {
+      const c = comments.get(fixQueue.shift());
+      if (!c || !c.resolved || c.confirmed) continue;
+      toastId = c.id;
+      seenFixes.add(c.id);
+      setItem("localStorage", FIXES_KEY, JSON.stringify([...seenFixes].slice(-FIXES_KEPT)));
+      tTitle.replaceChildren(
+        c.resolvedByAgent ? agentMark(c.resolvedBy, 16, true) : document.createTextNode("\u2713 "),
+        document.createTextNode(c.resolvedBy + " fixed your comment")
+      );
+      const words = Array.from(c.text.replace(/\s+/g, " ")).slice(0, 90).join("");
+      tText.textContent = "\u201c" + words + (words.length < c.text.length ? "\u2026" : "") + "\u201d" + (c.path !== lastPath ? " on " + c.path : "");
+      toast.hidden = false;
+      return;
+    }
+    toast.hidden = true;
+  }
+
+  function hideToast() {
+    toastId = null;
+    toast.hidden = true;
+    if (fixQueue.length) setTimeout(showNextFix, 400);
+  }
+
+  tLater.addEventListener("click", hideToast);
+  tLook.addEventListener("click", () => {
+    const c = toastId && comments.get(toastId);
+    hideToast();
+    if (c) lookAtFix(c);
+  });
+
+  // Shows the fixed element and its thread (going to its page first), and pictures the fix if
+  // nobody has yet.
+  function lookAtFix(c) {
+    if (c.path !== lastPath) {
+      const path = safePath(c.path);
+      if (path === null) return;
+      session.reveal = c.id;
+      saveSession();
+      location.assign(path); // safePath() guarantees a same-origin path
+      return;
+    }
+    forceShow.add(c.id);
+    renderPins();
+    revealComment(c);
+    if (c.mine && !c.after) queueCapture(c.id, 800);
+  }
+
+  // The hub asks the host's page for pictures of fixes on it; ours when we look at our own.
+  function onCapture(m) {
+    if (!me || !me.isHost || !validId(m.id)) return;
+    const c = comments.get(m.id);
+    if (c && c.resolved && !c.after && c.path === lastPath) queueCapture(c.id, AFTER_SETTLE);
+  }
+
+  function queueCapture(id, delay) {
+    if (capturing.has(id)) return;
+    capturing.add(id);
+    captureChain = captureChain
+      .then(() => new Promise((r) => setTimeout(r, delay)))
+      .then(() => captureAfter(id))
+      .catch(() => {})
+      .then(() => new Promise((r) => setTimeout(r, AFTER_GAP)))
+      .finally(() => capturing.delete(id));
+  }
+
+  async function captureAfter(id) {
+    const c = comments.get(id);
+    if (!c || !c.resolved || c.after || c.path !== lastPath || !joined) return;
+    const v = toViewport(c);
+    if (!v.el) return; // the element is gone; nothing to picture
+    const shot = await screenshot(v.el, c);
+    const now = comments.get(id);
+    if (shot && now && now.resolved && !now.after) send({ type: "after", id, screenshot: shot });
   }
 
   // Comments on this page, oldest first; a pin's number is its index + 1.
@@ -1128,7 +1367,7 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
     openCount = 0;
     pageComments().forEach((c, i) => {
       if (!c.resolved) openCount++;
-      else if (!showResolved) return;
+      else if (!showResolved && !forceShow.has(c.id)) return;
       keep.add(c.id);
       let p = pins.get(c.id);
       if (!p) {
@@ -1141,9 +1380,11 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
       p.el.textContent = String(p.n);
       css(p.el, { background: c.color, color: textOn(c.color) });
       p.el.classList.toggle("resolved", c.resolved);
+      p.el.classList.toggle("working", !!c.claim);
+      if (c.claim) css(p.el, { "--agent": agentColor(c.claim.agent) });
       const nr = c.replies.length;
       p.el.setAttribute("aria-label", "Comment " + p.n + " by " + c.author + (c.resolved ? " (resolved)" : "") +
-        (nr ? ", " + nr + (nr === 1 ? " reply" : " replies") : ""));
+        (c.claim ? ", " + c.claim.agent + " is working on it" : "") + (nr ? ", " + nr + (nr === 1 ? " reply" : " replies") : ""));
       pinLayer.append(p.el); // keeps DOM (and tab) order by number
     });
     for (const [id, p] of pins) if (!keep.has(id)) { p.el.remove(); pins.delete(id); }
@@ -1165,7 +1406,9 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
   let confirmTimer = 0;
   function closeBubble() {
     if (!bubbleId) return;
+    const was = bubbleId;
     bubbleId = null;
+    if (forceShow.delete(was) && !showResolved) setTimeout(renderPins, 0);
     confirmDelete = false;
     clearTimeout(confirmTimer);
     renderBubble();
@@ -1196,7 +1439,8 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
     css(dot, { background: r.color });
     meta.append(dot, h("span", "who", r.author + (r.fromHost && !r.agent ? HOST_MARK : "")));
     if (r.agent) {
-      const badge = h("span", "agent", r.agent === r.author ? "Agent" : "Agent \u00b7 " + r.agent);
+      const badge = h("span", "agent");
+      badge.append(agentMark(r.agent, 12, true), document.createTextNode(r.agent === r.author ? "Agent" : "Agent \u00b7 " + r.agent));
       badge.title = "Written by " + r.agent + " through OpenTraffic";
       meta.append(badge);
     }
@@ -1248,6 +1492,41 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
       bShotImg.removeAttribute("src");
       bShotImg.remove();
     }
+    // Who's on it, or who fixed it: a mark spanning two rows, what's happening, and the detail.
+    let title = "";
+    let detail = "";
+    let mark = null;
+    if (c.claim) {
+      title = c.claim.agent + " is working on this";
+      detail = c.claim.progress || "Getting started";
+      mark = agentMark(c.claim.agent, 20);
+    } else if (c.resolved && c.resolvedBy && !c.resolvedByAuthor) {
+      title = "Fixed by " + c.resolvedBy;
+      detail = c.confirmed ? (c.mine ? "You" : c.author) + " confirmed the fix"
+        : c.mine ? "Confirm it, or reopen it" : "Waiting for " + c.author + " to confirm";
+      mark = c.resolvedByAgent ? agentMark(c.resolvedBy, 20, true) : icon(20, "M5 12.5l4.5 4.5L19 7.5");
+    }
+    if (mark) {
+      mark.classList.add("mark");
+      const lines = h("div", "lines");
+      lines.append(h("div", "t1", title), h("div", "t2", detail));
+      bFix.replaceChildren(mark, lines);
+    }
+    bFix.hidden = !title;
+    bFix.classList.toggle("working", !!c.claim);
+    if (c.claim) css(bFix, { "--agent": agentColor(c.claim.agent) });
+    const after = c.after && !failedShots.has(c.after) ? ATTACHMENT_PATH + c.after : "";
+    bAfter.hidden = bAfterCap.hidden = !after;
+    bShotCap.hidden = !(after && shot);
+    if (after) {
+      bAfter.href = after;
+      if (bAfterImg.getAttribute("src") !== after) bAfterImg.src = after;
+      if (!bAfterImg.isConnected) bAfter.append(bAfterImg);
+    } else {
+      bAfter.removeAttribute("href");
+      bAfterImg.removeAttribute("src");
+      bAfterImg.remove();
+    }
     bEnv.hidden = !c.env;
     if (c.env) {
       bEnv.textContent = [c.env.browser, c.env.os, c.env.viewport].join(" \u00b7 ");
@@ -1258,18 +1537,23 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
     replyArea.setAttribute("aria-label", "Reply to" + n);
     resolveBtn.textContent = c.resolved ? "Reopen" : "Resolve";
     resolveBtn.setAttribute("aria-label", resolveBtn.textContent + n);
-    deleteBtn.hidden = !c.canDelete;
+    // The commenter is asked whether someone else's fix works (Delete makes room meanwhile).
+    confirmBtn.hidden = !(c.mine && c.resolved && !c.resolvedByAuthor && !c.confirmed);
+    deleteBtn.hidden = !c.canDelete || !confirmBtn.hidden;
     deleteBtn.textContent = confirmDelete ? "Really delete?" : "Delete";
     deleteBtn.classList.toggle("danger", confirmDelete);
     deleteBtn.setAttribute("aria-label", (confirmDelete ? "Really delete" : "Delete") + n + (confirmDelete ? "?" : ""));
   }
 
-  bShotImg.addEventListener("error", () => {
-    const id = bShotImg.getAttribute("src");
-    if (id && id.startsWith(ATTACHMENT_PATH)) failedShots.add(id.slice(ATTACHMENT_PATH.length));
-    bShot.hidden = true;
-    schedulePlace();
-  });
+  for (const [img, link] of [[bShotImg, bShot], [bAfterImg, bAfter]]) {
+    img.addEventListener("error", () => {
+      const id = img.getAttribute("src");
+      if (id && id.startsWith(ATTACHMENT_PATH)) failedShots.add(id.slice(ATTACHMENT_PATH.length));
+      link.hidden = true;
+      renderBubble();
+      schedulePlace();
+    });
+  }
 
   function sendReply() {
     const c = bubbleId && comments.get(bubbleId);
@@ -1303,6 +1587,10 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
     const c = bubbleId && comments.get(bubbleId);
     if (c) send({ type: "resolve", id: c.id, resolved: !c.resolved }); // the hub echoes the change
   });
+  confirmBtn.addEventListener("click", () => {
+    const c = bubbleId && comments.get(bubbleId);
+    if (c && c.mine && c.resolved) send({ type: "confirm", id: c.id }); // the hub echoes the change
+  });
   deleteBtn.addEventListener("click", () => {
     const c = bubbleId && comments.get(bubbleId);
     if (!c || !c.canDelete) return;
@@ -1322,7 +1610,11 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
     const list = pageComments().filter((c) => !c.resolved);
     if (!list.length) return;
     cycle = (cycle + 1) % list.length;
-    const c = list[cycle];
+    revealComment(list[cycle]);
+  }
+
+  // Scrolls a comment on this page into view and opens it.
+  function revealComment(c) {
     const v = toViewport(c);
     const behavior = reducedMotion.matches ? "auto" : "smooth";
     if (v.el && typeof v.el.scrollIntoView === "function" && v.el.getBoundingClientRect().height < window.innerHeight * 0.8) {
@@ -2331,6 +2623,7 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
       const p = cleanPeer(raw);
       if (p && p.id !== me.id) peers.set(p.id, p);
     }
+    for (const p of peers.values()) showAgent(p);
     joined = shown = true;
     sessionFull = false;
     failures = 0;
@@ -2340,6 +2633,13 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
     lastLead = {};
     setErrorsFeature(!!(m.features && typeof m.features === "object" && m.features.errors === true));
     setComments(m.comments);
+    if (validId(session.reveal)) {
+      // We came here to look at a fix.
+      const c = comments.get(session.reveal);
+      delete session.reveal;
+      saveSession();
+      if (c && c.path === lastPath) setTimeout(() => lookAtFix(c), 300);
+    }
     if (me.isHost) {
       following = false;
       if (session.lead) { leadOn = true; send({ type: "lead", on: true }); } // re-assert after reconnect/reload
@@ -2356,7 +2656,8 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
     if (!p || !me || p.id === me.id) return;
     peers.set(p.id, p);
     const c = cursors.get(p.id);
-    if (c) { paintCursor(c, p); place(p.id, c); }
+    if (p.isAgent) showAgent(p);
+    else if (c) { paintCursor(c, p); place(p.id, c); }
     render();
   }
 
@@ -2377,6 +2678,7 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
       case "comment": return upsertComment(m.comment);
       case "comment-delete": return removeComment(m.id);
       case "point": return onPoint(m);
+      case "capture": return onCapture(m);
       default: return; // unknown types are ignored
     }
   }

@@ -18,7 +18,7 @@ Requirements and limits:
 - Only `http://` local addresses can be shared.
 - OpenTunnel passes the public hostname to your server as-is, so Vite and similar dev servers reject it. **Fix Host Header** puts OpenTraffic's local proxy in front to send the local host instead.
 - Live collaboration works the same as on Quick Tunnels.
-- Anyone with the link can open a share, and the address shows up in public certificate logs. Shares can't be password-protected, so anything private should ask visitors to sign in itself.
+- Anyone with the link can open a share, and the address shows up in public certificate logs. Add a password under **Protection…** and OpenTraffic asks visitors for it before anything reaches your app (see [Protected shares](/docs/protection#passwords-on-quick-tunnels-and-opentunnel)).
 - OpenTunnel is an early beta.
 
 ## Next steps

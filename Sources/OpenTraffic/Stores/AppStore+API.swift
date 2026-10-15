@@ -36,7 +36,28 @@ final class AppAPIBackend: OpenTrafficAPIBackend {
     }
 
     func resolveComment(_ share: String, commentID: String, resolved: Bool) async throws -> APIComment {
-        try await store.apiResolve(share, commentID: commentID, resolved: resolved)
+        try await store.apiResolve(share, commentID: commentID, resolved: resolved, client: nil)
+    }
+
+    func resolveComment(_ share: String, commentID: String, resolved: Bool, client: String) async throws -> APIComment {
+        // The bare opentraffic command is the user at a terminal, so it resolves as the host.
+        try await store.apiResolve(share, commentID: commentID, resolved: resolved, client: client == "opentraffic command" ? nil : client)
+    }
+
+    func claimComment(_ share: String, commentID: String, progress: String?, client: String) async throws -> APIComment {
+        try await store.apiClaim(share, commentID: commentID, progress: progress, client: client)
+    }
+
+    func releaseComment(_ share: String, commentID: String, client: String) async throws -> APIComment {
+        try await store.apiRelease(share, commentID: commentID, client: client)
+    }
+
+    func afterScreenshot(_ share: String, commentID: String) async throws -> (data: Data, contentType: String) {
+        try await store.apiScreenshot(share, commentID: commentID, after: true)
+    }
+
+    func agentRunScope(for caller: APICaller) async -> AgentRunScope? {
+        await store.agentRunScope(for: caller)
     }
 
     func reply(_ share: String, commentID: String, text: String, client: String) async throws -> APIComment {
@@ -278,7 +299,10 @@ extension AppStore {
             stopsAt: autoStopDeadlines[definition.id],
             health: health(for: definition.id)?.checks.map {
                 APIHealthCheck(kind: $0.kind.rawValue, title: $0.kind.title(for: definition.kind.provider), state: "\($0.state)", detail: $0.detail)
-            }
+            },
+            branch: definition.kind.supportsCollaboration ? definition.workOnBranch : nil,
+            branchName: definition.branchSession?.branch,
+            baseBranch: definition.branchSession?.original
         )
     }
 
@@ -368,7 +392,12 @@ extension AppStore {
         loadComments(for: definition.id)
         return comments(for: definition.id)
             .filter { status == .all || (status == .open) != $0.resolved }
-            .map { APIComment($0, shareID: definition.id) }
+            .map { apiComment($0, in: definition.id) }
+    }
+
+    /// A comment as the API shows it, with the app working on it.
+    func apiComment(_ comment: CollabComment, in id: UUID) -> APIComment {
+        APIComment(comment, shareID: id, claim: agentClaims.claim(share: id, comment: comment.id))
     }
 
     private func apiComment(_ definition: TunnelDefinition, _ commentID: String) throws -> CollabComment {
@@ -378,11 +407,11 @@ extension AppStore {
         return comment
     }
 
-    func apiScreenshot(_ reference: String, commentID: String) throws -> (data: Data, contentType: String) {
+    func apiScreenshot(_ reference: String, commentID: String, after: Bool = false) throws -> (data: Data, contentType: String) {
         let definition = try apiDefinition(reference)
         let comment = try apiComment(definition, commentID)
-        guard let url = screenshotURL(for: comment, in: definition.id), let data = try? Data(contentsOf: url) else {
-            throw OpenTrafficAPIError.notFound("This comment has no screenshot.")
+        guard let url = screenshotURL(for: comment, in: definition.id, after: after), let data = try? Data(contentsOf: url) else {
+            throw OpenTrafficAPIError.notFound(after ? "There's no picture of this comment's fix yet." : "This comment has no screenshot.")
         }
         let type = switch url.pathExtension {
         case "webp": "image/webp"
@@ -392,11 +421,49 @@ extension AppStore {
         return (data, type)
     }
 
-    func apiResolve(_ reference: String, commentID: String, resolved: Bool) async throws -> APIComment {
+    /// `client`: the app resolving it, shown to the commenter (nil: an older client, shown as the host).
+    func apiResolve(_ reference: String, commentID: String, resolved: Bool, client: String?) async throws -> APIComment {
         let definition = try apiDefinition(reference)
         _ = try apiComment(definition, commentID)
-        await resolveComment(commentID, resolved: resolved, for: definition.id)
-        return APIComment(try apiComment(definition, commentID), shareID: definition.id)
+        await resolveComment(commentID, resolved: resolved, for: definition.id, by: client, agent: client != nil)
+        return apiComment(try apiComment(definition, commentID), in: definition.id)
+    }
+
+    func apiClaim(_ reference: String, commentID: String, progress: String?, client: String) throws -> APIComment {
+        let definition = try apiDefinition(reference)
+        let comment = try apiComment(definition, commentID)
+        guard !comment.resolved else { throw OpenTrafficAPIError.conflict("Comment \(commentID) is resolved already.") }
+        let isNew = agentClaims.claim(share: definition.id, comment: commentID) == nil
+        // Visitors see the progress, so no secrets in it.
+        let progress = progress.map { redactedForVisitors($0, client: client, in: definition) }
+        let claim: AgentClaim
+        do {
+            claim = try agentClaims.claim(share: definition.id, comment: commentID, agent: client, progress: progress)
+        } catch .claimed(let other) {
+            throw OpenTrafficAPIError.conflict("\(other) is already working on comment \(commentID).")
+        }
+        claimsChanged(for: definition.id)
+        let result = APIComment(comment, shareID: definition.id, claim: claim)
+        if isNew {
+            noteClaimForBranch(commentID, for: definition.id)
+            if let share = apiShareRef(definition.id) { apiEvents.append(.commentClaimed, share: share, comment: result) }
+        }
+        return result
+    }
+
+    func apiRelease(_ reference: String, commentID: String, client: String) throws -> APIComment {
+        let definition = try apiDefinition(reference)
+        let comment = try apiComment(definition, commentID)
+        if let holder = agentClaims.claim(share: definition.id, comment: commentID), holder.agent != client {
+            throw OpenTrafficAPIError.conflict("\(holder.agent) is working on comment \(commentID), not \(client).")
+        }
+        if agentClaims.release(share: definition.id, comment: commentID, agent: client) != nil {
+            claimsChanged(for: definition.id)
+            if let share = apiShareRef(definition.id) {
+                apiEvents.append(.commentReleased, share: share, comment: APIComment(comment, shareID: definition.id))
+            }
+        }
+        return APIComment(comment, shareID: definition.id)
     }
 
     func apiReply(_ reference: String, commentID: String, text: String, client: String) async throws -> APIComment {
@@ -405,10 +472,11 @@ extension AppStore {
         guard let text = text.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank, text.count <= CollabRoom.maximumCommentLength else {
             throw OpenTrafficAPIError.badRequest("text must be 1–\(CollabRoom.maximumCommentLength) characters.")
         }
-        guard let updated = await replyToComment(commentID, text: text, for: definition.id, agent: client) else {
+        let visible = redactedForVisitors(text, client: client, in: definition)
+        guard let updated = await replyToComment(commentID, text: visible, for: definition.id, agent: client) else {
             throw OpenTrafficAPIError.conflict("The reply couldn't be added.")
         }
-        return APIComment(updated, shareID: definition.id)
+        return apiComment(updated, in: definition.id)
     }
 
     func apiErrors(_ reference: String) throws -> [CollabErrorGroup] {

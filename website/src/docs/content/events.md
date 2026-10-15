@@ -14,7 +14,9 @@ done
 ```
 
 Event types: `share.started`, `share.stopped`, `session.joined`, `session.left`, `comment.created`,
-`comment.updated`, `comment.deleted`, `error.reported`.
+`comment.updated` (also when a comment is resolved, confirmed, or reopened: see its `status`), `comment.deleted`,
+`comment.claimed` (an app started working on it: `comment.claimedBy`), `comment.released` (it stopped without
+resolving it, or its claim lapsed), `error.reported`.
 
 ## Event object
 

@@ -42,6 +42,7 @@ extension AppStore {
         guard let index = definitions.firstIndex(where: { $0.id == id }), definitions[index].collaboration != enabled else { return }
         definitions[index].collaboration = enabled
         saveDefinitions()
+        if !enabled { await endBranchSession(for: id) }
         if isActive(id) { await restart(id) }
     }
 
@@ -61,15 +62,24 @@ extension AppStore {
 
     // MARK: Lifecycle
 
-    /// Starts a Quick Tunnel whose connector forwards to a fresh collaboration proxy.
-    func startQuickWithCollaboration(_ definition: TunnelDefinition, generation: UInt64, executable: URL) async {
+    /// Quick Tunnels go through OpenTraffic's proxy for live collaboration or a password.
+    func quickNeedsProxy(_ definition: TunnelDefinition) -> Bool {
+        if usesCollaboration(definition) { return true }
+        if case .password = definition.protection { return true }
+        return false
+    }
+
+    /// Starts a Quick Tunnel whose connector forwards to a fresh proxy (collaboration, a password, or both).
+    func startQuickWithProxy(_ definition: TunnelDefinition, generation: UInt64, executable: URL) async {
+        let collaboration = usesCollaboration(definition)
         do {
-            guard let proxyURL = try await startShareProxy(for: definition, generation: generation, collaboration: true) else { return }
+            guard let proxyURL = try await startShareProxy(for: definition, generation: generation, collaboration: collaboration) else { return }
             startQuickConnector(definition, localURL: proxyURL, generation: generation, executable: executable)
             // The connector didn't launch: nothing will reach the proxy.
             if runtime(for: definition.id).state == .failed { stopCollaboration(definition.id) }
         } catch {
-            setFailure("OpenTraffic couldn't start live collaboration: \(error.localizedDescription)", for: definition.id, generation: generation)
+            let what = collaboration ? "live collaboration" : "this share"
+            setFailure("OpenTraffic couldn't start \(what): \(error.localizedDescription)", for: definition.id, generation: generation)
         }
     }
 
@@ -82,6 +92,7 @@ extension AppStore {
             throw OpenTrafficError.invalidLocalURL
         }
         guard !collaboration || Self.collaborationScript != nil else { throw OpenTrafficError.invalidLocalURL }
+        let access = try shareAccess(for: definition)
         stopCollaboration(definition.id)
         let id = definition.id
         let proxy = CollabProxy(
@@ -99,6 +110,7 @@ extension AppStore {
             ),
             comments: collaboration ? comments(for: id) : []
         )
+        proxy.setAccess(access)
         if collaboration {
             proxy.setBridgedPorts(Set(definition.bridgedPorts))
             await proxy.setCapturesErrors(definition.captureErrors)
@@ -126,6 +138,7 @@ extension AppStore {
                     self.commentsChanged(comments, for: id)
                 }
             }
+            await proxy.setAgentWork(agentClaims.claims(share: id).map(\.work))
         }
         _ = try await proxy.start()
         guard runtime(for: id).generation == generation, let proxyURL = proxy.localURL else {
@@ -134,6 +147,7 @@ extension AppStore {
         }
         collabProxies[id] = proxy
         updateReservedPorts()
+        if collaboration { Task { await beginBranchSession(for: id) } }
         return proxyURL
     }
 
@@ -164,7 +178,7 @@ extension AppStore {
         if let share = apiShareRef(id) {
             for peer in joined { apiEvents.append(.sessionJoined, share: share, peer: APIPerson(peer)) }
         }
-        let joinedNames = joined.filter { !$0.isHost }.map(\.name)
+        let joinedNames = joined.filter { !$0.isHost && !$0.isAgent }.map(\.name)
         if !joinedNames.isEmpty { notifyJoined(joinedNames, for: id) }
     }
 
@@ -242,9 +256,9 @@ extension AppStore {
         return comments[index]
     }
 
-    /// The picture attached to a comment, if any.
-    func screenshotURL(for comment: CollabComment, in id: UUID) -> URL? {
-        guard let attachment = comment.screenshot, CollabProxyAttachment.isValid(attachment) else { return nil }
+    /// The picture attached to a comment, or with `after`, the picture of it once resolved; if any.
+    func screenshotURL(for comment: CollabComment, in id: UUID, after: Bool = false) -> URL? {
+        guard let attachment = after ? comment.afterScreenshot : comment.screenshot, CollabProxyAttachment.isValid(attachment) else { return nil }
         let directory = feedbackPersistence.attachmentsDirectory(id)
         return ["webp", "jpg", "png"].lazy
             .map { directory.appending(path: "\(attachment).\($0)") }
@@ -291,13 +305,14 @@ extension AppStore {
         let previous = self.comments(for: id)
         let known = Set(previous.map(\.id))
         setComments(comments, for: id)
+        let byID = Dictionary(previous.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         if let share = apiShareRef(id) {
-            let byID = Dictionary(previous.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             for comment in comments {
+                let claim = agentClaims.claim(share: id, comment: comment.id)
                 if let old = byID[comment.id] {
-                    if old != comment { apiEvents.append(.commentUpdated, share: share, comment: APIComment(comment, shareID: id)) }
+                    if old != comment { apiEvents.append(.commentUpdated, share: share, comment: APIComment(comment, shareID: id, claim: claim)) }
                 } else {
-                    apiEvents.append(.commentCreated, share: share, comment: APIComment(comment, shareID: id))
+                    apiEvents.append(.commentCreated, share: share, comment: APIComment(comment, shareID: id, claim: claim))
                 }
             }
             let current = Set(comments.map(\.id))
@@ -305,8 +320,41 @@ extension AppStore {
                 apiEvents.append(.commentDeleted, share: share, commentId: comment.id)
             }
         }
+        // Resolved or deleted from the page while an app was on it: nothing left to work on.
+        let open = Set(comments.lazy.filter { !$0.resolved }.map(\.id))
+        for claim in agentClaims.claims(share: id) where !open.contains(claim.commentID) {
+            agentClaims.release(share: id, comment: claim.commentID)
+            claimsChanged(for: id)
+        }
+        for comment in comments {
+            guard let old = byID[comment.id] else { continue }
+            if comment.resolved, !old.resolved { commitFixIfNeeded(comment, for: id) }
+            if comment.confirmed, !old.confirmed {
+                notifyFixFeedback(comment, confirmed: true, for: id)
+            } else if old.resolved, !comment.resolved {
+                // Reopened from the page, not by the host or an app.
+                if quietReopens.remove(comment.id) == nil, !old.resolvedByAuthor, old.resolvedBy != nil {
+                    notifyFixFeedback(old, confirmed: false, for: id)
+                }
+            }
+        }
         let new = comments.filter { !known.contains($0.id) && !$0.fromHost }
         if !new.isEmpty { notifyCommented(new, for: id) }
+        if agentRunsAutomatically {
+            for comment in new { scheduleAutomaticAgentRun(comment.id, for: id) }
+        }
+    }
+
+    /// The commenter agreed with a fix, or reopened it.
+    private func notifyFixFeedback(_ comment: CollabComment, confirmed: Bool, for id: UUID) {
+        guard notifyCollaboration, let share = definitions.first(where: { $0.id == id }) else { return }
+        let fixer = comment.resolvedBy.map { " by \($0)" } ?? ""
+        TunnelNotifications.post(
+            title: confirmed ? "\(comment.author) confirmed the fix on \(share.name)" : "A fix\(fixer) was reopened on \(share.name)",
+            body: "\(comment.path): \(comment.text)",
+            identifier: "collab-fix-\(comment.id)",
+            tunnelID: id
+        )
     }
 
     /// Comments are grouped like joins: at most one notification per share every 10 seconds.
@@ -369,14 +417,18 @@ extension AppStore {
         }
     }
 
-    /// Resolves or reopens a comment; live for everyone when the share is running.
-    func resolveComment(_ commentID: String, resolved: Bool, for id: UUID) async {
+    /// Resolves or reopens a comment; live for everyone when the share is running. `by` is the app that
+    /// resolved it (with `agent`), or nil for the host.
+    func resolveComment(_ commentID: String, resolved: Bool, for id: UUID, by name: String? = nil, agent: Bool = false) async {
+        let name = name ?? (collaborationHostName.nilIfBlank ?? "Host")
+        if resolved, agentClaims.release(share: id, comment: commentID) != nil { claimsChanged(for: id) }
+        if !resolved, comments(for: id).contains(where: { $0.id == commentID && $0.resolved }) { quietReopens.insert(commentID) }
         if let proxy = collabProxies[id] {
-            await proxy.resolveComment(commentID, resolved: resolved)
+            await proxy.resolveComment(commentID, resolved: resolved, by: name, agent: agent)
         } else {
             var comments = comments(for: id)
-            guard let index = comments.firstIndex(where: { $0.id == commentID }) else { return }
-            comments[index].resolved = resolved
+            guard let index = comments.firstIndex(where: { $0.id == commentID }), comments[index].resolved != resolved else { return }
+            comments[index].setResolved(resolved, by: name, agent: agent)
             commentsChanged(comments, for: id)
         }
     }
@@ -447,6 +499,6 @@ extension AppStore {
 
 extension APIPerson {
     init(_ peer: CollabPeer) {
-        self.init(name: peer.name, path: peer.path, isHost: peer.isHost)
+        self.init(name: peer.name, path: peer.path, isHost: peer.isHost, isAgent: peer.isAgent ? true : nil)
     }
 }

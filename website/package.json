@@ -13,7 +13,8 @@
     "video:gif": "ffmpeg -v error -y -i out/opentraffic-promo.mp4 -an -vf 'fps=10,scale=800:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle' -loop 0 ../docs/images/demo.gif",
     "promo": "python3 remotion/audio/sfx.py && python3 remotion/audio/music.py && remotion render remotion/index.ts Promo out/promo-unmastered.mp4 --public-dir=remotion/public --codec=h264 --crf=18 --audio-codec=aac --audio-bitrate=320k && remotion/audio/master.sh out/promo-unmastered.mp4 out/opentraffic-promo.mp4",
     "studio": "remotion studio remotion/index.ts --public-dir=remotion/public",
-    "docs:check": "node scripts/check-docs.mjs"
+    "docs:check": "node scripts/check-docs.mjs",
+    "sign-in": "vite build --ssr src/sign-in/render.tsx --outDir dist-sign-in && node scripts/build-sign-in.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

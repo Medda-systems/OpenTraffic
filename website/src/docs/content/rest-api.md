@@ -38,16 +38,18 @@ Shares are named by id or by name (case-insensitive); percent-encode names with 
 | GET | `/v1/shares` | | `{shares: [Share]}` |
 | POST | `/v1/shares` | see below | `Share` (waits ≤ 30 s for the URL) |
 | GET | `/v1/shares/{ref}` | | `Share` |
-| PATCH | `/v1/shares/{ref}` | `{name?, url?, collaboration?, captureErrors?, autoStart?, project?, rewriteHostHeader?, autoStop?}` | `Share` |
+| PATCH | `/v1/shares/{ref}` | `{name?, url?, collaboration?, captureErrors?, branch?, autoStart?, project?, rewriteHostHeader?, autoStop?}` | `Share` |
 | DELETE | `/v1/shares/{ref}` | | `{deleted: true}` |
 | POST | `/v1/shares/{ref}/start`, `/stop`, `/restart` | | `Share` (`/stop` waits ≤ 10 s until it has stopped) |
-| GET, PUT | `/v1/shares/{ref}/protection` | PUT: `{mode, username?, emails?}` | `{mode, username, password, emails}` |
+| GET, PUT | `/v1/shares/{ref}/protection` | PUT: `{mode, username?, emails?}` | `{mode, username, password, emails, link}`; `link` (temporary and OpenTunnel shares, once they have an address) has the password built in, and `username` is null there since any works |
 | POST | `/v1/shares/{ref}/password` | | a new password: `{mode, username, password, emails}` |
 | GET | `/v1/shares/{ref}/comments` | `?status=open\|resolved\|all` (default `open`) | `{comments: [Comment]}` |
 | PATCH | `/v1/shares/{ref}/comments/{id}` | `{resolved}` | `Comment` |
 | DELETE | `/v1/shares/{ref}/comments/{id}` | | `{deleted: true}` |
 | POST | `/v1/shares/{ref}/comments/{id}/replies` | `{text}` (1–1000 characters) | `Comment` |
-| GET | `/v1/shares/{ref}/comments/{id}/screenshot` | | image bytes |
+| POST | `/v1/shares/{ref}/comments/{id}/claim` | optional `{progress}` (at most 120 characters) | `Comment`; 409 when another app has it or it's resolved |
+| DELETE | `/v1/shares/{ref}/comments/{id}/claim` | | `Comment` |
+| GET | `/v1/shares/{ref}/comments/{id}/screenshot` | `?which=before\|after` (default `before`) | image bytes |
 | GET | `/v1/shares/{ref}/errors` | | `{errors: [ErrorGroup]}` |
 | GET | `/v1/shares/{ref}/logs` | `?lines=200` | `{lines: [String]}` |
 | GET | `/v1/events` | `?since=<seq>&wait=<seconds ≤ 60>` | `{events: [Event], next: <seq>}` |
@@ -72,6 +74,7 @@ Dates are ISO 8601. Errors are `{"error": {"code": "...", "message": "..."}}` wi
 | `provider` | string | `quick`, `opentunnel`, `tailscale`, `ngrok`, or `domain`; defaults to `quick`. |
 | `name` | string | Optional display name; must not belong to another share. |
 | `collaboration` | boolean | Enable collaboration where supported; defaults to false in REST (true in the MCP `share` tool). |
+| `branch` | boolean | With `collaboration`: [work on a branch](/docs/collaboration#work-on-a-branch) while it runs. |
 | `hostname` | string | `domain`: the hostname to serve, in your Cloudflare account (required). `ngrok`: a domain reserved in your ngrok account. |
 | `replaceDNS` | boolean | `domain`: take over a hostname that already has a DNS record. An existing CNAME is pointed at the new tunnel and A/AAAA records are replaced; other records are never removed. |
 | `funnel` | boolean | `tailscale`: public on the internet through Funnel instead of tailnet only. |
@@ -83,11 +86,13 @@ A create request waits up to 30 seconds for a URL. The returned share may still 
 
 ## Share response
 
-A `Share` contains `id`, `name`, `provider`, `kind`, `state`, `localURL`, optional `publicURL`, `collaboration`, `people`, `openComments`, and `comments`. It also has what the share's detail view shows: `hostname`, `lastError` (when failed), `protection` (`none`, `password`, `google`, `github`, or `email`), `project`, `autoStart`, `captureErrors`, `rewriteHostHeader`, `funnel` (Tailscale), `stopsAt`, and `health`, the connection path's latest checks (`kind`, `title`, `state` of `ok`, `working`, `failed`, or `skipped`, and `detail`). Each person has a name, path, and `isHost` flag. State is one of `stopped`, `starting`, `running`, `stopping`, or `failed`.
+A `Share` contains `id`, `name`, `provider`, `kind`, `state`, `localURL`, optional `publicURL`, `collaboration`, `people`, `openComments`, and `comments`. It also has what the share's detail view shows: `hostname`, `lastError` (when failed), `protection` (`none`, `password`, `google`, `github`, or `email`), `project`, `autoStart`, `captureErrors`, `rewriteHostHeader`, `funnel` (Tailscale), `stopsAt`, `branch` (and, while it's on one, `branchName` and the `baseBranch` it merges into), and `health`, the connection path's latest checks (`kind`, `title`, `state` of `ok`, `working`, `failed`, or `skipped`, and `detail`). Each person has a name, path, and `isHost` flag; coding agents at work on a comment also appear, with `isAgent: true`. State is one of `stopped`, `starting`, `running`, `stopping`, or `failed`.
 
 ## Comment response
 
-A `Comment` contains `shareId`, `id`, `author`, `path`, `text`, `createdAt`, `resolved`, `replies`, `hasScreenshot`, and `errors`. Optional context includes `title`, `label`, `anchor`, and `environment`. Fetch screenshot bytes from the screenshot endpoint only when `hasScreenshot` is true. Swift’s optional fields can be omitted from JSON.
+A `Comment` contains `shareId`, `id`, `author`, `path`, `text`, `createdAt`, `resolved`, `replies`, `hasScreenshot`, and `errors`. Optional context includes `title`, `label`, `anchor`, and `environment`. `status` is `open`, `working` (an app claimed it: `claimedBy`, and its latest `progress`), `resolved` (`resolvedBy`, `resolvedAt`), or `confirmed` (the commenter agreed with the fix). Fetch screenshot bytes from the screenshot endpoint only when `hasScreenshot` is true, and the picture of the fix with `which=after` only when `hasAfterScreenshot` is true.
+
+A claim says an app is working on a comment: other apps' claims are refused, and everyone in the session sees the app at the comment's element. Claim again to update `progress`; that also renews the claim, which otherwise lapses after 15 minutes. Resolving ends it. The `X-OpenTraffic-Client` header names the app, on claims, replies, and fixes. Swift’s optional fields can be omitted from JSON.
 
 ## Limits and errors
 

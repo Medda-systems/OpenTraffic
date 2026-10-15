@@ -237,6 +237,42 @@ struct CopyButton: View {
     }
 }
 
+/// Copies a share's link; a share with a password OpenTraffic checks also offers the link with the
+/// password built in, from the button's menu.
+struct CopyLinkMenu: View {
+    let url: String?
+    let linkWithPassword: () -> String?
+    @State private var copied = false
+
+    var body: some View {
+        Menu {
+            Button("Copy Link", systemImage: "link") { copy(url) }
+            Button("Copy Link with Password", systemImage: "key") { copy(linkWithPassword(), concealed: true) }
+        } label: {
+            Label(copied ? "Copied" : "Copy Link", systemImage: copied ? "checkmark" : "doc.on.doc")
+                .labelStyle(.iconOnly)
+                .contentTransition(.symbolEffect(.replace))
+                .foregroundStyle(copied ? AnyShapeStyle(.green) : AnyShapeStyle(.primary))
+        } primaryAction: {
+            copy(url)
+        }
+        .menuStyle(.button)
+        .fixedSize()
+        .disabled(url == nil)
+        .help(copied ? "Copied" : "Copy the link. The menu also has the link with the password built in.")
+    }
+
+    private func copy(_ text: String?, concealed: Bool = false) {
+        guard let text else { return }
+        Pasteboard.copy(text, concealed: concealed)
+        copied = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            copied = false
+        }
+    }
+}
+
 struct AnyLabelStyle: LabelStyle {
     private let make: (Configuration) -> AnyView
 

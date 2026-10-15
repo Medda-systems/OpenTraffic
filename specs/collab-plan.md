@@ -97,8 +97,8 @@ Colors come from a fixed palette, assigned in join order.
 * Names are rendered with `textContent`; all inputs are length-limited and validated.
 * At most 50 connected peers per share.
 * Visitors can see each other's chosen names, cursor positions, and which path they're on —
-  the share's detail view says so next to the toggle. Combine with password or login protection
-  (phase 3 for ngrok/custom domains) for private sessions.
+  the share's detail view says so next to the toggle. Combine with a password (section 3.8) for
+  private sessions.
 * Content-Security-Policy is adjusted only as far as OpenTraffic's own scripts and connections need
   (section 3.2): the two exact script URLs, or a nonce under `'strict-dynamic'`.
 * Followers and the people list only ever see a page's path, never its query string or fragment,
@@ -288,3 +288,141 @@ file and relays newline-delimited JSON-RPC between stdin/stdout and `POST /mcp`,
 **Webhooks** (Settings → Integrations): URL, events (empty = all), secret. Each event is POSTed as JSON with
 `X-OpenTraffic-Event`, `X-OpenTraffic-Delivery: <event id>`, and `X-OpenTraffic-Signature: sha256=<hex HMAC-SHA256 of the
 body with the secret>`; retried after 1, 5 and 25 s on errors or non-2xx.
+
+### 3.5 Agents at work, and fixes the commenter hears about
+
+OpenTraffic never runs a model. Agents (a subscription CLI like Claude Code or Codex, or a script with an API key)
+work through the MCP server, the `opentraffic` command or REST, and OpenTraffic shows that work in the session.
+
+**Claims (the app).** `claim_comment` / `POST …/comments/{id}/claim {progress?}` gives the calling client (its
+`X-OpenTraffic-Client` / `OPENTRAFFIC_CLIENT` name) a 15-minute lease on an open comment; claiming again renews it and
+updates `progress` (≤ 120 chars, one line). Another client's unexpired claim is a 409. Resolving, deleting, or
+resolving from the page ends it; `release_comment` / `DELETE …/claim` gives it up; an expired lease is dropped by the
+app's 5-second poll. Claims live in the app (`AgentClaimBook`), not on disk, and are pushed to the hub as
+`CollabAgentWork`. Events: `comment.claimed`, `comment.released`. API comments gain `status`
+(`open`/`working`/`resolved`/`confirmed`), `claimedBy`, `progress`, `resolvedBy`, `resolvedAt`, `hasAfterScreenshot`.
+
+**Agents in the session (hub).** Each agent with work is a peer with `isAgent: true`, colour `#BF5AF2`, `path` of its
+newest claimed comment, and `at: {x, y, anchor?, rx?, ry?}` — that comment's position. It joins, moves (`update`) and
+leaves like anyone. The overlay draws its cursor at `at` (no idle timeout), beside the pin, tagged
+"✦ <name> · working". Comments being worked on carry `claim: {agent, progress?}`; their pins pulse.
+
+**Who resolved it (hub).** Comments record `resolvedBy` (person, host, or client name), `resolvedByAgent`,
+`resolvedByAuthor` (the commenter themselves), `resolvedAt`, `confirmed`, and `afterScreenshot`; reopening clears
+them all. Each person's copy says `mine: true` when their overlay (`client`) wrote it.
+
+| Client → hub | Fields | Rules |
+| --- | --- | --- |
+| `confirm` | `id` | Only the comment's author, only while resolved. Sets `confirmed`. |
+| `after` | `id`, `screenshot` (upload id) | A picture of the fix: from the host's connection, or the author's; the upload must be this connection's; only for a comment resolved by someone else that has none yet. One per 2 s. |
+
+| Hub → client | Fields |
+| --- | --- |
+| `capture` | `id` — sent only to the host's overlay, when a comment on its page is resolved by someone else, and again for each such comment without a picture when the host's page arrives there (also those from the last day, after a restart). |
+
+**Overlay.** When one of `mine` becomes resolved by someone else (or was while they were away, once per browser:
+`localStorage["__opentraffic_collab_fixes_seen"]`), it shows "✓ <resolvedBy> fixed your comment" with **Take a look**
+(goes to the page, scrolls to the element, opens it, and pictures the fix if nobody has) and **Later**. The bubble
+says who's working on it or who fixed it, shows **Before**/**After**, and asks the author **Looks good** / **Reopen**.
+On `capture` the host's overlay waits 1.5 s for hot reload, then pictures the element like a comment screenshot.
+A visitor's overlay only pictures a fix after they click **Take a look**.
+
+**Starting an agent (app).** Settings → Integrations → *Agent for comments* holds a command (presets for Claude Code,
+Codex, Cursor, opencode, or custom) and *Run it by itself* (off by default). OpenTraffic runs `/bin/zsh -c <command>`
+in the share's `agentDirectory` (else the local server's working directory, found from its pid, then remembered),
+with the user's login-shell PATH and `OPENTRAFFIC_PROMPT`, `OPENTRAFFIC_SHARE`, `OPENTRAFFIC_SHARE_ID`,
+`OPENTRAFFIC_COMMENT_ID`, `OPENTRAFFIC_CLIENT` — ids only, never visitor text. Triggers: **Send to …** in the Feedback
+tab, or by itself 5 s after a visitor's comment when it's still open and unclaimed, no client is in
+`wait_for_feedback` for the share (or was in the last 90 s), and no client holds another of its comments. One run per
+share at a time (the rest queue), 20-minute limit, **Stop** ends the command and what it started. A run that exits
+while its client still holds the comment releases it.
+
+### 3.6 Work on a branch
+
+A per-share switch (`TunnelDefinition.workOnBranch`, off by default; `branch` in the API, `--branch` in the CLI).
+`GitRepository` (Core) runs `git -C <root>`; calls on one repository are serialized.
+
+* **Start** (when the share's collaboration starts): the project folder is `agentDirectory` (else the local server's
+  working directory, from its pid); its repository's root is found with `rev-parse --show-toplevel`. Refused on a
+  detached HEAD or during a merge/rebase/cherry-pick. `git switch -c opentraffic/<slug>-<yyyyMMdd-HHmm>` (`-2`… if
+  taken) from the current branch: the working folder, including uncommitted changes, is untouched. The session
+  (`root`, `original`, `branch`, `startedAt`) is saved on the share, so a restart or crash carries on with it while
+  that branch is still checked out. The baseline is a snapshot of every changed file (`status --porcelain -z
+  --untracked-files=all` + `hash-object`).
+* **Fix commits**: on claim, the app snapshots the changes. When the comment is resolved by an app, the host, or after
+  a claim, it commits the paths whose contents differ from that snapshot (else from the baseline, which moves to
+  after each commit): `git add -A -- <paths>`, `git commit -m "Fix: <comment>" -m "<who, where, share, id>" --
+  <paths>`, so other staged or unstaged changes stay as they are. Hooks run; a failure is shown, not retried.
+* **End** (a real stop, removing the share, turning the switch or collaboration off, quitting; not a restart): if the
+  branch is still checked out and the original is an ancestor, fast-forward without touching files (`update-ref` the
+  original to the branch's head, `symbolic-ref HEAD` to the original, `branch -d`). If the original moved on, merge
+  only from a clean tracked tree (`switch`, `merge --no-edit`; on conflict `merge --abort` and switch back).
+  Otherwise keep the branch checked out, and the session, with a notice and notification saying why.
+
+**Setting up git.** Turning the switch on in the app checks first (`BranchReadiness`): no folder yet → on, decided at
+start; git not installed (no Homebrew git, and `xcode-select -p` has no git, checked without running Apple's stub,
+which would open macOS's installer) → offer `xcode-select --install`; no repository → **Set Up Git** / **Continue
+Without**. Set up = refuse without `user.name`/`user.email` (before creating anything); `git init
+--initial-branch=main`; write `GitRepository.defaultIgnore` when there's no `.gitignore`; `add -A`, then `rm --cached`
+`.env`/`.env.*` (not `.example`/`.sample`/`.template`) and files over 10 MB; commit "Before OpenTraffic". Local only.
+`.env` files are also never part of a fix commit. The API and CLI refuse `branch: true` with a 409 saying what to do.
+At start, a project that isn't (or no longer is) in a repository, or missing git, turns the switch off with one notice.
+
+### 3.7 Agents and visitors' words (prompt injection)
+
+Anyone with the link writes text an agent reads: the comment, replies, names, element labels, page titles,
+reported errors, and the screenshot (all visitor-controlled, since visitors control their browser). Defences,
+none visible in normal use (`Sources/OpenTrafficCore/AgentSafety.swift`):
+
+1. **Run scope.** The private socket gives the caller's pid (audit token); the HTTP API, only while runs are
+   active, the pid owning the connection's port (`lsof`). A caller descending from a running agent command's
+   process (`ProcessAncestry`), or remembered from an earlier request of one, is held to `AgentRunScope`: MCP
+   lists and accepts only get_feedback (filtered to its comment), get_screenshot, claim/release/reply/resolve
+   on its comment; REST likewise; everything else is 403. After its run, such a process may do nothing.
+2. **Presets** without shell or web: Claude Code `--disallowedTools "Bash,WebFetch,WebSearch,Read(./.env),
+   Read(./.env.*)"`; Codex `-s workspace-write -c sandbox_workspace_write.network_access=false`; Cursor without
+   `--force` (its allowlist); opencode `OPENCODE_CONFIG_CONTENT` denying bash and webfetch.
+3. **ReplyRedactor** on API replies and claim progress: `.env*` values (≥ 8 characters, not examples) of the
+   project folder and branch root, and key/token/private-key/URL-password patterns → `[hidden]`; the host gets a
+   notice.
+4. **AgentRunBudget**: automatic runs ≤ 10 per share and ≤ 3 per visitor (overlay client id) per hour.
+5. **Spotlighting**: MCP results with visitor text carry it between `<visitor-content id="…">` markers with a
+   random id per call; screenshots come with a note that their text is untrusted; the run prompt says so.
+6. **MergeGuard**: a branch merges by itself only when no changed path is sensitive (manifests, lockfiles,
+   build/tool configs, CI, scripts and server-side languages, server/api/functions folders, `.env*`), it adds
+   ≤ 400 lines, and no added line makes requests, evaluates code, runs programs, reads env vars or visitors'
+   cookies/storage, loads content or links from other sites, or holds encoded blobs.
+7. **Invisible characters**: everything visitors send is NFKC-normalised and loses control, format (incl.
+   tags, bidi, zero-width), private-use and unassigned code points, variation selectors except U+FE0F, and
+   blank fillers.
+8. **looksSuspicious**: comments (and labels/titles) shaped like instructions — overriding instructions,
+   commands, requests to disclose secrets, tool names, links off the site, base64, > 600 characters — don't
+   start the agent by themselves; they wait for Send to ….
+
+### 3.8 A password in front of the share
+
+Quick Tunnels and OpenTunnel can't be configured to ask for a password (OpenTunnel's server only relays
+encrypted bytes), but all their traffic passes through `CollabProxy` on the Mac, so the proxy asks
+(`ShareAccess`). A protected Quick share runs through the proxy even without collaboration (forward
+only); a protected OpenTunnel share likewise.
+
+* Every request is checked before anything else, including the hub socket, the overlay script, bridged
+  ports and other upgrades. Exempt: `/__opentraffic/host` (its token is checked as before) and
+  `/__opentraffic/sign-in`. The host cookie lets the host through; the `Host` header proves nothing
+  (OpenTunnel visitors can set it).
+* Signed in = cookie `__opentraffic_access` = HMAC-SHA256(password, "opentraffic-access:" + share id),
+  `HttpOnly; Secure; SameSite=Lax`, 30 days; or basic auth with the password (any username). Page
+  navigations without it get the branded sign-in page (401) in place; anything else a 401 with
+  `WWW-Authenticate: Basic`.
+* Invite links carry `ot_invite` = HMAC(password, "opentraffic-invite:" + share id); a valid one sets the
+  cookie and 303s to the same URL without it. Both values come from the password, so a new password
+  signs everyone out and stops old links, applied live with `setAccess` (no restart).
+* The sign-in POST returns a small page that stores the visitor's name for the overlay
+  (`__opentraffic_collab_name`) and continues to a same-site `next`. Five wrong tries a minute per
+  CF-Connecting-IP (or per share when the tunnel doesn't say) → 429. Comparisons are constant-time.
+* The page is built from the website's shadcn components (`website/src/sign-in`), rendered to static
+  HTML with its Tailwind CSS and the Geist font inlined by `npm run sign-in` into
+  `Sources/OpenTrafficCore/SignInTemplate.swift`; the proxy only fills in the share's name, `next`, the
+  error, and whether to ask for a name. No script runs on it.
+* The app never sees OpenTraffic's cookie or basic auth with the share's password. OpenTraffic's pages
+  send a CSP that loads nothing from elsewhere and forbids framing.

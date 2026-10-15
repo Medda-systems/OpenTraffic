@@ -34,16 +34,23 @@ public enum ProtectionOption: String, Sendable, CaseIterable, Identifiable {
 }
 
 extension TunnelKind {
-    /// The protection each kind of share supports. Quick Tunnels, OpenTunnel, and Tailscale offer
-    /// none here: Quick Tunnels and OpenTunnel can't be configured, and Tailscale's private shares are
-    /// already limited to the tailnet.
+    /// The protection each kind of share supports. Quick Tunnels and OpenTunnel can't be configured,
+    /// so their password is checked by OpenTraffic's own proxy (`passwordInProxy`). Tailscale offers
+    /// none: private shares are already limited to the tailnet.
     public var protectionOptions: [ProtectionOption] {
         switch self {
-        case .quick, .tailscale, .opentunnel: []
+        case .quick, .opentunnel: [.none, .password]
+        case .tailscale: []
         case .ngrok: [.none, .password, .google, .github]
         case .remote: [.none, .cloudflareEmail]
         }
     }
+}
+
+extension TunnelKind {
+    /// Its password is checked by OpenTraffic's proxy (a sign-in page, any username) rather than by
+    /// the tunnel provider.
+    public var passwordInProxy: Bool { self == .quick || self == .opentunnel }
 }
 
 public enum EmailList {

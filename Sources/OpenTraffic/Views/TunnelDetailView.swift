@@ -57,6 +57,10 @@ struct TunnelDetailView: View {
                 Menu {
                     Button(Vocabulary.copyURL, systemImage: "doc.on.doc") { store.copyPublicURL(tunnel.id) }
                         .disabled(publicURL == nil)
+                    if tunnel.kind.passwordInProxy, tunnel.protection.isProtected {
+                        Button("Copy Link with Password", systemImage: "key") { store.copyInviteLink(tunnel.id) }
+                            .disabled(publicURL == nil)
+                    }
                     Button(Vocabulary.openInBrowser, systemImage: "safari", action: openPublicURL)
                         .disabled(publicURL == nil)
                     Divider()
@@ -127,7 +131,9 @@ struct TunnelDetailView: View {
                     Divider()
                     PublicURLCard(
                         url: publicURL,
-                        placeholder: runtime.state == .starting ? "Creating…" : "Available once the tunnel starts"
+                        placeholder: runtime.state == .starting ? "Creating…" : "Available once the tunnel starts",
+                        linkWithPassword: tunnel.kind.passwordInProxy && tunnel.protection.isProtected
+                            ? { [store, id = tunnel.id] in store.inviteLink(for: id) } : nil
                     ) {
                         HStack(spacing: Spacing.s) {
                             Text(Vocabulary.localService).foregroundStyle(.secondary)
@@ -150,7 +156,7 @@ struct TunnelDetailView: View {
                             Button {
                                 store.present(.protection(tunnel.id))
                             } label: {
-                                Label(tunnel.protection.summary, systemImage: tunnel.protection.symbol)
+                                Label(tunnel.protection.summary(for: tunnel.kind), systemImage: tunnel.protection.symbol)
                             }
                             .buttonStyle(.borderless)
                             .foregroundStyle(tunnel.protection.isProtected ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
@@ -411,9 +417,13 @@ struct SavedPathsMenu: View {
             }
             Button("Add Path…") { draft = ""; addingPath = true }
         } label: {
+            // Menus draw their label in the text colour; this one is a link-like action, like Share… beside it.
             Label("Paths", systemImage: "link")
+                .foregroundStyle(Color.accentColor)
         }
-        .menuStyle(.borderlessButton)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
         .fixedSize()
         .disabled(store.publicURL(for: tunnel) == nil)
         .help("Copy the public URL with a saved path, like /api/webhooks")

@@ -65,6 +65,9 @@ extension AppStore {
         if request.collaboration == true, !kind.supportsCollaboration {
             throw OpenTrafficAPIError.badRequest("\(kind.provider.title) shares don't support live collaboration.")
         }
+        if request.branch == true, request.collaboration != true {
+            throw OpenTrafficAPIError.badRequest("Working on a branch needs live collaboration (collaboration: true).")
+        }
         if request.funnel == true, kind != .tailscale {
             throw OpenTrafficAPIError.badRequest("Funnel is for Tailscale shares.")
         }
@@ -83,6 +86,10 @@ extension AppStore {
         // and nothing is created for it.
         if existing == nil || start, let blocker = await apiBlocker(for: kind, funnel: funnel) {
             throw OpenTrafficAPIError(status: 409, code: "not_ready", message: blocker)
+        }
+        if request.branch == true {
+            let name = request.name?.nilIfBlank ?? existing?.name ?? target?.display ?? localURL
+            try await apiRequireBranchReady(existing ?? TunnelDefinition(name: name, kind: kind, localURL: localURL))
         }
         if start {
             let audience = kind == .tailscale && !funnel ? "on your tailnet" : "publicly"
@@ -115,6 +122,15 @@ extension AppStore {
             } catch {
                 throw OpenTrafficAPIError.badRequest(error.localizedDescription)
             }
+        }
+        if request.branch == true, let index = definitions.firstIndex(where: { $0.id == definition.id }), !definitions[index].workOnBranch {
+            if isCollaborating(definition.id) {
+                await setWorkOnBranch(true, for: definition.id)
+            } else {
+                definitions[index].workOnBranch = true
+                saveDefinitions()
+            }
+            definition = definitions[index]
         }
         guard start else { return apiShare(definition) }
         if !isActive(definition.id) { startSharing(definition) }
@@ -254,6 +270,9 @@ extension AppStore {
         if update.collaboration == true, !definition.kind.supportsCollaboration {
             throw OpenTrafficAPIError.badRequest("\(definition.kind.provider.title) shares don't support live collaboration.")
         }
+        if update.branch == true, !(update.collaboration ?? definition.collaboration) {
+            throw OpenTrafficAPIError.badRequest("Working on a branch needs live collaboration (turn it on too).")
+        }
         let autoStop = try update.autoStop.map { raw -> ShareDuration in
             guard let duration = ShareDuration(apiValue: raw) else {
                 throw OpenTrafficAPIError.badRequest("autoStop must be never, 15m, 1h, or 4h.")
@@ -276,6 +295,10 @@ extension AppStore {
         }
         if let collaboration = update.collaboration { await setCollaboration(collaboration, for: id) }
         if let captureErrors = update.captureErrors { setCaptureErrors(captureErrors, for: id) }
+        if let branch = update.branch {
+            if branch, let current = definitions.first(where: { $0.id == id }), !current.workOnBranch { try await apiRequireBranchReady(current) }
+            await setWorkOnBranch(branch, for: id)
+        }
         if let autoStart = update.autoStart { setAutoStart(autoStart, for: id) }
         if let project = update.project { setProject(project.nilIfBlank, for: id) }
         if let rewrite = update.rewriteHostHeader {
@@ -315,6 +338,8 @@ extension AppStore {
         switch definition.protection {
         case .none:
             APIProtection(mode: "none", username: nil, password: nil, emails: [])
+        case .password where definition.kind.passwordInProxy:
+            APIProtection(mode: "password", username: nil, password: sharePassword(for: definition.id), emails: [], link: inviteLink(for: definition.id))
         case .password(let username):
             APIProtection(mode: "password", username: username, password: sharePassword(for: definition.id), emails: [])
         case .login(let provider, let emails):
@@ -358,7 +383,7 @@ extension AppStore {
         guard protection == .none || definition.kind.protectionOptions.contains(protection.option) else {
             let options = definition.kind.protectionOptions.filter { $0 != .none }.map { Self.apiProtectionMode(Self.protection(for: $0)) }
             throw OpenTrafficAPIError.badRequest(options.isEmpty
-                ? "\(definition.kind.provider.title) shares can't be protected. ngrok shares take a password or a sign-in; custom domains take email codes."
+                ? "\(definition.kind.provider.title) shares can't be protected. Temporary, OpenTunnel, and ngrok shares take a password; ngrok also takes a sign-in; custom domains take email codes."
                 : "This share can be protected with: \(options.joined(separator: ", ")).")
         }
         if let message = await setProtection(protection, for: definition.id) {

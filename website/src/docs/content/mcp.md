@@ -16,9 +16,10 @@ the background. Environment:
 | `list_shares` | Shares with state, URLs, people in the session, comment counts. |
 | `share` | Publishes a local `port` or `url` (`provider`: `quick`, `tailscale`, `ngrok`, `opentunnel`; `name`; `collaboration`, default on). |
 | `start_share`, `stop_share` | By id or name. |
-| `get_feedback` | Comments (`status`: `open`, `resolved`, `all`). |
-| `resolve_comment`, `reply_to_comment` | Replies show the app's name. |
-| `get_screenshot` | The pinned element, as an image. |
+| `get_feedback` | Comments (`status`: `open`, `resolved`, `all`). Each says whether it's `open`, `working` (and who's on it), `resolved`, or `confirmed`. |
+| `claim_comment`, `release_comment` | Say you're working on a comment (with optional `progress`), or stop. The session sees the app at the element; other apps' claims are refused. A claim lapses after 15 minutes unless claimed again. |
+| `resolve_comment`, `reply_to_comment` | Replies and fixes show the app's name; the commenter is told it's fixed and can confirm or reopen it. |
+| `get_screenshot` | The pinned element, as an image; `which: after` for the picture of it once fixed. |
 | `get_errors`, `get_logs` | Browser errors visitors hit; the tunnel's log. |
 | `wait_for_feedback` | Waits (up to `timeout_seconds`, default 60, max 300) for new, changed or deleted comments; returns them and a `cursor` to pass as `since` next time. |
 
@@ -34,8 +35,10 @@ smaller `timeout_seconds`.
 | `start_share` / `stop_share` | `share` | None |
 | `get_feedback` | `share` | `status` (default `open`) |
 | `resolve_comment` | `share`, `comment_id` | `resolved` (default true) |
+| `claim_comment` | `share`, `comment_id` | `progress` (at most 120 characters) |
+| `release_comment` | `share`, `comment_id` | None |
 | `reply_to_comment` | `share`, `comment_id`, `text` | None |
-| `get_screenshot` | `share`, `comment_id` | None |
+| `get_screenshot` | `share`, `comment_id` | `which` (`before` or `after`; default `before`) |
 | `get_errors` | `share` | None |
 | `get_logs` | `share` | `lines` (default 200; clamped to 1–2000) |
 | `wait_for_feedback` | None | `share`, `since`, `timeout_seconds` (default 60; maximum 300) |
@@ -44,7 +47,9 @@ Share references are IDs or case-insensitive names. The server validates argumen
 
 ## Feedback polling
 
-`wait_for_feedback` observes comment creation, updates, and deletion. Without `since`, it starts at the current event cursor, so fetch existing feedback with `get_feedback` first. Pass the returned `cursor` as `since` in the next call. An optional `share` limits the results to one share.
+`wait_for_feedback` observes comment creation, updates, and deletion. While an app is in it (and for 90 seconds
+after), OpenTraffic counts the share as watched, and leaves new comments to that app instead of starting the
+[agent command](/docs/agents#let-opentraffic-start-your-agent). Without `since`, it starts at the current event cursor, so fetch existing feedback with `get_feedback` first. Pass the returned `cursor` as `since` in the next call. An optional `share` limits the results to one share.
 
 The in-memory event history is bounded and is reset on app restart. Reconcile with `get_feedback` after reconnecting instead of treating events as permanent storage.
 

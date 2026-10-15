@@ -75,7 +75,7 @@ public final class LocalAPIServer: Sendable {
             .childChannelInitializer { [self] channel in
                 channel.eventLoop.makeCompletedFuture {
                     try channel.pipeline.syncOperations.configureHTTPServerPipeline(withErrorHandling: true)
-                    try channel.pipeline.syncOperations.addHandler(APIConnectionHandler(server: self))
+                    try channel.pipeline.syncOperations.addHandler(APIConnectionHandler(server: self, caller: APICaller(tcpPort: channel.remoteAddress?.port)))
                 }
             }
         let channel = try await bootstrap.bind(host: "127.0.0.1", port: requestedPort).get()
@@ -102,7 +102,8 @@ public final class LocalAPIServer: Sendable {
                     guard isTrustedCaller(token) else { return channel.close() }
                     return channel.eventLoop.makeCompletedFuture {
                         try channel.pipeline.syncOperations.configureHTTPServerPipeline(withErrorHandling: true)
-                        try channel.pipeline.syncOperations.addHandler(APIConnectionHandler(server: self))
+                        // The audit token's sixth word is the caller's process id.
+                        try channel.pipeline.syncOperations.addHandler(APIConnectionHandler(server: self, caller: APICaller(pid: pid_t(bitPattern: token.val.5))))
                     }
                 }
             }
@@ -194,6 +195,7 @@ private final class APIConnectionHandler: ChannelInboundHandler {
     typealias OutboundOut = HTTPServerResponsePart
 
     private let server: LocalAPIServer
+    private let caller: APICaller
     private var context: ChannelHandlerContext?
     private var head: HTTPRequestHead?
     private var body = ByteBuffer()
@@ -201,8 +203,9 @@ private final class APIConnectionHandler: ChannelInboundHandler {
     private var discarding = false
     private var task: Task<Void, Never>?
 
-    init(server: LocalAPIServer) {
+    init(server: LocalAPIServer, caller: APICaller) {
         self.server = server
+        self.caller = caller
     }
 
     func handlerAdded(context: ChannelHandlerContext) {
@@ -252,11 +255,14 @@ private final class APIConnectionHandler: ChannelInboundHandler {
             let request = (method: head.method.rawValue, uri: head.uri, body: Data(body.readableBytesView))
             let client = LocalAPIServer.clientName(head.headers.first(name: "x-opentraffic-client"))
             let trusted = server.isTrustedChannel
+            let caller = self.caller
             let loop = context.eventLoop
             let handler = NIOLoopBound(self, eventLoop: loop)
             task = Task {
+                // A run of the agent command OpenTraffic started may only work on its own comment.
+                let scope = await router.backend.agentRunScope(for: caller)
                 let response = await APITrust.$isTrusted.withValue(trusted) {
-                    await router.respond(method: request.method, uri: request.uri, body: request.body, client: client)
+                    await router.respond(method: request.method, uri: request.uri, body: request.body, client: client, scope: scope)
                 }
                 loop.execute {
                     handler.value.task = nil

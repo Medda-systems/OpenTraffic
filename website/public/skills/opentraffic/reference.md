@@ -12,12 +12,12 @@ Every command takes `--json`. Exit status: `0` worked, `1` failed or refused, `2
 | `opentraffic start <share>` / `stop <share>` / `stop --all` / `restart <share>` | Start, stop, restart. |
 | `opentraffic remove <share> --yes` | Remove a share with its settings and comments. |
 | `opentraffic rename <share> <new name>` | Rename. |
-| `opentraffic set <share> [options]` | `--url PORT\|URL` (stop it first), `--collab on\|off`, `--errors on\|off`, `--autostart on\|off`, `--project NAME`, `--no-project`, `--host-header on\|off`, `--stop-after never\|15m\|1h\|4h`. |
-| `opentraffic protect <share> password [--user NAME]` | Password protection (ngrok shares); prints the password. |
+| `opentraffic set <share> [options]` | `--url PORT\|URL` (stop it first), `--collab on\|off`, `--errors on\|off`, `--branch on\|off`, `--autostart on\|off`, `--project NAME`, `--no-project`, `--host-header on\|off`, `--stop-after never\|15m\|1h\|4h`. |
+| `opentraffic protect <share> password [--user NAME]` | Password protection (ngrok, temporary, and OpenTunnel shares); prints the password. |
 | `opentraffic protect <share> google\|github [email ...]` | Sign-in (ngrok shares), optionally limited to these emails. |
 | `opentraffic protect <share> email <email ...>` | Email codes (custom domains, Cloudflare Access). |
 | `opentraffic protect <share> off` | Anyone with the link. |
-| `opentraffic password <share> [--new]` | Show, or replace, the password. |
+| `opentraffic password <share> [--new]` | Show, or replace, the password; temporary and OpenTunnel shares also print a link with it built in. |
 
 `share` options:
 
@@ -30,6 +30,7 @@ Every command takes `--json`. Exit status: `0` worked, `1` failed or refused, `2
 | `--via domain --hostname HOST [--replace-dns]` | A hostname in the user's Cloudflare account (`opentraffic domains` lists them). |
 | `--name NAME` | Display name. |
 | `--collab` | Live collaboration (cursors, comments, follow mode). |
+| `--branch` | Live collaboration, on a branch of its own while it runs: a commit per fixed comment, merged back when the share stops if that's clean. Only when the user asks for it. |
 | `--save` | Save without starting. |
 | `--copy` | Copy the URL to the clipboard. |
 
@@ -48,9 +49,11 @@ Every command takes `--json`. Exit status: `0` worked, `1` failed or refused, `2
 | --- | --- |
 | `opentraffic comments <share> [--resolved\|--all]` | Comments with element, path, browser, picture, replies. |
 | `opentraffic reply <share> <comment> <text>` | Reply (1–1000 characters). |
-| `opentraffic resolve <share> <comment> [--reopen]` | Resolve or reopen. |
+| `opentraffic resolve <share> <comment> [--reopen]` | Resolve or reopen. The commenter is told it's fixed. |
+| `opentraffic claim <share> <comment> [progress]` | Say you're working on it: other agents leave it alone, and the session sees it. Again (optionally with progress text) to keep it; it lapses after 15 minutes. |
+| `opentraffic release <share> <comment>` | Stop working on a comment you claimed, without resolving it. |
 | `opentraffic delete-comment <share> <comment> --yes` | Delete. |
-| `opentraffic screenshot <share> <comment> [-o FILE]` | Save the picture of the commented element (WebP, PNG, or JPEG). |
+| `opentraffic screenshot <share> <comment> [--after] [-o FILE]` | Save the picture of the commented element (WebP, PNG, or JPEG); `--after`, the picture of it once fixed. |
 | `opentraffic errors <share>` | Browser errors visitors hit. |
 | `opentraffic logs <share> [-n LINES] [-f]` | The share's log. |
 | `opentraffic watch [share]` | Stream events: `share.started`, `share.stopped`, `session.joined`, `session.left`, `comment.created`, `comment.updated`, `comment.deleted`, `error.reported`. |

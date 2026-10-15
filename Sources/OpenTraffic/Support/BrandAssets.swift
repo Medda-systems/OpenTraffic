@@ -7,6 +7,28 @@ enum BrandAssets {
 
     private static var statusIcons: [String: NSImage] = [:]
     private static var providerLogos: [TunnelProvider: NSImage] = [:]
+    private static var agentMarks: [AgentBrand: NSImage] = [:]
+
+    /// The mark at `points` square, for controls that take a plain image (segmented controls, menus).
+    static func agentMark(_ brand: AgentBrand, points: CGFloat) -> NSImage? {
+        guard let source = agentMark(brand) else { return nil }
+        let image = NSImage(size: NSSize(width: points, height: points), flipped: false) { rect in
+            source.draw(in: rect)
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    /// A coding agent's mark as a template image; nil outside the app bundle.
+    static func agentMark(_ brand: AgentBrand) -> NSImage? {
+        if let cached = agentMarks[brand] { return cached }
+        guard let url = Bundle.main.url(forResource: "agent-\(brand.rawValue)", withExtension: "svg"),
+              let image = NSImage(contentsOf: url) else { return nil }
+        image.isTemplate = true
+        agentMarks[brand] = image
+        return image
+    }
     private static var fittedLogos: [String: NSImage] = [:]
 
     /// The provider's mark as a template image, or nil when running outside the app bundle.

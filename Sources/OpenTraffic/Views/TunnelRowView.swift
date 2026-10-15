@@ -56,7 +56,7 @@ struct ManagedTunnelRow: View {
                             Image(systemName: "lock.fill")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
-                                .help(tunnel.protection.summary)
+                                .help(tunnel.protection.summary(for: tunnel.kind))
                         }
                         if !store.peers(for: tunnel.id).isEmpty {
                             PeopleBadge(count: store.peers(for: tunnel.id).count)
@@ -266,6 +266,10 @@ struct ManagedTunnelRow: View {
         Divider()
         Button(Vocabulary.copyURL, systemImage: "doc.on.doc") { store.copyPublicURL(tunnel.id) }
             .disabled(publicURL == nil)
+        if tunnel.kind.passwordInProxy, tunnel.protection.isProtected {
+            Button("Copy Link with Password", systemImage: "key") { store.copyInviteLink(tunnel.id) }
+                .disabled(publicURL == nil)
+        }
         Button(Vocabulary.openInBrowser, systemImage: "safari") {
             if let publicURL, let url = URL(string: publicURL) { NSWorkspace.shared.open(url) }
         }

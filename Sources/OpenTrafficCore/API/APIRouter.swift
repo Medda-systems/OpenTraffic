@@ -54,9 +54,10 @@ struct APIRouter: Sendable {
         mcp = MCPServer(backend: backend, events: events)
     }
 
-    func respond(method: String, uri: String, body: Data, client: String) async -> APIResponse {
+    /// `scope`: the caller is a run of the agent command, limited to one comment.
+    func respond(method: String, uri: String, body: Data, client: String, scope: AgentRunScope? = nil) async -> APIResponse {
         do {
-            return try await route(method: method, uri: uri, body: body, client: client)
+            return try await route(method: method, uri: uri, body: body, client: client, scope: scope)
         } catch let error as OpenTrafficAPIError {
             return .error(error)
         } catch {
@@ -64,7 +65,7 @@ struct APIRouter: Sendable {
         }
     }
 
-    private func route(method: String, uri: String, body: Data, client: String) async throws -> APIResponse {
+    private func route(method: String, uri: String, body: Data, client: String, scope: AgentRunScope?) async throws -> APIResponse {
         let path = String(uri.prefix { $0 != "?" && $0 != "#" })
         let query = URLComponents(string: uri)?.queryItems ?? []
         func parameter(_ name: String) -> String? { query.first { $0.name == name }?.value }
@@ -75,8 +76,9 @@ struct APIRouter: Sendable {
 
         if segments == ["mcp"] {
             try allow("POST")
-            return await mcp.respond(to: body, client: client)
+            return await mcp.respond(to: body, client: client, scope: scope)
         }
+        if let scope { try await check(scope, method: method, segments: segments) }
         if segments == ["v1", "events"] {
             try allow("GET")
             let since = try parameter("since").map { try Self.integer($0, name: "since") } ?? 0
@@ -164,7 +166,8 @@ struct APIRouter: Sendable {
                 }
                 return status
             } ?? .open
-            return .json(CommentsBody(comments: try await backend.comments(share, status: status)))
+            let comments = try await backend.comments(share, status: status)
+            return .json(CommentsBody(comments: scope.map { scope in comments.filter { $0.id == scope.commentID } } ?? comments))
         case ["errors"]:
             try allow("GET")
             return .json(ErrorsBody(errors: try await backend.errors(share)))
@@ -183,7 +186,7 @@ struct APIRouter: Sendable {
             switch method {
             case "PATCH":
                 let update = try Self.decode(ResolveBody.self, from: body)
-                return .json(try await backend.resolveComment(share, commentID: comment, resolved: update.resolved))
+                return .json(try await backend.resolveComment(share, commentID: comment, resolved: update.resolved, client: client))
             case "DELETE":
                 try await backend.deleteComment(share, commentID: comment)
                 return .json(DeletedBody(deleted: true))
@@ -195,13 +198,45 @@ struct APIRouter: Sendable {
             let reply = try Self.decode(ReplyBody.self, from: body)
             let text = try Self.validReply(reply.text)
             return .json(try await backend.reply(share, commentID: comment, text: text, client: client))
+        case ["claim"]:
+            switch method {
+            case "POST":
+                let claim = try Self.decode(ClaimBody.self, from: body)
+                return .json(try await backend.claimComment(share, commentID: comment, progress: claim.progress, client: client))
+            case "DELETE":
+                return .json(try await backend.releaseComment(share, commentID: comment, client: client))
+            default:
+                throw OpenTrafficAPIError.methodNotAllowed(method)
+            }
         case ["screenshot"]:
             try allow("GET")
-            let image = try await backend.screenshot(share, commentID: comment)
+            let after: Bool
+            switch parameter("which") ?? "before" {
+            case "before": after = false
+            case "after": after = true
+            default: throw OpenTrafficAPIError.badRequest("which must be before or after")
+            }
+            let image = after
+                ? try await backend.afterScreenshot(share, commentID: comment)
+                : try await backend.screenshot(share, commentID: comment)
             return APIResponse(status: 200, headers: [("content-type", image.contentType)], body: image.data)
         default:
             throw OpenTrafficAPIError.routeNotFound
         }
+    }
+
+    /// A run of the agent command may only read its share's comments (just its own comes back), and read,
+    /// claim, reply to, and resolve its own comment.
+    private func check(_ scope: AgentRunScope, method: String, segments: [String]) async throws {
+        guard segments.count >= 4, segments[0] == "v1", segments[1] == "shares", segments[3] == "comments",
+              (try? await backend.share(segments[2]))?.id == scope.shareID else { throw AgentRunScope.refused() }
+        let rest = Array(segments.dropFirst(4))
+        if rest.isEmpty, method == "GET" { return }
+        guard rest.first == scope.commentID else { throw AgentRunScope.refused() }
+        let allowed: [(String, [String])] = [
+            ("PATCH", []), ("POST", ["replies"]), ("POST", ["claim"]), ("DELETE", ["claim"]), ("GET", ["screenshot"]),
+        ]
+        guard allowed.contains(where: { $0.0 == method && $0.1 == Array(rest.dropFirst()) }) else { throw AgentRunScope.refused() }
     }
 
     // MARK: Bodies
@@ -221,6 +256,7 @@ struct APIRouter: Sendable {
     private struct ToolsBody: Encodable { let tools: [APITool] }
     private struct DeletedBody: Encodable { let deleted: Bool }
     private struct ReplyBody: Decodable { let text: String }
+    private struct ClaimBody: Decodable { let progress: String? }
 
     // MARK: Helpers
 

@@ -18,13 +18,29 @@ extension AppStore {
             if protection == .none { SharePasswordStore.deletePassword(for: id) }
         case .remote:
             if let message = await applyAccessProtection(protection, to: definition) { return message }
-        case .quick, .tailscale, .opentunnel:
+        case .quick, .opentunnel:
+            if case .password = protection, SharePasswordStore.password(for: id) == nil {
+                guard SharePasswordStore.setPassword(SharePassword.generate(), for: id) else {
+                    return "Couldn't save the password in the Keychain."
+                }
+            }
+        case .tailscale:
             return "\(definition.kind.title) shares can't be protected by OpenTraffic."
         }
         guard let current = definitions.firstIndex(where: { $0.id == id }) else { return nil }
         definitions[current].protection = protection
         saveDefinitions()
-        if definition.kind == .ngrok, isActive(id) {
+        if definition.kind.passwordInProxy {
+            if protection == .none { SharePasswordStore.deletePassword(for: id) }
+            if let proxy = collabProxies[id] {
+                // The proxy checks it: no restart, so the share keeps its address.
+                proxy.setAccess(try? shareAccess(for: definitions[current]))
+            } else if isActive(id), protection != .none {
+                // Nothing in between yet: restart through the proxy.
+                await restart(id)
+            }
+            await refreshHealth(for: id)
+        } else if definition.kind == .ngrok, isActive(id) {
             await restart(id)
         } else {
             await refreshHealth(for: id)
@@ -42,7 +58,11 @@ extension AppStore {
             notice = AppNotice(.error, "Couldn't save the new password in the Keychain.")
             return
         }
-        if isActive(id) { await restart(id) }
+        if let definition = definitions.first(where: { $0.id == id }), definition.kind.passwordInProxy {
+            collabProxies[id]?.setAccess(try? shareAccess(for: definition))
+        } else if isActive(id) {
+            await restart(id)
+        }
         notice = AppNotice(.success, "New password set. Anyone with the old password is locked out.")
     }
 
@@ -55,6 +75,27 @@ extension AppStore {
             throw OpenTrafficError.process("OpenTraffic couldn't read this share's password from the Keychain, so it didn't start the share unprotected. Open Protection and choose New Password.")
         }
         return ["\(username):\(password)"]
+    }
+
+    /// The password OpenTraffic's proxy asks for, if the share has one checked there. Throws rather
+    /// than returning nothing when the password can't be read, so a protected share never starts open.
+    func shareAccess(for definition: TunnelDefinition) throws -> ShareAccess? {
+        guard definition.kind.passwordInProxy, case .password = definition.protection else { return nil }
+        guard let password = SharePasswordStore.password(for: definition.id)?.nilIfBlank else {
+            throw OpenTrafficError.process("OpenTraffic couldn't read this share's password from the Keychain, so it didn't start the share unprotected. Open Protection and choose New Password.")
+        }
+        return ShareAccess(password: password, shareKey: definition.id.uuidString, shareName: definition.name)
+    }
+
+    /// The share's address with sign-in built in: whoever opens it skips the password page.
+    func inviteLink(for id: UUID) -> String? {
+        guard let definition = definitions.first(where: { $0.id == id }), let url = publicURL(for: definition),
+              let access = try? shareAccess(for: definition) else { return nil }
+        return access.inviteURL(publicURL: url)
+    }
+
+    func copyInviteLink(_ id: UUID) {
+        if let link = inviteLink(for: id) { copy(link, feedbackFor: id) }
     }
 
     func ngrokOAuth(for definition: TunnelDefinition) -> (provider: LoginProvider, allowedEmails: [String])? {

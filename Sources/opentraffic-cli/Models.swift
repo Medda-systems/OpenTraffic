@@ -25,6 +25,9 @@ struct Share: Decodable {
     let funnel: Bool?
     let stopsAt: Date?
     let health: [HealthCheck]?
+    let branch: Bool?
+    let branchName: String?
+    let baseBranch: String?
 }
 
 struct Person: Decodable {
@@ -51,6 +54,12 @@ struct Comment: Decodable {
     let replies: [Reply]
     let hasScreenshot: Bool
     let environment: Environment?
+    // Absent from older versions of OpenTraffic.
+    let status: String?
+    let claimedBy: String?
+    let progress: String?
+    let resolvedBy: String?
+    let hasAfterScreenshot: Bool?
 
     struct Reply: Decodable {
         let author: String
@@ -135,6 +144,8 @@ struct Protection: Decodable {
     let username: String?
     let password: String?
     let emails: [String]
+    /// The address with the password built in (temporary and OpenTunnel shares).
+    let link: String?
 }
 
 struct Event: Decodable {

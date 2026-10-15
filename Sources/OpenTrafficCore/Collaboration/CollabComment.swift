@@ -28,7 +28,18 @@ public struct CollabComment: Codable, Equatable, Sendable, Identifiable {
     /// Browser errors the commenter ran into shortly before (when the share collects them).
     public let errors: [CollabErrorItem]
     /// The commenter's overlay id, so they can delete it later. Never sent to other people.
-    let authorClient: String?
+    public let authorClient: String?
+    /// Who resolved it: a person in the session, the host, or an app using OpenTraffic's API.
+    public var resolvedBy: String?
+    /// Resolved through OpenTraffic's API (a coding agent), not by a person.
+    public var resolvedByAgent: Bool
+    /// Resolved by the person who wrote it, who doesn't need to hear about it.
+    public var resolvedByAuthor: Bool
+    public var resolvedAt: Date?
+    /// The commenter looked at the fix and agreed.
+    public var confirmed: Bool
+    /// Attachment id of a picture of the element after it was resolved.
+    public var afterScreenshot: String?
 
     public init(
         id: String,
@@ -50,7 +61,13 @@ public struct CollabComment: Codable, Equatable, Sendable, Identifiable {
         screenshot: String? = nil,
         environment: CollabEnvironment? = nil,
         errors: [CollabErrorItem] = [],
-        authorClient: String? = nil
+        authorClient: String? = nil,
+        resolvedBy: String? = nil,
+        resolvedByAgent: Bool = false,
+        resolvedByAuthor: Bool = false,
+        resolvedAt: Date? = nil,
+        confirmed: Bool = false,
+        afterScreenshot: String? = nil
     ) {
         self.id = id
         self.author = author
@@ -72,11 +89,18 @@ public struct CollabComment: Codable, Equatable, Sendable, Identifiable {
         self.environment = environment
         self.errors = errors
         self.authorClient = authorClient
+        self.resolvedBy = resolvedBy
+        self.resolvedByAgent = resolvedByAgent
+        self.resolvedByAuthor = resolvedByAuthor
+        self.resolvedAt = resolvedAt
+        self.confirmed = confirmed
+        self.afterScreenshot = afterScreenshot
     }
 
     enum CodingKeys: String, CodingKey {
         case id, author, color, path, text, x, y, anchor, rx, ry, label, title, createdAt, resolved, fromHost
         case replies, screenshot, environment, errors, authorClient
+        case resolvedBy, resolvedByAgent, resolvedByAuthor, resolvedAt, confirmed, afterScreenshot
     }
 
     public init(from decoder: Decoder) throws {
@@ -101,14 +125,56 @@ public struct CollabComment: Codable, Equatable, Sendable, Identifiable {
         environment = try container.decodeIfPresent(CollabEnvironment.self, forKey: .environment)
         errors = try container.decodeIfPresent([CollabErrorItem].self, forKey: .errors) ?? []
         authorClient = try container.decodeIfPresent(String.self, forKey: .authorClient)
+        resolvedBy = try container.decodeIfPresent(String.self, forKey: .resolvedBy)
+        resolvedByAgent = try container.decodeIfPresent(Bool.self, forKey: .resolvedByAgent) ?? false
+        resolvedByAuthor = try container.decodeIfPresent(Bool.self, forKey: .resolvedByAuthor) ?? false
+        resolvedAt = try container.decodeIfPresent(Date.self, forKey: .resolvedAt)
+        confirmed = try container.decodeIfPresent(Bool.self, forKey: .confirmed) ?? false
+        afterScreenshot = try container.decodeIfPresent(String.self, forKey: .afterScreenshot)
     }
 
-    func json(canDelete: Bool, includeErrors: Bool = true) -> [String: Any] {
+    /// Resolves (recording who did) or reopens it. Reopening forgets the fix: who made it, the
+    /// commenter's confirmation, and the picture of it.
+    public mutating func setResolved(_ resolved: Bool, by name: String? = nil, agent: Bool = false, byAuthor: Bool = false, at date: Date = Date()) {
+        self.resolved = resolved
+        resolvedBy = resolved ? name : nil
+        resolvedByAgent = resolved && agent
+        resolvedByAuthor = resolved && byAuthor
+        resolvedAt = resolved ? date : nil
+        confirmed = false
+        afterScreenshot = nil
+    }
+
+    /// Whether `client` (an overlay id) wrote it.
+    func isAuthor(_ client: String?) -> Bool {
+        client != nil && client == authorClient
+    }
+
+    /// Attachments it uses.
+    var attachments: [String] {
+        [screenshot, afterScreenshot].compactMap { $0 }
+    }
+
+    func json(canDelete: Bool, includeErrors: Bool = true, mine: Bool = false, work: CollabAgentWork? = nil) -> [String: Any] {
         var object: [String: Any] = [
             "id": id, "author": author, "color": color, "path": path, "text": text,
             "x": x, "y": y, "createdAt": Int64(createdAt.timeIntervalSince1970 * 1000),
             "resolved": resolved, "canDelete": canDelete,
         ]
+        if mine { object["mine"] = true }
+        if resolved {
+            if let resolvedBy { object["resolvedBy"] = resolvedBy }
+            if resolvedByAgent { object["resolvedByAgent"] = true }
+            if resolvedByAuthor { object["resolvedByAuthor"] = true }
+            if let resolvedAt { object["resolvedAt"] = Int64(resolvedAt.timeIntervalSince1970 * 1000) }
+            if confirmed { object["confirmed"] = true }
+            if let afterScreenshot { object["after"] = afterScreenshot }
+        }
+        if let work, !resolved {
+            var claim: [String: Any] = ["agent": work.agent]
+            if let progress = work.progress { claim["progress"] = progress }
+            object["claim"] = claim
+        }
         if let anchor, let rx, let ry {
             object["anchor"] = anchor
             object["rx"] = rx

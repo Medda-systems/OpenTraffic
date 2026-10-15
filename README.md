@@ -67,7 +67,7 @@ OpenTraffic checks your server, this Mac, the tunnel, and the public URL, and of
 
 ### And also
 
-- **Protection:** a password or Google/GitHub sign-in on ngrok, email sign-in on your own domain.
+- **Protection:** a password on any temporary, OpenTunnel, or ngrok share (with a link that has it built in), Google/GitHub sign-in on ngrok, email sign-in on your own domain.
 - **Apps made of several servers:** calls to an API on another port go through the same share.
 - **Stays out of your way:** auto-stop timers, projects that start together, notifications, and global shortcuts.
 - **Signed and notarized:** releases come from Medda Systems and update themselves.
@@ -168,4 +168,4 @@ You'll need Swift 6.1 or later (Xcode 16.3+ or its command line tools). [CONTRIB
 
 OpenTraffic is © Medda Systems AB and released under the [MIT License](LICENSE). The OpenTraffic name and logo are trademarks of Medda Systems AB and aren't covered by the license; see [TRADEMARKS.md](TRADEMARKS.md). Third-party components are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-OpenTraffic isn't affiliated with Cloudflare, Tailscale, ngrok, or Anomaly; their names and logos belong to their owners.
+OpenTraffic isn't affiliated with Cloudflare, Tailscale, ngrok, Anomaly, Anthropic, Anysphere (Cursor), or OpenAI; their names and logos belong to their owners.

@@ -47,6 +47,7 @@ private final class UpstreamHandler: ChannelInboundHandler, RemovableChannelHand
                 "host": head.headers.first(name: "host") ?? "",
                 "accept-encoding": head.headers.first(name: "accept-encoding") ?? "",
                 "cookie": head.headers.first(name: "cookie") ?? "",
+                "authorization": head.headers.first(name: "authorization") ?? "",
             ]
             chunks = [String(decoding: try! JSONSerialization.data(withJSONObject: echo), as: UTF8.self)]
         case "/redirect":
@@ -581,4 +582,145 @@ private final class Candidates: @unchecked Sendable {
     await harness.stop()
     try await Task.sleep(for: .milliseconds(300))
     #expect(!channel.isActive)
+}
+
+// MARK: Password
+
+private extension Harness {
+    /// A request that leaves cookies to the test.
+    func send(_ path: String, method: String = "GET", headers: [String: String] = [:], body: String? = nil) async throws -> (String, HTTPURLResponse) {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(path)")!)
+        request.httpMethod = method
+        request.httpShouldHandleCookies = false
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+        if let body {
+            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Data(body.utf8)
+        }
+        let (data, response) = try await session.data(for: request)
+        return (String(decoding: data, as: UTF8.self), response as! HTTPURLResponse)
+    }
+}
+
+private let page = ["Accept": "text/html", "Sec-Fetch-Mode": "navigate"]
+
+@Test func aPasswordKeepsVisitorsOutUntilTheySignIn() async throws {
+    let harness = try await Harness.start()
+    defer { Task { await harness.stop() } }
+    let access = ShareAccess(password: "correct horse", shareKey: "share-1", shareName: "Shop <dev>")
+    harness.proxy.setAccess(access)
+
+    let (signIn, refused) = try await harness.send("/streamed?x=1", headers: page)
+    #expect(refused.statusCode == 401)
+    #expect(signIn.contains("Shop &lt;dev&gt;"))
+    #expect(signIn.contains(#"value="/streamed?x=1""#))
+    #expect(!signIn.contains("streamed</body>"))
+    #expect(refused.value(forHTTPHeaderField: "Content-Security-Policy")?.contains("frame-ancestors 'none'") == true)
+
+    // Scripts and tools get a plain 401 that offers basic auth; so do OpenTraffic's own routes.
+    let (_, api) = try await harness.send("/api")
+    #expect(api.statusCode == 401)
+    #expect(api.value(forHTTPHeaderField: "WWW-Authenticate")?.hasPrefix("Basic") == true)
+    let (_, script) = try await harness.send(CollabProxy.scriptPath)
+    #expect(script.statusCode == 401)
+
+    let (_, wrong) = try await harness.send(ShareAccess.signInPath, method: "POST", body: "password=nope&next=%2Fapi")
+    #expect(wrong.statusCode == 401)
+
+    let (done, signedIn) = try await harness.send(ShareAccess.signInPath, method: "POST", body: "password=correct+horse&name=Ada&next=%2Fapi")
+    #expect(signedIn.statusCode == 200)
+    let cookie = try #require(signedIn.value(forHTTPHeaderField: "Set-Cookie"))
+    #expect(cookie.hasPrefix("\(ShareAccess.cookieName)=\(access.cookieValue);"))
+    #expect(cookie.contains("HttpOnly") && cookie.contains("Secure") && cookie.contains("SameSite=Lax"))
+    #expect(done.contains(#"location.replace(["\/api"][0])"#) || done.contains(#"location.replace(["/api"][0])"#))
+    #expect(done.contains("Ada"))
+    #expect(signIn.contains(#"name="name""#))
+
+    // Signed in, the site works, and the app never sees OpenTraffic's cookie.
+    let (json, ok) = try await harness.send("/api", headers: ["Cookie": "\(ShareAccess.cookieName)=\(access.cookieValue)"])
+    #expect(ok.statusCode == 200 && json == #"{"ok":true}"#)
+    let (echoed, _) = try await harness.send("/headers", headers: ["Cookie": "a=1; \(ShareAccess.cookieName)=\(access.cookieValue)"])
+    #expect(echoed.contains(#""cookie":"a=1""#))
+
+    // A new password signs everyone out.
+    harness.proxy.setAccess(ShareAccess(password: "another one", shareKey: "share-1", shareName: "Shop"))
+    let (_, stale) = try await harness.send("/api", headers: ["Cookie": "\(ShareAccess.cookieName)=\(access.cookieValue)"])
+    #expect(stale.statusCode == 401)
+
+    harness.proxy.setAccess(nil)
+    let (_, open) = try await harness.send("/api")
+    #expect(open.statusCode == 200)
+}
+
+@Test func toolsCanSendThePasswordAndTheAppDoesntSeeIt() async throws {
+    let harness = try await Harness.start()
+    defer { Task { await harness.stop() } }
+    harness.proxy.setAccess(ShareAccess(password: "p4ss", shareKey: "k", shareName: "S"))
+    let basic = "Basic " + Data("anyone:p4ss".utf8).base64EncodedString()
+    let (echoed, ok) = try await harness.send("/headers", headers: ["Authorization": basic])
+    #expect(ok.statusCode == 200)
+    #expect(echoed.contains(#""authorization":"""#))
+    let (_, wrong) = try await harness.send("/headers", headers: ["Authorization": "Basic " + Data("anyone:nope".utf8).base64EncodedString()])
+    #expect(wrong.statusCode == 401)
+    // The app's own authorization passes through untouched.
+    harness.proxy.setAccess(nil)
+    let (own, _) = try await harness.send("/headers", headers: ["Authorization": "Bearer app"])
+    #expect(own.contains("Bearer app"))
+}
+
+@Test func anInviteLinkSignsInAndDropsTheToken() async throws {
+    let harness = try await Harness.start()
+    defer { Task { await harness.stop() } }
+    let access = ShareAccess(password: "p4ss", shareKey: "k", shareName: "S")
+    harness.proxy.setAccess(access)
+    let link = try #require(URL(string: access.inviteURL(publicURL: "https://shop.example/streamed?x=1")))
+    #expect(link.query?.contains("ot_invite=") == true)
+    #expect(!link.absoluteString.contains("p4ss"))
+
+    let (_, invited) = try await harness.send("/streamed?x=1&\(ShareAccess.inviteParameter)=\(access.inviteToken)", headers: page)
+    #expect(invited.statusCode == 303)
+    #expect(invited.value(forHTTPHeaderField: "Location") == "/streamed?x=1")
+    #expect(invited.value(forHTTPHeaderField: "Set-Cookie")?.contains(access.cookieValue) == true)
+
+    let (_, forged) = try await harness.send("/?\(ShareAccess.inviteParameter)=guess", headers: page)
+    #expect(forged.statusCode == 401)
+}
+
+@Test func theHostLinkStillWorksAndTheHostHeaderProvesNothing() async throws {
+    let harness = try await Harness.start()
+    defer { Task { await harness.stop() } }
+    harness.proxy.setAccess(ShareAccess(password: "p4ss", shareKey: "k", shareName: "S"))
+    // A visitor naming the proxy's own address is still a visitor.
+    let (_, spoofed) = try await harness.send("/api", headers: ["Host": "127.0.0.1:\(harness.port)"])
+    #expect(spoofed.statusCode == 401)
+
+    let (_, joined) = try await harness.send("\(CollabProxy.hostPath)?token=\(harness.proxy.hostToken)")
+    #expect(joined.statusCode == 302)
+    let hostCookie = "\(CollabProxy.hostCookiePrefix)_\(harness.port)=\(harness.proxy.hostToken)"
+    let (_, host) = try await harness.send("/api", headers: ["Cookie": hostCookie])
+    #expect(host.statusCode == 200)
+}
+
+@Test func guessingThePasswordIsSlowedDown() async throws {
+    let harness = try await Harness.start()
+    defer { Task { await harness.stop() } }
+    harness.proxy.setAccess(ShareAccess(password: "p4ss", shareKey: "k", shareName: "S"))
+    for _ in 0..<SignInLimiter.maximumFailures {
+        let (_, wrong) = try await harness.send(ShareAccess.signInPath, method: "POST", headers: ["CF-Connecting-IP": "203.0.113.9"], body: "password=x")
+        #expect(wrong.statusCode == 401)
+    }
+    let (_, limited) = try await harness.send(ShareAccess.signInPath, method: "POST", headers: ["CF-Connecting-IP": "203.0.113.9"], body: "password=p4ss")
+    #expect(limited.statusCode == 429)
+    // Someone else isn't held up by it.
+    let (_, other) = try await harness.send(ShareAccess.signInPath, method: "POST", headers: ["CF-Connecting-IP": "198.51.100.4"], body: "password=p4ss")
+    #expect(other.statusCode == 200)
+}
+
+@Test func theHubAndUpgradesNeedThePasswordToo() async throws {
+    let harness = try await Harness.start()
+    defer { Task { await harness.stop() } }
+    harness.proxy.setAccess(ShareAccess(password: "p4ss", shareKey: "k", shareName: "S"))
+    let task = harness.socket(CollabProxy.socketPath)
+    await #expect(throws: (any Error).self) { _ = try await task.receive() }
+    #expect((task.response as? HTTPURLResponse)?.statusCode == 401)
 }

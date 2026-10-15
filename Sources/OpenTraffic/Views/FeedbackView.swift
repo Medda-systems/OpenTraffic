@@ -28,6 +28,10 @@ struct FeedbackView: View {
             .padding(.horizontal, Spacing.l)
             .padding(.vertical, Spacing.s)
             Divider()
+            if store.agentCommandIsSet {
+                AgentBar(store: store, tunnel: tunnel)
+                Divider()
+            }
             let errors = store.collabErrors[tunnel.id] ?? []
             if visible.isEmpty && errors.isEmpty {
                 ContentUnavailableView {
@@ -96,6 +100,7 @@ private struct CommentRow: View {
     @State private var reply = ""
     @FocusState private var replyFocused: Bool
     @State private var screenshot: LoadedScreenshot?
+    @State private var afterScreenshot: LoadedScreenshot?
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.m) {
@@ -116,20 +121,14 @@ private struct CommentRow: View {
                     .strikethrough(comment.resolved, color: .secondary)
                     .foregroundStyle(comment.resolved ? .secondary : .primary)
                     .fixedSize(horizontal: false, vertical: true)
-                if let screenshot {
-                    Button {
-                        NSWorkspace.shared.open(screenshot.url)
-                    } label: {
-                        Image(nsImage: screenshot.image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: 360, maxHeight: 220, alignment: .leading)
-                            .clipShape(RoundedRectangle(cornerRadius: Radius.small))
-                            .overlay(RoundedRectangle(cornerRadius: Radius.small).stroke(.quaternary))
+                CommentStatus(store: store, tunnelID: tunnelID, comment: comment)
+                if let afterScreenshot {
+                    HStack(alignment: .top, spacing: Spacing.s) {
+                        if let screenshot { picture(screenshot, caption: "Before", width: 220) }
+                        picture(afterScreenshot, caption: "After", width: 220)
                     }
-                    .buttonStyle(.plain)
-                    .help("Open the full picture")
-                    .accessibilityLabel("Screenshot of the pinned element")
+                } else if let screenshot {
+                    picture(screenshot, caption: nil, width: 360)
                 }
                 if let environment = comment.environment {
                     Text("\(environment.browser) · \(environment.os) · \(environment.viewport)")
@@ -171,6 +170,13 @@ private struct CommentRow: View {
                     if !replying {
                         Button("Reply", systemImage: "arrowshape.turn.up.left") { replying = true }
                     }
+                    if store.agentCommandIsSet, !comment.resolved, store.agentClaims.claim(share: tunnelID, comment: comment.id) == nil,
+                       !store.isQueuedForAgent(comment.id, in: tunnelID) {
+                        Button { store.sendToAgent(comment.id, for: tunnelID) } label: {
+                            Label { Text("Send to \(store.agentClientName)") } icon: { AgentMark(name: store.agentClientName, size: 13) }
+                        }
+                        .help("Run the agent command for this comment")
+                    }
                     Button("Delete", systemImage: "trash", role: .destructive) { confirmingDelete = true }
                 }
                 .buttonStyle(.borderless)
@@ -179,7 +185,8 @@ private struct CommentRow: View {
         }
         .padding(.vertical, Spacing.xs)
         .opacity(comment.resolved ? 0.75 : 1)
-        .task(id: comment.screenshot) { await loadScreenshot() }
+        .task(id: comment.screenshot) { screenshot = await load(after: false) }
+        .task(id: comment.afterScreenshot) { afterScreenshot = await load(after: true) }
         .confirmationDialog("Delete this comment?", isPresented: $confirmingDelete) {
             Button("Delete", role: .destructive) { Task { await store.deleteComment(comment.id, for: tunnelID) } }
         } message: {
@@ -187,18 +194,38 @@ private struct CommentRow: View {
         }
     }
 
-    /// Finds and decodes the screenshot once per attachment, reading the file off the main thread.
-    private func loadScreenshot() async {
-        guard let attachment = comment.screenshot else { screenshot = nil; return }
+    private func picture(_ loaded: LoadedScreenshot, caption: String?, width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let caption {
+                Text(caption).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            Button {
+                NSWorkspace.shared.open(loaded.url)
+            } label: {
+                Image(nsImage: loaded.image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: width, maxHeight: 220, alignment: .leading)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.small))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.small).stroke(.quaternary))
+            }
+            .buttonStyle(.plain)
+            .help("Open the full picture")
+            .accessibilityLabel(caption.map { "\($0): picture of the pinned element" } ?? "Screenshot of the pinned element")
+        }
+    }
+
+    /// Finds and decodes a picture once per attachment, reading the file off the main thread.
+    private func load(after: Bool) async -> LoadedScreenshot? {
+        guard let attachment = after ? comment.afterScreenshot : comment.screenshot else { return nil }
         let key = "\(tunnelID)/\(attachment)" as NSString
-        if let cached = LoadedScreenshot.cache.object(forKey: key) { screenshot = cached; return }
-        guard let url = store.screenshotURL(for: comment, in: tunnelID) else { screenshot = nil; return }
+        if let cached = LoadedScreenshot.cache.object(forKey: key) { return cached }
+        guard let url = store.screenshotURL(for: comment, in: tunnelID, after: after) else { return nil }
         let data = await Task.detached(priority: .utility) { try? Data(contentsOf: url) }.value
-        guard !Task.isCancelled else { return }
-        guard let data, let image = NSImage(data: data) else { screenshot = nil; return }
+        guard !Task.isCancelled, let data, let image = NSImage(data: data) else { return nil }
         let loaded = LoadedScreenshot(url: url, image: image)
         LoadedScreenshot.cache.setObject(loaded, forKey: key)
-        screenshot = loaded
+        return loaded
     }
 
     private func send() {
@@ -207,6 +234,121 @@ private struct CommentRow: View {
         reply = ""
         replying = false
         Task { await store.replyToComment(comment.id, text: text, for: tunnelID) }
+    }
+}
+
+/// Who is working on a comment, or who fixed it and whether the commenter agreed.
+private struct CommentStatus: View {
+    let store: AppStore
+    let tunnelID: UUID
+    let comment: CollabComment
+
+    var body: some View {
+        if !comment.resolved, let claim = store.agentClaims.claim(share: tunnelID, comment: comment.id) {
+            Label {
+                Text("\(claim.agent) is working on this") + Text(claim.progress.map { " · \($0)" } ?? "").foregroundStyle(.secondary)
+            } icon: {
+                AgentMark(name: claim.agent, size: 12)
+            }
+            .font(.caption)
+            .foregroundStyle(AgentMark.color(for: claim.agent))
+        } else if !comment.resolved, store.isQueuedForAgent(comment.id, in: tunnelID) {
+            let agent = store.agentRuns[tunnelID]?.client ?? store.agentClientName
+            Label { Text("Waiting for \(agent)") } icon: { AgentMark(name: agent, size: 12) }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else if comment.resolved, let by = comment.resolvedBy {
+            Label {
+                Text(comment.resolvedByAuthor ? "Resolved by \(by), who wrote it" : "Resolved by \(by)")
+                    + Text(comment.confirmed ? " · \(comment.author) confirmed the fix" : "")
+            } icon: {
+                if comment.resolvedByAgent, !comment.confirmed {
+                    AgentMark(name: by, size: 12)
+                } else {
+                    Image(systemName: comment.confirmed ? "checkmark.seal.fill" : "checkmark.circle")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(comment.confirmed ? AnyShapeStyle(TunnelDisplayState.online.textTint) : AnyShapeStyle(.secondary))
+        }
+    }
+}
+
+/// The agent command for this share: what it's doing, where it works, and what it printed.
+private struct AgentBar: View {
+    let store: AppStore
+    let tunnel: TunnelDefinition
+    @State private var showingOutput = false
+
+    var body: some View {
+        let run = store.agentRuns[tunnel.id]
+        HStack(spacing: Spacing.s) {
+            if run?.state == .running {
+                ProgressView().controlSize(.small)
+            } else {
+                AgentMark(name: run?.client ?? store.agentClientName, size: 15)
+            }
+            Text(status(run))
+                .font(.callout)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: Spacing.s)
+            Button(folderLabel) { store.chooseAgentDirectory(for: tunnel.id) }
+                .help("The project folder the agent works in for this share. Click to change.")
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let run, !run.output.isEmpty {
+                Button("Output") { showingOutput = true }
+                    .popover(isPresented: $showingOutput, arrowEdge: .bottom) { AgentOutput(run: run) }
+            }
+            if run?.state == .running {
+                Button("Stop", role: .destructive) { store.stopAgentRun(for: tunnel.id) }
+            }
+        }
+        .buttonStyle(.borderless)
+        .font(.callout)
+        .padding(.horizontal, Spacing.l)
+        .padding(.vertical, Spacing.xs)
+    }
+
+    private var folderLabel: String {
+        let path = tunnel.agentDirectory ?? store.detectedProjectDirectory(for: tunnel)?.path
+        guard let path else { return "Choose Project Folder…" }
+        return (path as NSString).abbreviatingWithTildeInPath
+    }
+
+    private func status(_ run: AgentRun?) -> String {
+        let waiting = store.agentQueues[tunnel.id]?.count ?? 0
+        let more = waiting > 0 ? " (\(waiting) more waiting)" : ""
+        switch run?.state {
+        case .running?: return "\(run!.client) is working on a comment\(more)…"
+        case .finished?: return "\(run!.client) finished \(run!.startedAt.formatted(.relative(presentation: .named)))"
+        case .failed(let reason)?: return reason
+        case .stopped?: return "Stopped"
+        case nil:
+            return store.agentRunsAutomatically
+                ? "\(store.agentClientName) handles new comments when no agent is watching"
+                : "Send comments to \(store.agentClientName) below"
+        }
+    }
+}
+
+private struct AgentOutput: View {
+    let run: AgentRun
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                Text(run.output.joined(separator: "\n"))
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(Spacing.m)
+                    .id("end")
+            }
+            .onAppear { proxy.scrollTo("end", anchor: .bottom) }
+        }
+        .frame(width: 520, height: 320)
     }
 }
 
@@ -233,7 +375,11 @@ private struct ReplyRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.s) {
-            InitialsAvatar(name: reply.author, color: reply.color, size: 18)
+            if let agent = reply.agent {
+                AgentAvatar(name: agent, size: 18)
+            } else {
+                InitialsAvatar(name: reply.author, color: reply.color, size: 18)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: Spacing.xs) {
                     Text(reply.author).font(.callout.weight(.semibold))

@@ -201,6 +201,32 @@ final class AppStore {
     var collabBridgeCandidates: [UUID: Set<Int>] = [:]
     /// Browser errors visitors ran into, grouped, per share (this session only).
     var collabErrors: [UUID: [CollabErrorGroup]] = [:]
+    /// Comments apps are working on (claimed through the API), for every share.
+    var agentClaims = AgentClaimBook()
+    /// The agent command's latest run per share, and the comments waiting for it.
+    var agentRuns: [UUID: AgentRun] = [:]
+    var agentQueues: [UUID: [String]] = [:]
+    @ObservationIgnored var agentProcesses: [UUID: AgentProcess] = [:]
+    /// The user's PATH from their shell, looked up once for the agent command.
+    @ObservationIgnored var agentShellPath: Task<String, Never>?
+    /// Processes that called OpenTraffic during a run of the agent command, and that run's comment: they
+    /// stay held to it even once the run is over (when it's over, to nothing at all).
+    @ObservationIgnored var agentRunCallers: [pid_t: AgentRunScope] = [:]
+    /// Runs the agent command started by itself recently, against the budget.
+    @ObservationIgnored var agentRunBudget = AgentRunBudget()
+    /// Shares working on a branch: their repositories (by root), what was already changed when the
+    /// branch started or last got a commit, and what was changed when each comment was claimed.
+    @ObservationIgnored var gitRepositories: [String: GitRepository] = [:]
+    @ObservationIgnored var gitBaselines: [UUID: GitSnapshot] = [:]
+    @ObservationIgnored var claimSnapshots: [UUID: [String: GitSnapshot]] = [:]
+    /// Settings → Integrations: the command OpenTraffic runs to have an agent handle a comment (empty: none).
+    var agentCommand: String {
+        didSet { defaults.set(agentCommand, forKey: "agentCommand") }
+    }
+    /// Run the agent command by itself for new comments when no app is watching the share.
+    var agentRunsAutomatically: Bool {
+        didSet { defaults.set(agentRunsAutomatically, forKey: "agentRunsAutomatically") }
+    }
     /// Everything apps using the local API can follow (long polling, MCP, webhooks).
     @ObservationIgnored let apiEvents = APIEventLog()
     @ObservationIgnored var pendingJoinNames: [UUID: [String]] = [:]
@@ -208,6 +234,8 @@ final class AppStore {
     /// People who just left a session, by share and name: a page change reconnects them a moment later.
     @ObservationIgnored var recentDepartures: [UUID: [String: CollabPeer]] = [:]
     @ObservationIgnored var pendingCommentNotices: [UUID: [CollabComment]] = [:]
+    /// Comments reopened here or through the API, whose reopening needs no notification.
+    @ObservationIgnored var quietReopens: Set<String> = []
     @ObservationIgnored var lastCommentNotification: [UUID: Date] = [:]
     /// Shares whose comments changed and haven't been written to disk yet.
     @ObservationIgnored var unsavedComments: Set<UUID> = []
@@ -338,6 +366,8 @@ final class AppStore {
         self.notifyOnFailure = defaults.object(forKey: "notifyOnFailure") as? Bool ?? true
         self.notifyCollaboration = defaults.object(forKey: "notifyCollaboration") as? Bool ?? true
         self.collaborationHostName = defaults.string(forKey: "collaborationHostName") ?? ""
+        self.agentCommand = defaults.string(forKey: "agentCommand") ?? ""
+        self.agentRunsAutomatically = defaults.object(forKey: "agentRunsAutomatically") as? Bool ?? false
         self.apiEnabled = defaults.object(forKey: "apiEnabled") as? Bool ?? false
         self.apiPort = (defaults.object(forKey: "apiPort") as? Int).flatMap { (1024...65_535).contains($0) ? $0 : nil } ?? 47777
         self.apiAllowsPublishingWithoutAsking = defaults.object(forKey: "apiAllowsPublishingWithoutAsking") as? Bool ?? false
@@ -400,6 +430,7 @@ final class AppStore {
                 await self?.refreshNgrokAgents()
                 await self?.refreshOpenTunnel()
                 self?.enforceAutoStop()
+                self?.expireAgentClaims()
                 await self?.startTunnelsWhoseServicesAreRunning()
                 try? await Task.sleep(for: .seconds(5))
             }
@@ -626,7 +657,7 @@ final class AppStore {
         }
     }
 
-    private func copy(_ text: String, feedbackFor id: UUID) {
+    func copy(_ text: String, feedbackFor id: UUID) {
         Pasteboard.copy(text)
         recentlyCopiedID = id
         copyFeedbackTask?.cancel()
@@ -742,10 +773,15 @@ final class AppStore {
     }
 
     func remove(_ id: UUID) {
+        endBranchSessionNow(for: id)
         invalidateAndStop(id)
         unsavedComments.remove(id)
         feedbackPersistence.delete(id)
         collabComments[id] = nil
+        stopAgentRun(for: id)
+        agentQueues[id] = nil
+        agentRuns[id] = nil
+        agentClaims.releaseAll(share: id)
         if let definition = definitions.first(where: { $0.id == id }) {
             let origins = Set([definition.localURL, effectiveOrigin(for: definition).url])
             for origin in origins {
@@ -831,9 +867,9 @@ final class AppStore {
 
         switch definition.kind {
         case .quick:
-            if usesCollaboration(definition) {
+            if quickNeedsProxy(definition) {
                 Task { [weak self] in
-                    await self?.startQuickWithCollaboration(definition, generation: generation, executable: executable)
+                    await self?.startQuickWithProxy(definition, generation: generation, executable: executable)
                 }
             } else {
                 startQuickConnector(definition, localURL: definition.localURL, generation: generation, executable: executable)
@@ -870,9 +906,11 @@ final class AppStore {
         }
     }
 
-    func stop(_ id: UUID) {
+    /// Stops a share. `endingSession: false` (a restart) keeps its branch going.
+    func stop(_ id: UUID, endingSession: Bool = true) {
         autoStartTracker.userStopped(id)
         stopCollaboration(id)
+        if endingSession { Task { await endBranchSession(for: id) } }
         pendingRestarts.remove(id)
         guard var runtime = runtimes[id] else { return }
         if isActive(id), let share = apiShareRef(id) { apiEvents.append(.shareStopped, share: share) }
@@ -915,6 +953,8 @@ final class AppStore {
         isTerminating = true
         pendingRestarts.removeAll()
         stopAllCollaboration()
+        stopAllAgentRuns()
+        for definition in definitions where definition.branchSession != nil { endBranchSessionNow(for: definition.id) }
         if let server = apiServer {
             apiServer = nil
             Task { await server.stop() }

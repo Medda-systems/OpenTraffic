@@ -1,15 +1,49 @@
 import Foundation
 
-/// Someone viewing a collaborative share.
+/// Someone viewing a collaborative share, or a coding agent working on one of its comments.
 public struct CollabPeer: Equatable, Sendable, Identifiable {
     public let id: String
     public var name: String
     public var color: String
     public var path: String
     public let isHost: Bool
+    /// An app working through OpenTraffic's API, shown in the session while it holds a comment.
+    public var isAgent = false
+    /// Where an agent's cursor rests: the element of the comment it's working on.
+    var spot: CollabSpot?
 
     var json: [String: Any] {
-        ["id": id, "name": name, "color": color, "path": path, "isHost": isHost]
+        var object: [String: Any] = ["id": id, "name": name, "color": color, "path": path, "isHost": isHost]
+        if isAgent { object["isAgent"] = true }
+        if let spot { object["at"] = spot.json }
+        return object
+    }
+}
+
+/// A position on a page, as cursors and comments give it.
+struct CollabSpot: Equatable, Sendable {
+    let anchor: String?
+    let rx: Double?
+    let ry: Double?
+    let x: Double
+    let y: Double
+
+    init(_ comment: CollabComment) {
+        anchor = comment.anchor
+        rx = comment.rx
+        ry = comment.ry
+        x = comment.x
+        y = comment.y
+    }
+
+    var json: [String: Any] {
+        var object: [String: Any] = ["x": x, "y": y]
+        if let anchor, let rx, let ry {
+            object["anchor"] = anchor
+            object["rx"] = rx
+            object["ry"] = ry
+        }
+        return object
     }
 }
 
@@ -43,6 +77,10 @@ public struct CollabRoom {
     static let renameInterval: TimeInterval = 1
     static let commentInterval: TimeInterval = 2
     static let pointInterval: TimeInterval = 0.5
+    /// How often someone may confirm a fix or send a picture of one.
+    static let afterInterval: TimeInterval = 2
+    /// Agents' cursors and badges.
+    public static let agentColor = "#BF5AF2"
     public static let palette = [
         "#F38020", "#2F80ED", "#27AE60", "#9B51E0", "#EB5757",
         "#00A3A3", "#D97706", "#DB2777", "#4F46E5", "#65A30D",
@@ -60,6 +98,13 @@ public struct CollabRoom {
     private let hostName: String
     /// Every comment on every page, oldest first.
     public private(set) var comments: [CollabComment]
+    /// Comments coding agents are working on, by comment id (the app decides; see `setAgentWork`).
+    private var agentWork: [String: CollabAgentWork] = [:]
+    /// Each agent's place in the session, by agent name; its id stays the same while it's there.
+    private var agentPeers: [String: CollabPeer] = [:]
+    /// Comments resolved by someone other than their author that have no picture of the fix yet.
+    /// The host's page takes one when it's on that page; the author's when they look at the fix.
+    private var awaitingAfter: Set<String> = []
 
     private struct Connection {
         var peer: CollabPeer
@@ -73,6 +118,7 @@ public struct CollabRoom {
         var lastErrors = Date.distantPast
         var lastResolve = Date.distantPast
         var lastRename = Date.distantPast
+        var lastAfter = Date.distantPast
         /// Authorizes this connection's screenshot uploads; sent only to it.
         let uploadToken = CollabRoom.makeToken()
     }
@@ -84,9 +130,14 @@ public struct CollabRoom {
     /// Screenshot ids uploaded through the proxy, by the peer that uploaded them.
     private var attachments: [String: String] = [:]
 
-    public init(hostName: String? = nil, comments: [CollabComment] = []) {
+    public init(hostName: String? = nil, comments: [CollabComment] = [], now: Date = Date()) {
         self.hostName = Self.sanitizedName(hostName) ?? "Host"
         self.comments = comments
+        // Fixes from the last day that nobody has pictured yet, from an earlier session.
+        awaitingAfter = Set(comments.lazy.filter {
+            $0.resolved && !$0.resolvedByAuthor && $0.resolvedBy != nil && $0.afterScreenshot == nil
+                && now.timeIntervalSince($0.resolvedAt ?? .distantPast) < 86_400
+        }.map(\.id))
     }
 
     public func hasRoom(isHost: Bool) -> Bool {
@@ -119,9 +170,10 @@ public struct CollabRoom {
         return reportedErrors
     }
 
-    /// Everyone who has joined, in join order.
+    /// Everyone who has joined, in join order, then the agents at work.
     public var peers: [CollabPeer] {
         joinOrder.compactMap { id in connections[id].flatMap { $0.joined ? $0.peer : nil } }
+            + agentPeers.values.sorted { $0.id < $1.id }
     }
 
     /// Registers a new connection; nil when the room is full. One place is always kept for the host.
@@ -181,6 +233,7 @@ public struct CollabRoom {
                 leadRatio = 0
                 output += broadcast(leadMessage(), except: id)
             }
+            if peer.isHost { output += captureRequests(for: id, path: path) }
             return output
         case "cursor":
             guard let message = Self.cursorMessage(object, id: id) else { return [] }
@@ -213,9 +266,32 @@ public struct CollabRoom {
             return []
         case "resolve":
             guard now.timeIntervalSince(connection.lastResolve) >= Self.resolveInterval,
-                  let commentID = object["id"] as? String, let resolved = object["resolved"] as? Bool else { return [] }
+                  let commentID = object["id"] as? String, let resolved = object["resolved"] as? Bool,
+                  let comment = comments.first(where: { $0.id == commentID }) else { return [] }
             connections[id]?.lastResolve = now
-            return resolveComment(commentID, resolved: resolved)
+            return resolveComment(commentID, resolved: resolved, by: peer.name, byAuthor: comment.isAuthor(connection.client), now: now)
+        case "confirm":
+            // Only the commenter says the fix works.
+            guard now.timeIntervalSince(connection.lastResolve) >= Self.resolveInterval,
+                  let commentID = object["id"] as? String,
+                  let index = comments.firstIndex(where: { $0.id == commentID }),
+                  comments[index].resolved, !comments[index].confirmed,
+                  comments[index].isAuthor(connection.client) else { return [] }
+            connections[id]?.lastResolve = now
+            comments[index].confirmed = true
+            return commentMessages(comments[index])
+        case "after":
+            // A picture of the fix, from the host's page or the commenter's, uploaded by this connection.
+            guard now.timeIntervalSince(connection.lastAfter) >= Self.afterInterval,
+                  let commentID = object["id"] as? String, awaitingAfter.contains(commentID),
+                  let attachment = object["screenshot"] as? String, attachments[attachment] == id,
+                  let index = comments.firstIndex(where: { $0.id == commentID }),
+                  comments[index].resolved, comments[index].afterScreenshot == nil,
+                  peer.isHost || comments[index].isAuthor(connection.client) else { return [] }
+            connections[id]?.lastAfter = now
+            awaitingAfter.remove(commentID)
+            comments[index].afterScreenshot = attachment
+            return commentMessages(comments[index])
         case "delete":
             guard let commentID = object["id"] as? String,
                   let comment = comments.first(where: { $0.id == commentID }),
@@ -294,19 +370,94 @@ public struct CollabRoom {
         peers.first(where: \.isHost)?.color ?? Self.palette[0]
     }
 
-    /// Resolves or reopens a comment (from anyone in the session, or from OpenTraffic).
-    public mutating func resolveComment(_ commentID: String, resolved: Bool) -> [Outgoing] {
+    /// Resolves or reopens a comment (from anyone in the session, or from OpenTraffic). `by` names who
+    /// resolved it; `agent` marks an app using the API, `byAuthor` the commenter. When someone else
+    /// resolved it, the host's page is asked for a picture of the fix.
+    public mutating func resolveComment(_ commentID: String, resolved: Bool, by name: String? = nil, agent: Bool = false, byAuthor: Bool = false, now: Date = Date()) -> [Outgoing] {
         guard let index = comments.firstIndex(where: { $0.id == commentID }), comments[index].resolved != resolved else { return [] }
-        comments[index].resolved = resolved
-        return commentMessages(comments[index])
+        comments[index].setResolved(resolved, by: name.flatMap { Self.sanitizedName($0) }, agent: agent, byAuthor: byAuthor, at: now)
+        var output = commentMessages(comments[index])
+        if resolved, !byAuthor {
+            awaitingAfter.insert(commentID)
+            let path = comments[index].path
+            for id in joinedIDs where connections[id]?.peer.isHost == true && connections[id]?.peer.path == path {
+                output.append(captureMessage(commentID, to: id))
+            }
+        } else {
+            awaitingAfter.remove(commentID)
+        }
+        // Done or reopened, nobody is working on it any more; the app ends the claim too.
+        if agentWork.removeValue(forKey: commentID) != nil { output += syncAgentPeers() }
+        return output
+    }
+
+    /// Asks the host's page to take pictures of fixes on `path` it hasn't sent yet.
+    private func captureRequests(for id: String, path: String) -> [Outgoing] {
+        comments.filter { awaitingAfter.contains($0.id) && $0.path == path }.map { captureMessage($0.id, to: id) }
+    }
+
+    private func captureMessage(_ commentID: String, to id: String) -> Outgoing {
+        Outgoing(target: .peer(id), text: Self.encode(["type": "capture", "id": commentID]))
+    }
+
+    // MARK: Agents
+
+    /// Shows which comments coding agents are working on. Each agent is in the session while it holds a
+    /// comment, its cursor on the newest one's element; those comments read "working" for everyone.
+    public mutating func setAgentWork(_ work: [CollabAgentWork]) -> [Outgoing] {
+        let known = Set(comments.lazy.filter { !$0.resolved }.map(\.id))
+        var next: [String: CollabAgentWork] = [:]
+        for item in work where known.contains(item.commentID) { next[item.commentID] = item }
+        let changed = Set(next.keys).union(agentWork.keys).filter { next[$0] != agentWork[$0] }
+        agentWork = next
+        var output = comments.filter { changed.contains($0.id) }.flatMap(commentMessages)
+        output += syncAgentPeers()
+        return output
+    }
+
+    /// Brings the agents in the session in line with `agentWork`: joins, moves, and leaves.
+    private mutating func syncAgentPeers() -> [Outgoing] {
+        var newest: [String: CollabAgentWork] = [:]
+        for work in agentWork.values where (newest[work.agent]?.since ?? .distantPast) <= work.since {
+            newest[work.agent] = work
+        }
+        var output: [Outgoing] = []
+        for (name, peer) in agentPeers where newest[name] == nil {
+            agentPeers[name] = nil
+            output += broadcastToJoined(["type": "leave", "id": peer.id])
+        }
+        for (name, work) in newest.sorted(by: { $0.value.since < $1.value.since }) {
+            guard let comment = comments.first(where: { $0.id == work.commentID }) else { continue }
+            let color = AgentBrand(agentName: name)?.color ?? Self.agentColor
+            var peer = agentPeers[name] ?? CollabPeer(id: Self.makeID(), name: Self.sanitizedName(name) ?? "Agent", color: color, path: comment.path, isHost: false)
+            let isNew = agentPeers[name] == nil
+            let before = peer
+            peer.isAgent = true
+            peer.path = comment.path
+            peer.spot = CollabSpot(comment)
+            agentPeers[name] = peer
+            if isNew {
+                output += broadcastToJoined(["type": "join", "peer": peer.json])
+            } else if peer != before {
+                output += broadcastToJoined(["type": "update", "peer": peer.json])
+            }
+        }
+        return output
+    }
+
+    private func broadcastToJoined(_ message: [String: Any]) -> [Outgoing] {
+        let text = Self.encode(message)
+        return joinedIDs.map { Outgoing(target: .peer($0), text: text) }
     }
 
     /// Deletes a comment. Permission is checked by the caller (the author, the host, or OpenTraffic).
     public mutating func deleteComment(_ commentID: String) -> [Outgoing] {
         guard comments.contains(where: { $0.id == commentID }) else { return [] }
         comments.removeAll { $0.id == commentID }
-        let text = Self.encode(["type": "comment-delete", "id": commentID])
-        return joinedIDs.map { Outgoing(target: .peer($0), text: text) }
+        awaitingAfter.remove(commentID)
+        var output = broadcastToJoined(["type": "comment-delete", "id": commentID])
+        if agentWork.removeValue(forKey: commentID) != nil { output += syncAgentPeers() }
+        return output
     }
 
     /// Text of all comments and replies.
@@ -320,6 +471,7 @@ public struct CollabRoom {
     private mutating func makeRoom(for bytes: Int) -> Bool {
         while comments.count >= Self.maximumComments || feedbackBytes + bytes > Self.maximumFeedbackBytes {
             guard let index = comments.firstIndex(where: \.resolved) else { return false }
+            awaitingAfter.remove(comments[index].id)
             comments.remove(at: index)
         }
         return true
@@ -335,7 +487,12 @@ public struct CollabRoom {
     }
 
     private func json(_ comment: CollabComment, for connection: Connection) -> [String: Any] {
-        comment.json(canDelete: canDelete(comment, connection: connection), includeErrors: connection.peer.isHost)
+        comment.json(
+            canDelete: canDelete(comment, connection: connection),
+            includeErrors: connection.peer.isHost,
+            mine: comment.isAuthor(connection.client),
+            work: agentWork[comment.id]
+        )
     }
 
     private func canDelete(_ comment: CollabComment, connection: Connection) -> Bool {
@@ -356,6 +513,7 @@ public struct CollabRoom {
         connection.joined = true
         connections[id] = connection
         joinOrder.append(id)
+        let captures = connection.peer.isHost ? captureRequests(for: id, path: connection.peer.path) : []
         var welcome: [String: Any] = [
             "type": "welcome",
             "you": connection.peer.json,
@@ -371,6 +529,7 @@ public struct CollabRoom {
         }
         return [Outgoing(target: .peer(id), text: Self.encode(welcome))]
             + broadcast(["type": "join", "peer": connection.peer.json], except: id)
+            + captures
     }
 
     private mutating func update(_ id: String, _ change: (inout CollabPeer) -> Void) -> [Outgoing] {
@@ -488,13 +647,28 @@ public struct CollabRoom {
         return text.isEmpty ? nil : String(text.prefix(limit))
     }
 
+    /// Text with everything a reader can't see removed, so what an agent reads is what the host sees:
+    /// control and formatting characters (zero-width, direction overrides, the invisible "tag" letters
+    /// used to smuggle instructions), private-use and unassigned code points, variation selectors that
+    /// can carry hidden data (all but the emoji one), and blank filler letters. Look-alike forms, such
+    /// as full-width letters, become ordinary ones. Visible text in any language, and emoji, stay.
     static func removingInvisibleCharacters(_ text: String, keepNewlines: Bool) -> String {
-        var invisible = CharacterSet.controlCharacters
-            .union(CharacterSet(charactersIn: "\u{200B}\u{200C}\u{200D}\u{2060}\u{FEFF}"))
-            .union(CharacterSet(charactersIn: Unicode.Scalar(0x202A)!...Unicode.Scalar(0x202E)!))
-            .union(CharacterSet(charactersIn: Unicode.Scalar(0x2066)!...Unicode.Scalar(0x2069)!))
-        if keepNewlines { invisible.remove("\n") }
-        return String(String.UnicodeScalarView(text.unicodeScalars.filter { !invisible.contains($0) }))
+        let normalized = text.precomposedStringWithCompatibilityMapping
+        return String(String.UnicodeScalarView(normalized.unicodeScalars.filter { isVisible($0, keepingNewlines: keepNewlines) }))
+    }
+
+    private static func isVisible(_ scalar: Unicode.Scalar, keepingNewlines: Bool) -> Bool {
+        if scalar == "\n" { return keepingNewlines }
+        switch scalar.properties.generalCategory {
+        case .control, .format, .privateUse, .unassigned, .surrogate, .lineSeparator, .paragraphSeparator:
+            return false
+        default:
+            break
+        }
+        let value = scalar.value
+        if (0xFE00...0xFE0E).contains(value) || (0xE0100...0xE01EF).contains(value) { return false }
+        // Letters that render as nothing (Hangul fillers, the braille blank).
+        return ![0x115F, 0x1160, 0x3164, 0xFFA0, 0x2800, 0x180E].contains(value)
     }
 
     public static func sanitizedName(_ value: Any?) -> String? {

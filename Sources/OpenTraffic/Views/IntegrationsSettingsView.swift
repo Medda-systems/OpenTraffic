@@ -9,14 +9,19 @@ struct IntegrationsSettingsView: View {
     @State private var setup = AppStore.MCPSetup.claudeCode
     @State private var portText = ""
     @State private var addingWebhook = false
+    @State private var agentPreset: AgentPreset?
 
     var body: some View {
         Form {
             Section {
-                Picker("App", selection: $setup) {
-                    ForEach(AppStore.MCPSetup.allCases) { Text($0.rawValue).tag($0) }
+                LabeledContent("App") {
+                    IconSegmentedControl(
+                        segments: AppStore.MCPSetup.allCases.map { app in
+                            .init(value: app, title: app.rawValue, image: AgentBrand(agentName: app.rawValue).flatMap { BrandAssets.agentMark($0, points: 14) })
+                        },
+                        selection: $setup
+                    )
                 }
-                .pickerStyle(.segmented)
                 Text(store.mcpSetupText(setup))
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
@@ -33,6 +38,33 @@ struct IntegrationsSettingsView: View {
             } footer: {
                 Text("The bridge is part of OpenTraffic, like the opentraffic command: it needs no token or local API, and doesn't ask before sharing. Any other MCP client can run the same command"
                     + (store.apiEnabled ? ", or connect to http://127.0.0.1:\(String(store.apiPort))/mcp with the token as a Bearer header." : "."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Picker("Agent", selection: $agentPreset) {
+                    Text("None").tag(AgentPreset?.none)
+                    ForEach(AgentPreset.allCases) { preset in
+                        Label { Text(preset.title) } icon: { AgentMark(name: preset.clientName) }
+                            .tag(Optional(preset))
+                    }
+                }
+                .onChange(of: agentPreset) { _, preset in choose(preset) }
+                if agentPreset != nil {
+                    TextField("Command", text: $store.agentCommand, axis: .vertical)
+                        .font(.callout.monospaced())
+                        .lineLimit(1...4)
+                        // An edited preset is a custom command (and its agent is just "Agent").
+                        .onChange(of: store.agentCommand) { _, command in
+                            if store.agentCommandIsSet { agentPreset = AgentPreset.matching(command) ?? .custom }
+                        }
+                    Toggle("Run it by itself for new comments when no agent is watching", isOn: $store.agentRunsAutomatically)
+                }
+            } header: {
+                Text("Agent for comments")
+            } footer: {
+                Text(agentFooter)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -91,7 +123,10 @@ struct IntegrationsSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { portText = String(store.apiPort) }
+        .onAppear {
+            portText = String(store.apiPort)
+            agentPreset = store.agentCommandIsSet ? (AgentPreset.matching(store.agentCommand) ?? .custom) : nil
+        }
         .confirmationDialog("Create a new API token?", isPresented: $confirmingRegenerate) {
             Button("New Token", role: .destructive) { store.regenerateAPIToken() }
         } message: {
@@ -123,6 +158,26 @@ struct IntegrationsSettingsView: View {
         case .codex: "Add to ~/.codex/config.toml."
         case .cursor: "Add to ~/.cursor/mcp.json."
         case .opencode: "Add to opencode.json."
+        }
+    }
+
+    private var agentFooter: String {
+        guard agentPreset != nil else {
+            return "OpenTraffic can start a coding agent to handle a comment when no agent is watching the share: you send comments to it from the Feedback tab, or let it run by itself. The agent uses its own sign-in or API key; OpenTraffic doesn't run any model."
+        }
+        return "Runs in the share's project folder with $OPENTRAFFIC_PROMPT, $OPENTRAFFIC_SHARE and $OPENTRAFFIC_COMMENT_ID set, and needs OpenTraffic's MCP server (above) to read and answer the comment. Running by itself lets anyone with a share's link start the agent on this Mac: comments reach it as untrusted feedback, but only turn this on for people you trust."
+    }
+
+    private func choose(_ preset: AgentPreset?) {
+        switch preset {
+        case nil:
+            store.agentCommand = ""
+            store.agentRunsAutomatically = false
+        case .custom:
+            // Keep what's there to edit, or start from an example.
+            if !store.agentCommandIsSet { store.agentCommand = AgentPreset.custom.command }
+        case let preset?:
+            if AgentPreset.matching(store.agentCommand) != preset { store.agentCommand = preset.command }
         }
     }
 

@@ -66,9 +66,15 @@ struct CollaborationCard: View {
                             store.openAsCollaborationHost(tunnel.id)
                         }
                         .help("Open the site in your browser as the host, so you can lead everyone else")
-                        Button("Copy Invite Link", systemImage: "link") { store.copyPublicURL(tunnel.id) }
-                            .disabled(store.publicURL(for: tunnel) == nil)
-                            .help("Copy the link to send to the people you're sharing with")
+                        if tunnel.protection.isProtected {
+                            Button("Copy Link with Password", systemImage: "link") { store.copyInviteLink(tunnel.id) }
+                                .disabled(store.publicURL(for: tunnel) == nil)
+                                .help("Copy the link with the password built in, so the people you send it to skip the sign-in page")
+                        } else {
+                            Button("Copy Invite Link", systemImage: "link") { store.copyPublicURL(tunnel.id) }
+                                .disabled(store.publicURL(for: tunnel) == nil)
+                                .help("Copy the link to send to the people you're sharing with")
+                        }
                         Spacer()
                     }
                 } else {
@@ -82,6 +88,19 @@ struct CollaborationCard: View {
                     set: { store.setCaptureErrors($0, for: tunnel.id) }
                 ))
                 .help("Visitors' uncaught errors, console errors, and failed requests show up in the Feedback tab and with their comments. Pages opened from now on follow this.")
+                Toggle(isOn: Binding(
+                    get: { tunnel.workOnBranch },
+                    set: { enabled in Task { await store.requestWorkOnBranch(enabled, for: tunnel.id) } }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Work on a branch")
+                        Text(branchCaption)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .help("Fixes for comments are committed one by one on a branch of their own; your other uncommitted changes stay uncommitted.")
                 Text("Visitors see each other's names, cursors, and which page they're on. Page content and form fields are never shared; a comment includes a short label of the element it's pinned to, a picture of it, and the visitor's browser and window size.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
@@ -98,6 +117,13 @@ struct CollaborationCard: View {
                 ? "Temporary shares get a new address when they restart. Anyone using the current link will need the new one."
                 : "The share keeps its address, but anyone connected right now will reconnect.")
         }
+    }
+
+    private var branchCaption: String {
+        if let session = tunnel.branchSession {
+            return "On \(session.branch). Stopping the share merges it into \(session.original) when that's clean."
+        }
+        return "While the share runs, the project is on a branch of its own with a commit for each fixed comment. Stopping merges it back when that's clean."
     }
 
     /// Other local services the app talks to (localhost bridge): new ones to allow, and allowed ones.
@@ -175,10 +201,14 @@ struct CollaborationCard: View {
             VStack(alignment: .leading, spacing: Spacing.s) {
                 ForEach(peers) { peer in
                     HStack(spacing: Spacing.s) {
-                        InitialsAvatar(name: peer.name, color: peer.color, size: 22)
+                        if peer.isAgent {
+                            AgentAvatar(name: peer.name, size: 22)
+                        } else {
+                            InitialsAvatar(name: peer.name, color: peer.color, size: 22)
+                        }
                         Text(peer.name).lineLimit(1)
-                        if peer.isHost {
-                            Text("Host")
+                        if peer.isHost || peer.isAgent {
+                            Text(peer.isHost ? "Host" : "Agent")
                                 .font(.caption2.weight(.semibold))
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)

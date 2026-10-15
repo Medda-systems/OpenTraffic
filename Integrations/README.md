@@ -39,8 +39,9 @@ the background. Environment:
 | `share` | Publishes a local `port` or `url` (`provider`: `quick`, `tailscale`, `ngrok`, `opentunnel`; `name`; `collaboration`, default on). |
 | `start_share`, `stop_share` | By id or name. |
 | `get_feedback` | Comments (`status`: `open`, `resolved`, `all`). |
-| `resolve_comment`, `reply_to_comment` | Replies show the app's name. |
-| `get_screenshot` | The pinned element, as an image. |
+| `claim_comment`, `release_comment` | Say you're working on a comment (with optional `progress`), or stop. The session sees the app at the element; other apps' claims are refused. A claim lapses after 15 minutes unless claimed again. |
+| `resolve_comment`, `reply_to_comment` | Replies and fixes show the app's name; the commenter is told it's fixed and can confirm or reopen it. |
+| `get_screenshot` | The pinned element, as an image; `which: after` for the picture of it once fixed. |
 | `get_errors`, `get_logs` | Browser errors visitors hit; the tunnel's log. |
 | `wait_for_feedback` | Waits (up to `timeout_seconds`, default 60, max 300) for new, changed or deleted comments; returns them and a `cursor` to pass as `since` next time. |
 
@@ -173,7 +174,7 @@ done
 ```
 
 Event types: `share.started`, `share.stopped`, `session.joined`, `session.left`, `comment.created`,
-`comment.updated`, `comment.deleted`, `error.reported`.
+`comment.updated`, `comment.deleted`, `comment.claimed`, `comment.released`, `error.reported`.
 
 ## Webhooks
 

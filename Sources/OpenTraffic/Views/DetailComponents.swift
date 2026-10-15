@@ -89,6 +89,8 @@ extension DetailTabPicker {
 struct PublicURLCard<Footer: View>: View {
     let url: String?
     var placeholder = "Available once the tunnel starts"
+    /// For shares with a password OpenTraffic checks: the copy button gets a menu with this link.
+    var linkWithPassword: (() -> String?)? = nil
     @ViewBuilder var footer: Footer
 
     var body: some View {
@@ -113,7 +115,11 @@ struct PublicURLCard<Footer: View>: View {
                 }
                 Spacer(minLength: Spacing.s)
                 HStack(spacing: Spacing.xs) {
-                    CopyButton(text: url, label: Vocabulary.copyURL)
+                    if let linkWithPassword {
+                        CopyLinkMenu(url: url, linkWithPassword: linkWithPassword)
+                    } else {
+                        CopyButton(text: url, label: Vocabulary.copyURL)
+                    }
                     QRCodeButton(url: url)
                 }
                 .buttonStyle(.bordered)

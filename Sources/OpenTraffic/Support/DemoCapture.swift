@@ -12,7 +12,9 @@ import SwiftUI
 ///   applies `command.json` from the folder: `{"select": "Orbit", "tab": "feedback",
 ///   "appearance": "light", "newTunnel": "quick", "protection": "password"}`. Each applied command
 ///   bumps `ack.txt`. `"protection": "password"` adds a demo ngrok share with a password and shows its
-///   Protection sheet; `"off"` removes both.
+///   Protection sheet (`"quick"`: a temporary share, whose password OpenTraffic checks); `"off"` removes both. `"alert": "git"` shows the offer to set up git for the
+///   selected share. Settings → Integrations has a window of its own, `integrations`. `"agent":
+///   "codex"` (an `AgentPreset`) picks the agent command; `"showResolved": "off"` hides resolved feedback.
 @MainActor
 enum DemoCapture {
     static let folder: URL? = {
@@ -75,6 +77,12 @@ enum DemoCapture {
             size: NSSize(width: 960, height: 700),
             titled: false
         )
+        windows["integrations"] = makeWindow(
+            AnyView(IntegrationsSettingsView(store: store).frame(width: 600, height: 760).tint(Brand.accent)),
+            size: NSSize(width: 600, height: 760),
+            titled: true
+        )
+        windows["integrations"]?.title = "Integrations"
         writeWindowNumbers()
         // Launched hidden (open -j) so nothing flashes on screen; the off-screen windows need it shown.
         NSApp.unhideWithoutActivation()
@@ -177,11 +185,28 @@ enum DemoCapture {
         if let protection = command["protection"] {
             windows.removeValue(forKey: "protection")?.orderOut(nil)
             store.definitions.removeAll { $0.id == protectedDemoID }
-            if protection == "password" {
-                let demo = TunnelDefinition(id: protectedDemoID, name: "Orbit", kind: .ngrok, localURL: "http://localhost:5175", protection: .password(username: "guest"))
+            if protection == "password" || protection == "quick" {
+                let kind: TunnelKind = protection == "quick" ? .quick : .ngrok
+                let demo = TunnelDefinition(id: protectedDemoID, name: "Orbit", kind: kind, localURL: "http://localhost:5175", protection: .password(username: "guest"))
                 store.definitions.append(demo)
                 windows["protection"] = makeWindow(AnyView(ProtectionSheet(store: store, tunnel: demo)), size: NSSize(width: 540, height: 520), titled: false)
             }
+            writeWindowNumbers()
+        }
+        if let preset = command["agent"].flatMap(AgentPreset.init(rawValue:)) {
+            store.agentCommand = preset.command
+        }
+        if let show = command["showResolved"] {
+            UserDefaults.standard.set(show != "off", forKey: "feedbackShowResolved")
+        }
+        if command["alert"] == "git", let share = store.selectedDefinition {
+            windows.removeValue(forKey: "alert")?.orderOut(nil)
+            let path = ((share.agentDirectory ?? "~/code/\(share.name.lowercased())") as NSString).abbreviatingWithTildeInPath
+            let alert = AppStore.gitSetupAlert(shareName: share.name, path: path)
+            alert.layout()
+            hide(alert.window)
+            alert.window.orderFrontRegardless()
+            windows["alert"] = alert.window
             writeWindowNumbers()
         }
         acknowledged += 1

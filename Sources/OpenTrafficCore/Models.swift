@@ -162,6 +162,14 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
     public var captureErrors: Bool
     /// OpenTunnel only: the route (subdomain) on OpenTraffic's tunnel, kept so the URL stays the same.
     public var openTunnelRoute: String?
+    /// The project folder the agent command runs in for this share's comments (nil: the folder the
+    /// local server runs from, when OpenTraffic can tell).
+    public var agentDirectory: String?
+    /// Collaboration: while the share runs, the project works on a branch of its own, each resolved
+    /// comment's changes committed there; stopping merges it back when that's clean.
+    public var workOnBranch: Bool
+    /// The branch session in progress, kept so a restart (or a crash) carries on with the same branch.
+    public var branchSession: GitBranchSession?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -184,6 +192,9 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         case bridgedPorts
         case captureErrors
         case openTunnelRoute
+        case agentDirectory
+        case workOnBranch
+        case branchSession
     }
 
     public init(
@@ -206,7 +217,10 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         collaboration: Bool = false,
         bridgedPorts: [Int] = [],
         captureErrors: Bool = false,
-        openTunnelRoute: String? = nil
+        openTunnelRoute: String? = nil,
+        agentDirectory: String? = nil,
+        workOnBranch: Bool = false,
+        branchSession: GitBranchSession? = nil
     ) {
         self.id = id
         self.name = name
@@ -228,6 +242,9 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         self.bridgedPorts = bridgedPorts
         self.captureErrors = captureErrors
         self.openTunnelRoute = openTunnelRoute
+        self.agentDirectory = agentDirectory?.nilIfBlank
+        self.workOnBranch = workOnBranch
+        self.branchSession = branchSession
     }
 
     public init(from decoder: Decoder) throws {
@@ -252,6 +269,9 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         bridgedPorts = (try container.decodeIfPresent([Int].self, forKey: .bridgedPorts) ?? []).filter { (1...65_535).contains($0) }
         captureErrors = try container.decodeIfPresent(Bool.self, forKey: .captureErrors) ?? false
         openTunnelRoute = try container.decodeIfPresent(String.self, forKey: .openTunnelRoute)
+        agentDirectory = try container.decodeIfPresent(String.self, forKey: .agentDirectory)?.nilIfBlank
+        workOnBranch = try container.decodeIfPresent(Bool.self, forKey: .workOnBranch) ?? false
+        branchSession = try? container.decodeIfPresent(GitBranchSession.self, forKey: .branchSession)
     }
 
     /// Whether OpenTraffic can make this share send the local host as the Host header. cloudflared

@@ -78,10 +78,10 @@ extension AppStore {
                 definitions[index].openTunnelRoute = route
                 saveDefinitions()
             }
-            // OpenTunnel passes the visitor's bytes straight to the local server, so live collaboration
-            // and the Host header fix both need OpenTraffic's proxy in between.
+            // OpenTunnel passes the visitor's bytes straight to the local server, so live collaboration,
+            // a password, and the Host header fix all need OpenTraffic's proxy in between.
             let collaboration = usesCollaboration(definition)
-            if collaboration || definition.rewriteHostHeader {
+            if collaboration || definition.rewriteHostHeader || definition.protection.isProtected {
                 guard let proxyURL = try await startShareProxy(for: definition, generation: generation, collaboration: collaboration),
                       let proxyTarget = OpenTunnel.target(for: proxyURL) else { return }
                 target = proxyTarget
@@ -205,7 +205,11 @@ extension AppStore {
     }
 
     func openTunnelRunningDetail(for definition: TunnelDefinition) -> String {
-        let proxy = collabProxies[definition.id] != nil && !isCollaborating(definition.id) ? " through OpenTraffic's proxy (Host header fix)" : ""
+        var proxy = ""
+        if let shareProxy = collabProxies[definition.id], !isCollaborating(definition.id) {
+            let reasons = [shareProxy.access != nil ? "password" : nil, definition.rewriteHostHeader ? "Host header fix" : nil].compactMap(\.self)
+            proxy = " through OpenTraffic's proxy" + (reasons.isEmpty ? "" : " (\(reasons.joined(separator: ", ")))")
+        }
         let connections = openTunnelStatus?.connections ?? 0
         return "Route \(definition.openTunnelRoute ?? "?")\(proxy). \(connections == 1 ? "1 open connection" : "\(connections) open connections") on the tunnel."
     }

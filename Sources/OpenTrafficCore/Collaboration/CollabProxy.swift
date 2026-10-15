@@ -109,6 +109,9 @@ public final class CollabProxy: @unchecked Sendable {
         var reportedCandidates: Set<Int> = []
         /// OpenTraffic's own ports (its API, other shares' proxies): never bridged.
         var reservedPorts: Set<Int> = []
+        /// The share's password, when it has one.
+        var access: ShareAccess?
+        var signInLimiter = SignInLimiter()
     }
     private let shared = OSAllocatedUnfairLock(initialState: Shared())
 
@@ -135,7 +138,7 @@ public final class CollabProxy: @unchecked Sendable {
         if let directory = configuration.attachmentsDirectory,
            let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.fileSizeKey]) {
             // Pictures no saved comment uses (uploaded for a comment never posted, or left over).
-            let used = Set(comments.compactMap(\.screenshot))
+            let used = Set(comments.flatMap(\.attachments))
             for file in files {
                 let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
                 if used.contains(file.deletingPathExtension().lastPathComponent) || (try? FileManager.default.removeItem(at: file)) == nil {
@@ -162,6 +165,14 @@ public final class CollabProxy: @unchecked Sendable {
     public func setReservedPorts(_ ports: Set<Int>) {
         shared.withLock { $0.reservedPorts = ports }
     }
+
+    /// Puts a password in front of everything the share serves (nil: open). Takes effect for the next
+    /// request; a new password signs everyone out, since their cookies were made from the old one.
+    public func setAccess(_ access: ShareAccess?) {
+        shared.withLock { $0.access = access }
+    }
+
+    public var access: ShareAccess? { shared.withLock { $0.access } }
 
     /// The tunnel's public hostname, so pages served there may open the hub's WebSocket.
     public func setPublicHost(_ host: String?) {
@@ -210,11 +221,21 @@ public final class CollabProxy: @unchecked Sendable {
         }.get() ?? nil
     }
 
-    /// Resolves or reopens a comment from OpenTraffic; everyone in the session sees the change.
-    public func resolveComment(_ id: String, resolved: Bool) async {
+    /// Resolves or reopens a comment from OpenTraffic; everyone in the session sees the change. `by` is
+    /// who resolved it, and `agent` whether that's an app using the API.
+    public func resolveComment(_ id: String, resolved: Bool, by name: String? = nil, agent: Bool = false) async {
         try? await loop.submit {
-            self.deliver(self.room.resolveComment(id, resolved: resolved))
+            self.deliver(self.room.resolveComment(id, resolved: resolved, by: name, agent: agent))
             self.reportCommentsIfChanged()
+            self.reportPeersIfChanged()
+        }.get()
+    }
+
+    /// Shows the comments coding agents are working on, and the agents, to everyone in the session.
+    public func setAgentWork(_ work: [CollabAgentWork]) async {
+        try? await loop.submit {
+            self.deliver(self.room.setAgentWork(work))
+            self.reportPeersIfChanged()
         }.get()
     }
 
@@ -223,6 +244,7 @@ public final class CollabProxy: @unchecked Sendable {
         try? await loop.submit {
             self.deliver(self.room.deleteComment(id))
             self.reportCommentsIfChanged()
+            self.reportPeersIfChanged()
         }.get()
     }
 
@@ -285,6 +307,63 @@ public final class CollabProxy: @unchecked Sendable {
 
     func isHost(_ head: HTTPRequestHead) -> Bool {
         isLocalAuthority(head) && Self.cookie(hostCookie, in: head.headers) == hostToken
+    }
+
+    // MARK: Password
+
+    enum AccessGate: Equatable {
+        /// OpenTraffic's sign-in page (asked for directly, or in place of a page the visitor can't open yet).
+        case signInPage(next: String)
+        case signIn
+        /// A valid invite link: sign in and continue to `next`.
+        case invite(next: String)
+        /// Anything else without access: 401, with basic auth offered to tools.
+        case refused
+    }
+
+    /// What to do with a request instead of serving it, or nil to serve it. The host (holding the
+    /// host link's cookie) always gets through; the Host header proves nothing, since a tunnel's
+    /// visitors can set it.
+    func gate(_ head: HTTPRequestHead) -> AccessGate? {
+        guard let access else { return nil }
+        let path = Self.path(of: head.uri)
+        if path == Self.hostPath { return nil }
+        if path == ShareAccess.signInPath {
+            return head.method == .POST ? .signIn : .signInPage(next: ShareAccess.safeNext(Self.query("next", in: head.uri)))
+        }
+        if Self.cookie(hostCookie, in: head.headers) == hostToken { return nil }
+        if let cookie = Self.cookie(ShareAccess.cookieName, in: head.headers), access.accepts(cookie: cookie) { return nil }
+        if let authorization = head.headers.first(name: "authorization"), access.accepts(authorization: authorization) { return nil }
+        let reads = head.method == .GET || head.method == .HEAD
+        if reads, let invite = Self.query(ShareAccess.inviteParameter, in: head.uri), access.accepts(invite: invite) {
+            return .invite(next: ShareAccess.removingInvite(from: head.uri))
+        }
+        return reads && Self.wantsPage(head) ? .signInPage(next: ShareAccess.safeNext(head.uri)) : .refused
+    }
+
+    /// A browser opening a page (rather than a script fetching data).
+    static func wantsPage(_ head: HTTPRequestHead) -> Bool {
+        if let mode = head.headers.first(name: "sec-fetch-mode")?.lowercased() { return mode == "navigate" }
+        return head.headers[canonicalForm: "accept"].contains { $0.lowercased().contains("text/html") }
+    }
+
+    /// Checks a submitted password. Wrong tries count against the visitor (or the share, when the
+    /// tunnel doesn't say who's visiting).
+    func signIn(password: String, from address: String?, now: Date = Date()) -> SignInResult {
+        shared.withLock { state in
+            guard let access = state.access else { return .wrong }
+            let key = address ?? "share"
+            guard state.signInLimiter.allows(key, now: now) else { return .limited }
+            if access.accepts(password: password) { return .accepted(access) }
+            state.signInLimiter.failed(key, at: now)
+            return .wrong
+        }
+    }
+
+    enum SignInResult {
+        case accepted(ShareAccess)
+        case wrong
+        case limited
     }
 
     /// The hub only accepts pages served by this share (public hostname or the local host link),
@@ -479,7 +558,7 @@ public final class CollabProxy: @unchecked Sendable {
     private func reportCommentsIfChanged() {
         let comments = room.comments
         guard comments != lastReportedComments else { return }
-        let gone = Set(lastReportedComments.compactMap(\.screenshot)).subtracting(comments.compactMap(\.screenshot))
+        let gone = Set(lastReportedComments.flatMap(\.attachments)).subtracting(comments.flatMap(\.attachments))
         gone.forEach(removeAttachment)
         lastReportedComments = comments
         shared.withLock { $0.commentsHandler }?(comments)
@@ -546,6 +625,8 @@ private final class ProxyHandler: ChannelInboundHandler, RemovableChannelHandler
 
     private var request: HTTPRequestHead?
     private var localRoute = false
+    /// The current request needs the share's password first.
+    private var gate: CollabProxy.AccessGate?
     private var socketUpgrade: HTTPRequestHead?
     /// The current request asks the local server to switch protocols (hot reload, bridged sockets).
     fileprivate private(set) var upgrading = false
@@ -587,9 +668,15 @@ private final class ProxyHandler: ChannelInboundHandler, RemovableChannelHandler
             upstreamKeepAlive = true
             targetPort = proxy.configuration.upstreamPort
             let path = CollabProxy.path(of: head.uri)
+            let isUpgrade = head.headers[canonicalForm: "connection"].contains { $0.lowercased() == "upgrade" }
+            gate = proxy.gate(head)
+            if gate != nil {
+                localRoute = true
+                closeAfterResponse = isUpgrade || head.method == .CONNECT
+                return
+            }
             // CONNECT isn't proxied; like an upgrade, the parser stops after it.
             localRoute = path.hasPrefix("/__opentraffic/") || head.method == .CONNECT
-            let isUpgrade = head.headers[canonicalForm: "connection"].contains { $0.lowercased() == "upgrade" }
             // The request parser stops after an upgrade request, so unless the protocol actually
             // switches, whatever answers it must be the last thing on this connection.
             closeAfterResponse = isUpgrade || head.method == .CONNECT
@@ -623,13 +710,19 @@ private final class ProxyHandler: ChannelInboundHandler, RemovableChannelHandler
         case .body(var buffer):
             if !localRoute {
                 send(.body(.byteBuffer(buffer)))
+            } else if gate == .signIn {
+                if localBody == nil { localBody = context.channel.allocator.buffer(capacity: buffer.readableBytes) }
+                if (localBody?.readableBytes ?? 0) <= 8 * 1024 { localBody?.writeBuffer(&buffer) }
             } else if CollabProxy.path(of: request?.uri ?? "") == CollabProxy.uploadPath {
                 // Collect uploads up to a little past the limit, so oversize ones are answered as such.
                 if localBody == nil { localBody = context.channel.allocator.buffer(capacity: buffer.readableBytes) }
                 if (localBody?.readableBytes ?? 0) <= CollabProxy.maximumUploadBytes { localBody?.writeBuffer(&buffer) }
             }
         case .end(let trailers):
-            if let head = socketUpgrade {
+            if let gate {
+                self.gate = nil
+                respondToGate(gate, context: context)
+            } else if let head = socketUpgrade {
                 socketUpgrade = nil
                 acceptSocket(context: context, head: head)
             } else if localRoute {
@@ -656,6 +749,11 @@ private final class ProxyHandler: ChannelInboundHandler, RemovableChannelHandler
         // Uncompressed HTML can be edited on the fly; Cloudflare compresses at the edge anyway.
         if proxy.configuration.injectsOverlay { head.headers.remove(name: "accept-encoding") }
         CollabProxy.removingCookies(prefix: CollabProxy.hostCookiePrefix, from: &head.headers)
+        CollabProxy.removingCookies(prefix: ShareAccess.cookieName, from: &head.headers)
+        // The share's password, sent by a tool: the app has its own idea of who may sign in.
+        if let access = proxy.access, let authorization = head.headers.first(name: "authorization"), access.accepts(authorization: authorization) {
+            head.headers.remove(name: "authorization")
+        }
         // The host's browser talks to the proxy's own address; give the local server the
         // address it expects, as if it were opened directly.
         if proxy.isLocalAuthority(head) || proxy.configuration.rewritesHostHeader {
@@ -920,6 +1018,48 @@ private final class ProxyHandler: ChannelInboundHandler, RemovableChannelHandler
             respond(context: context, status: .forbidden, headers: HTTPHeaders(), body: ByteBuffer(string: "Forbidden\n"))
         default:
             respond(context: context, status: .notFound, headers: HTTPHeaders(), body: ByteBuffer(string: "Not found\n"))
+        }
+    }
+
+    // MARK: Password
+
+    private func respondToGate(_ gate: CollabProxy.AccessGate, context: ChannelHandlerContext) {
+        guard let request else { return }
+        let shareName = proxy.access?.shareName ?? "Shared site"
+        let asksName = proxy.configuration.injectsOverlay
+        var headers = HTTPHeaders(ShareAccess.pageHeaders)
+        switch gate {
+        case .signInPage(let next):
+            let status: HTTPResponseStatus = CollabProxy.path(of: request.uri) == ShareAccess.signInPath ? .ok : .unauthorized
+            respond(context: context, status: status, headers: headers, body: ByteBuffer(string: ShareAccess.signInPage(shareName: shareName, next: next, asksName: asksName)))
+        case .signIn:
+            let fields = ShareAccess.formFields(localBody.map { Data($0.readableBytesView) } ?? Data())
+            let next = ShareAccess.safeNext(fields["next"])
+            switch proxy.signIn(password: fields["password"] ?? "", from: request.headers.first(name: "cf-connecting-ip")) {
+            case .accepted(let access):
+                headers.add(name: "set-cookie", value: access.setCookieHeader)
+                respond(context: context, status: .ok, headers: headers, body: ByteBuffer(string: ShareAccess.signedInPage(next: next, name: fields["name"])))
+            case .wrong:
+                let page = ShareAccess.signInPage(shareName: shareName, next: next, error: "That password isn't right.", asksName: asksName)
+                respond(context: context, status: .unauthorized, headers: headers, body: ByteBuffer(string: page))
+            case .limited:
+                headers.add(name: "retry-after", value: String(Int(SignInLimiter.window)))
+                let page = ShareAccess.signInPage(shareName: shareName, next: next, error: "Too many tries. Wait a minute, then try again.", asksName: asksName)
+                respond(context: context, status: .tooManyRequests, headers: headers, body: ByteBuffer(string: page))
+            }
+        case .invite(let next):
+            var headers = HTTPHeaders()
+            headers.add(name: "location", value: next)
+            headers.add(name: "cache-control", value: "no-store")
+            headers.add(name: "referrer-policy", value: "no-referrer")
+            if let access = proxy.access { headers.add(name: "set-cookie", value: access.setCookieHeader) }
+            respond(context: context, status: .seeOther, headers: headers, body: ByteBuffer())
+        case .refused:
+            var headers = HTTPHeaders()
+            headers.add(name: "content-type", value: "text/plain; charset=utf-8")
+            headers.add(name: "www-authenticate", value: #"Basic realm="OpenTraffic", charset="UTF-8""#)
+            headers.add(name: "cache-control", value: "no-store")
+            respond(context: context, status: .unauthorized, headers: headers, body: ByteBuffer(string: "This share is password protected.\n"))
         }
     }
 

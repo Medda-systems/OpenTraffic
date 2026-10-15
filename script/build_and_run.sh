@@ -80,6 +80,11 @@ chmod +x "$APP_RESOURCES/opentraffic"
 for provider in cloudflare ngrok tailscale opentunnel; do
   cp "$ROOT_DIR/Sources/OpenTraffic/Resources/provider-$provider.svg" "$APP_RESOURCES/provider-$provider.svg"
 done
+# Coding agents' marks, for the agents OpenTraffic shows at work: Claude, Cursor, and OpenCode from
+# Simple Icons (CC0); Codex from Lobe Icons (MIT). Trademarks belong to their owners.
+for agent in claude codex cursor opencode; do
+  cp "$ROOT_DIR/Sources/OpenTraffic/Resources/agent-$agent.svg" "$APP_RESOURCES/agent-$agent.svg"
+done
 # OpenTraffic's license and those of the libraries it includes travel with the app.
 mkdir -p "$APP_RESOURCES/Licenses"
 cp "$ROOT_DIR/LICENSE" "$APP_RESOURCES/Licenses/OpenTraffic-LICENSE.txt"
