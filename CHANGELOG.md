@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.9
 
 - **See agents at work:** a coding agent working on a comment now claims it (`claim_comment`, or `opentraffic claim`). Everyone on the page sees it in the session, its cursor beside the element ("✦ Claude Code · working") and what it's doing, and two agents never take the same comment. Claims lapse after 15 minutes unless renewed, so a stopped agent never leaves a comment stuck.
 - **"Fixed: take a look":** when someone else resolves a comment, its author is told, right away or the next time they open the link. **Take a look** opens the element, with **Before** and **After** pictures, and asks them to confirm the fix or reopen it. The Feedback tab shows who resolved each comment and whether its author agreed, and OpenTraffic can notify you when they do.
