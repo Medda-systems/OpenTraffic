@@ -16,6 +16,8 @@ Touch ID–protected storage requires paid Apple Developer Program signing and p
 
 ## Local API boundary
 
+The `opentraffic` command and the `opentraffic-mcp` bridge don't use the HTTP API. They connect to the app over a Unix socket in `~/Library/Application Support/OpenTraffic/` that only your user can open, and the app checks each caller's code signature: only tools signed by Medda Systems as OpenTraffic's own are served, and anything else is disconnected without an answer. These callers are trusted like the app's own windows, so they don't ask before sharing.
+
 The integrations API is opt-in, bound to IPv4 loopback, bearer-token protected, and rejects requests with an Origin header. Client names identify integrations; they are not separate credentials. Keep the token private and never publish port 47777 through a tunnel.
 
 ## Public shares

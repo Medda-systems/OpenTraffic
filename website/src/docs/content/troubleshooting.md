@@ -46,7 +46,7 @@ Check [Localhost bridge](/docs/localhost-bridge) for unapproved additional ports
 
 ## An agent cannot reach OpenTraffic
 
-Keep the app running, enable its local API, and use the bridge path from Settings → Integrations. A regenerated token is read automatically by the stdio bridge. For direct HTTP clients, update the bearer token. Lower `wait_for_feedback`’s timeout if the MCP client terminates calls earlier.
+Use the bridge path from Settings → Integrations; the bridge starts OpenTraffic if it isn't running and needs no token. If you moved OpenTraffic, update the path. For direct HTTP clients, enable the local API and update the bearer token if you made a new one. Lower `wait_for_feedback`’s timeout if the MCP client terminates calls earlier.
 
 ## A Keychain prompt appeared after a rebuild
 

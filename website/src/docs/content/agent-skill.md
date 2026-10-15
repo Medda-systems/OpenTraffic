@@ -45,7 +45,7 @@ Once your agent has restarted, ask it things like:
 - “The shared link says the host isn't allowed. Fix it.”
 - “Give me a link to the API on port 3001 that keeps working tomorrow.”
 
-Sharing still asks for your confirmation in OpenTraffic unless you allowed apps to share without asking in **Settings → Integrations**. The skill tells the agent to share only what you asked for, and never to remove shares, replace DNS records, or change protection unless you asked it to.
+The `opentraffic` command doesn't ask you to confirm anything, so the skill makes the agent the check: it tells the agent to share only what you asked for, and never to remove shares, replace DNS records, or change protection unless you asked it to.
 
 ## The skill and the MCP server
 

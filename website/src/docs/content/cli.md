@@ -102,9 +102,9 @@ url=$(opentraffic share 5173 --json | jq -r .publicURL)
 opentraffic watch --json | while read -r event; do …; done
 ```
 
-Anything that puts something on the internet asks for confirmation in OpenTraffic first, unless you turn on **Settings → Integrations → Apps can share without asking**. Turn that on for unattended use. Sharing an address on another device always asks.
+The command never asks for confirmation, including when it shares something, so it works unattended, in scripts, and for coding agents. Only OpenTraffic's own signed tools can use its private connection; other apps go through the [local API](/docs/rest-api), which still asks.
 
-The command reads `OPENTRAFFIC_API_PORT` and `OPENTRAFFIC_API_TOKEN_FILE` if you've moved the API; otherwise it uses OpenTraffic's settings.
+With an OpenTraffic older than 1.0.8, the command falls back to the local API and reads `OPENTRAFFIC_API_PORT` and `OPENTRAFFIC_API_TOKEN_FILE` if you've moved it.
 
 ## Links (`opentraffic://`)
 

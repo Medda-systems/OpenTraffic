@@ -210,17 +210,14 @@ extension AppStore {
 
     func mcpSetupText(_ client: MCPSetup) -> String {
         let path = mcpBridgePath
-        let port = apiPort == LocalAPIServer.defaultPort ? "" : ", \"OPENTRAFFIC_API_PORT\": \"\(apiPort)\""
         switch client {
         case .claudeCode:
-            let portFlag = apiPort == LocalAPIServer.defaultPort ? "" : " --env OPENTRAFFIC_API_PORT=\(apiPort)"
-            return "claude mcp add --scope user opentraffic --env OPENTRAFFIC_CLIENT=\"Claude Code\"\(portFlag) -- \"\(path)\""
+            return "claude mcp add --scope user opentraffic --env OPENTRAFFIC_CLIENT=\"Claude Code\" -- \"\(path)\""
         case .codex:
-            let codexPort = apiPort == LocalAPIServer.defaultPort ? "" : ", OPENTRAFFIC_API_PORT = \"\(apiPort)\""
             return """
             [mcp_servers.opentraffic]
             command = "\(path)"
-            env = { OPENTRAFFIC_CLIENT = "Codex"\(codexPort) }
+            env = { OPENTRAFFIC_CLIENT = "Codex" }
             tool_timeout_sec = 330
             """
         case .cursor:
@@ -229,7 +226,7 @@ extension AppStore {
               "mcpServers": {
                 "opentraffic": {
                   "command": "\(path)",
-                  "env": { "OPENTRAFFIC_CLIENT": "Cursor"\(port) }
+                  "env": { "OPENTRAFFIC_CLIENT": "Cursor" }
                 }
               }
             }
@@ -241,7 +238,7 @@ extension AppStore {
                 "opentraffic": {
                   "type": "local",
                   "command": ["\(path)"],
-                  "environment": { "OPENTRAFFIC_CLIENT": "opencode"\(port) },
+                  "environment": { "OPENTRAFFIC_CLIENT": "opencode" },
                   "enabled": true
                 }
               }
