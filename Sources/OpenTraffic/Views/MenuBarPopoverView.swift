@@ -216,6 +216,7 @@ struct MenuBarPopoverView: View {
                         Label { Text(kind.title) } icon: { Image(nsImage: BrandAssets.logo(kind.provider, style: .menu)).renderingMode(.template) }
                     }
                 }
+                .untintedMenuItems()
             } label: {
                 Label("New", systemImage: "plus")
             }
@@ -277,23 +278,14 @@ private struct ShareableServiceRow: View {
             .help("Open \(service.url) in your browser")
             .accessibilityLabel("Open \(service.displayName) in your browser")
             .contextMenu {
-                Button("Open in Browser", systemImage: "safari", action: openLocally)
-                Button("Copy Address", systemImage: "doc.on.doc") { Pasteboard.copy(service.url) }
+                Group {
+                    Button("Open in Browser", systemImage: "safari", action: openLocally)
+                    Button("Copy Address", systemImage: "doc.on.doc") { Pasteboard.copy(service.url) }
+                }
+                .untintedMenuItems()
             }
             Menu {
-                shareItem("Temporary Public URL", provider: .cloudflare) { share(.quick) }
-                    .disabled(!canShare)
-                shareItem("Private on Your Tailnet", provider: .tailscale) { share(.tailscale) }
-                    .disabled(!canShareOnTailnet)
-                shareItem("Public with ngrok", provider: .ngrok) { share(.ngrok) }
-                    .disabled(!canShareWithNgrok)
-                shareItem("Lasting Address with OpenTunnel", provider: .opentunnel) { share(.opentunnel) }
-                    .disabled(!canShareWithOpenTunnel || !service.url.lowercased().hasPrefix("http://"))
-                if let shareWithCollaboration {
-                    Divider()
-                    Button("Temporary URL with Live Collaboration", systemImage: "person.2.wave.2", action: shareWithCollaboration)
-                        .disabled(!canShare || !service.url.lowercased().hasPrefix("http://"))
-                }
+                shareItems.untintedMenuItems()
             } label: {
                 Text(Vocabulary.share)
             } primaryAction: {
@@ -310,6 +302,23 @@ private struct ShareableServiceRow: View {
         .padding(.horizontal, Spacing.s)
         .hoverHighlight()
         .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var shareItems: some View {
+        shareItem("Temporary Public URL", provider: .cloudflare) { share(.quick) }
+            .disabled(!canShare)
+        shareItem("Private on Your Tailnet", provider: .tailscale) { share(.tailscale) }
+            .disabled(!canShareOnTailnet)
+        shareItem("Public with ngrok", provider: .ngrok) { share(.ngrok) }
+            .disabled(!canShareWithNgrok)
+        shareItem("Lasting Address with OpenTunnel", provider: .opentunnel) { share(.opentunnel) }
+            .disabled(!canShareWithOpenTunnel || !service.url.lowercased().hasPrefix("http://"))
+        if let shareWithCollaboration {
+            Divider()
+            Button("Temporary URL with Live Collaboration", systemImage: "person.2.wave.2", action: shareWithCollaboration)
+                .disabled(!canShare || !service.url.lowercased().hasPrefix("http://"))
+        }
     }
 
     private func openLocally() {

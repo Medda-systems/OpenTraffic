@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.11
+
+- **Menu icons are really white in dark mode now:** 1.0.10's fix didn't reach the released app. The Claude Code, Codex, Cursor, and opencode marks in Settings → Integrations, and the Cloudflare, OpenTunnel, Tailscale, and ngrok marks in the New, New Tunnel, and Share menus, now follow the menu's text colour: white in dark mode, black in light mode.
+
 ## 1.0.10
 
 - **Icons in menus follow the menu in dark mode:** the Claude Code, Codex, Cursor, and opencode marks in Settings → Integrations, and the Cloudflare, OpenTunnel, Tailscale, and ngrok marks in the New, New Tunnel, and Share menus, are now white in dark mode like the rest of the menu instead of dark. The custom agent's sparkle is now the same size as the other marks.

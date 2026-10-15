@@ -36,7 +36,7 @@ struct ManagedTunnelRow: View {
         Group {
             if style == .card { cardLayout } else { rowLayout }
         }
-        .contextMenu { actions }
+        .contextMenu { actions.untintedMenuItems() }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(tunnel.name), \(state.label)")
         .confirmsRemoval(of: $pendingRemoval, store: store)
@@ -242,7 +242,7 @@ struct ManagedTunnelRow: View {
     }
 
     private var actionsMenu: some View {
-        Menu { actions } label: {
+        Menu { actions.untintedMenuItems() } label: {
             Image(systemName: "ellipsis.circle")
                 .accessibilityLabel("More actions")
         }
@@ -302,7 +302,7 @@ struct DiscoveredTunnelRow: View {
         Group {
             if style == .card { cardLayout } else { rowLayout }
         }
-        .contextMenu { actions }
+        .contextMenu { actions.untintedMenuItems() }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(store.discoveredDisplayName(tunnel)), \(TunnelDisplayState.external.label)")
     }
@@ -401,7 +401,7 @@ struct DiscoveredTunnelRow: View {
     }
 
     private var actionsMenu: some View {
-        Menu { actions } label: {
+        Menu { actions.untintedMenuItems() } label: {
             Image(systemName: "ellipsis.circle")
                 .accessibilityLabel("More actions")
         }

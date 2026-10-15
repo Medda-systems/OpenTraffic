@@ -28,10 +28,13 @@ struct ProjectRow: View {
             }
         }
         .contextMenu {
-            Button("Start All", systemImage: "play.fill") { store.startProject(name) }
-                .disabled(running == tunnels.count)
-            Button("Stop All", systemImage: "stop.fill") { store.stopProject(name) }
-                .disabled(running == 0)
+            Group {
+                Button("Start All", systemImage: "play.fill") { store.startProject(name) }
+                    .disabled(running == tunnels.count)
+                Button("Stop All", systemImage: "stop.fill") { store.stopProject(name) }
+                    .disabled(running == 0)
+            }
+            .untintedMenuItems()
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Project \(name), \(running) of \(tunnels.count) running")

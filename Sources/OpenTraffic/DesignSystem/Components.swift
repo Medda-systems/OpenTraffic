@@ -246,8 +246,11 @@ struct CopyLinkMenu: View {
 
     var body: some View {
         Menu {
-            Button("Copy Link", systemImage: "link") { copy(url) }
-            Button("Copy Link with Password", systemImage: "key") { copy(linkWithPassword(), concealed: true) }
+            Group {
+                Button("Copy Link", systemImage: "link") { copy(url) }
+                Button("Copy Link with Password", systemImage: "key") { copy(linkWithPassword(), concealed: true) }
+            }
+            .untintedMenuItems()
         } label: {
             Label(copied ? "Copied" : "Copy Link", systemImage: copied ? "checkmark" : "doc.on.doc")
                 .labelStyle(.iconOnly)

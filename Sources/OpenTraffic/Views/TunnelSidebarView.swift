@@ -47,9 +47,10 @@ struct TunnelSidebarView: View {
                 Menu {
                     ForEach(NewTunnelKind.allCases) { kind in
                         Button { store.present(.newTunnel(kind)) } label: {
-                        Label { Text(kind.title) } icon: { Image(nsImage: BrandAssets.logo(kind.provider, style: .menu)).renderingMode(.template) }
+                            Label { Text(kind.title) } icon: { Image(nsImage: BrandAssets.logo(kind.provider, style: .menu)).renderingMode(.template) }
+                        }
                     }
-                    }
+                    .untintedMenuItems()
                 } label: {
                     Label("New Tunnel", systemImage: "plus")
                 } primaryAction: {

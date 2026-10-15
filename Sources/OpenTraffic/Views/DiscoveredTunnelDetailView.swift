@@ -32,13 +32,16 @@ struct DiscoveredTunnelDetailView: View {
             DetailTabPicker(selection: $store.detailTab)
             ToolbarItem {
                 Menu {
-                    Button(Vocabulary.copyURL, systemImage: "doc.on.doc") { store.copyPublicURL(tunnel.id) }
-                    Button(Vocabulary.openInBrowser, systemImage: "safari") {
-                        if let url = URL(string: tunnel.publicURL) { NSWorkspace.shared.open(url) }
+                    Group {
+                        Button(Vocabulary.copyURL, systemImage: "doc.on.doc") { store.copyPublicURL(tunnel.id) }
+                        Button(Vocabulary.openInBrowser, systemImage: "safari") {
+                            if let url = URL(string: tunnel.publicURL) { NSWorkspace.shared.open(url) }
+                        }
+                        Divider()
+                        Button(Vocabulary.rename, systemImage: "pencil") { store.present(.renameDiscovered(tunnel.id)) }
+                        Button("Hide", systemImage: "eye.slash") { store.hideDiscovered(tunnel) }
                     }
-                    Divider()
-                    Button(Vocabulary.rename, systemImage: "pencil") { store.present(.renameDiscovered(tunnel.id)) }
-                    Button("Hide", systemImage: "eye.slash") { store.hideDiscovered(tunnel) }
+                    .untintedMenuItems()
                 } label: {
                     Label("More", systemImage: "ellipsis.circle")
                 }

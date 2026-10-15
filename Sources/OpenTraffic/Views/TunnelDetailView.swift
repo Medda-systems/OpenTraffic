@@ -55,21 +55,7 @@ struct TunnelDetailView: View {
             )
             ToolbarItem {
                 Menu {
-                    Button(Vocabulary.copyURL, systemImage: "doc.on.doc") { store.copyPublicURL(tunnel.id) }
-                        .disabled(publicURL == nil)
-                    if tunnel.kind.passwordInProxy, tunnel.protection.isProtected {
-                        Button("Copy Link with Password", systemImage: "key") { store.copyInviteLink(tunnel.id) }
-                            .disabled(publicURL == nil)
-                    }
-                    Button(Vocabulary.openInBrowser, systemImage: "safari", action: openPublicURL)
-                        .disabled(publicURL == nil)
-                    Divider()
-                    StopAfterMenu(store: store, id: tunnel.id)
-                    Button("Protection…", systemImage: "lock") { store.present(.protection(tunnel.id)) }
-                    Button("Host Header…", systemImage: "arrow.left.arrow.right.square") { store.present(.hostHeader(tunnel.id)) }
-                    Divider()
-                    Button(Vocabulary.edit, systemImage: "pencil") { store.present(.edit(tunnel.id)) }
-                    Button(Vocabulary.remove, systemImage: "trash", role: .destructive) { pendingRemoval = tunnel }
+                    menuActions.untintedMenuItems()
                 } label: {
                     Label("More", systemImage: "ellipsis.circle")
                 }
@@ -77,6 +63,25 @@ struct TunnelDetailView: View {
             }
         }
         .confirmsRemoval(of: $pendingRemoval, store: store)
+    }
+
+    @ViewBuilder
+    private var menuActions: some View {
+        Button(Vocabulary.copyURL, systemImage: "doc.on.doc") { store.copyPublicURL(tunnel.id) }
+            .disabled(publicURL == nil)
+        if tunnel.kind.passwordInProxy, tunnel.protection.isProtected {
+            Button("Copy Link with Password", systemImage: "key") { store.copyInviteLink(tunnel.id) }
+                .disabled(publicURL == nil)
+        }
+        Button(Vocabulary.openInBrowser, systemImage: "safari", action: openPublicURL)
+            .disabled(publicURL == nil)
+        Divider()
+        StopAfterMenu(store: store, id: tunnel.id)
+        Button("Protection…", systemImage: "lock") { store.present(.protection(tunnel.id)) }
+        Button("Host Header…", systemImage: "arrow.left.arrow.right.square") { store.present(.hostHeader(tunnel.id)) }
+        Divider()
+        Button(Vocabulary.edit, systemImage: "pencil") { store.present(.edit(tunnel.id)) }
+        Button(Vocabulary.remove, systemImage: "trash", role: .destructive) { pendingRemoval = tunnel }
     }
 
     private var runtime: TunnelRuntime { store.runtime(for: tunnel.id) }

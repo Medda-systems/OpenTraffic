@@ -44,11 +44,14 @@ struct IntegrationsSettingsView: View {
 
             Section {
                 Picker("Agent", selection: $agentPreset) {
-                    Text("None").tag(AgentPreset?.none)
-                    ForEach(AgentPreset.allCases) { preset in
-                        Label { Text(preset.title) } icon: { AgentMenuIcon(name: preset.clientName) }
-                            .tag(Optional(preset))
+                    Group {
+                        Text("None").tag(AgentPreset?.none)
+                        ForEach(AgentPreset.allCases) { preset in
+                            Label { Text(preset.title) } icon: { AgentMenuIcon(name: preset.clientName) }
+                                .tag(Optional(preset))
+                        }
                     }
+                    .untintedMenuItems()
                 }
                 .onChange(of: agentPreset) { _, preset in choose(preset) }
                 if agentPreset != nil {

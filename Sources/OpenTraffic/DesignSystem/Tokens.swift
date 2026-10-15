@@ -85,6 +85,15 @@ extension TunnelDisplayState {
     }
 }
 
+extension View {
+    /// For a menu's items: no tint. Built against the macOS 26 SDK, SwiftUI colours menu icons with the
+    /// tint around the menu (the app's, `Brand.accent`) and draws images of our own, like the provider
+    /// and agent marks, black under any tint. Untinted, every icon follows the menu's text.
+    func untintedMenuItems() -> some View {
+        tint(nil)
+    }
+}
+
 extension Color {
     /// `light` (an sRGB hex) in light mode, `dark` in dark mode.
     static func adaptive(light: UInt32, dark: Color) -> Color {
