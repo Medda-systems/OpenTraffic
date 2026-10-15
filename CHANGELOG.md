@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.7
 
 - **Online as soon as it's online:** a share now shows as online within about a second of its link working, instead of up to 45 seconds later (ngrok and custom domains) or 9 seconds (OpenTunnel). While a share starts, OpenTraffic checks every second, and a provider's "not ready yet" page no longer counts as a failure.
 - **`opentraffic share` and `start` say "live" only once the link answers**, and "starting" (with what it's waiting for) when the provider needs longer, such as a custom domain whose DNS record was just replaced.
