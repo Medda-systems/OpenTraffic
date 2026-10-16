@@ -1,4 +1,4 @@
-"""The promo's music: 37 bars of house at 120 BPM on the arrangement in synth.py, so the drop lands on
+"""The promo's music: 38 bars of house at 120 BPM on the arrangement in synth.py, so the drop lands on
 the first click, a breakdown under drawing and another before the closing run, and the final hit on the end card.
 
     python3 remotion/audio/music.py   writes music.wav

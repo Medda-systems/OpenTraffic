@@ -8,7 +8,7 @@ import type { Seat, Session } from "../session"
 import { mono, sans, serif } from "../theme"
 import { BAR, BEAT, bg, Capture, clamp, dim, ease, fg, Mark, Pill, Sfx, Slam, Stage } from "./kit"
 
-// A 74-second promo for social posts: 37 bars at 120 BPM, black and white around the app's own windows.
+// A 76-second promo for social posts: 38 bars at 120 BPM, black and white around the app's own windows.
 // Everything on screen is the real app or a real session in a browser (capture/), and the cuts land
 // on the beat of the soundtrack (audio/music.py).
 
@@ -604,24 +604,90 @@ const providerSfx = () => providers.map((p, i) => <Sfx key={p.kind} at={i * BEAT
 
 // ---------------------------------------------------------------- 11. a password (bar 26, the second break)
 
-const Protection = () => (
-  <AbsoluteFill>
-    <div style={{ position: "absolute", left: 130, top: 330, width: 820 }}>
-      <Slam at={0} size={120}>Password</Slam>
-      <Slam at={6} size={120}><Mark>protect it.</Mark></Slam>
-      <Slam at={22} size={40} color={dim} style={{ marginTop: 34, fontWeight: 500, letterSpacing: "-0.01em" }}>Or Google and GitHub sign-in, on ngrok shares.</Slam>
-    </div>
-    <div style={{ position: "absolute", left: 1010, top: 130 }}>
-      <Capture src={C("protection-dark.png")} width={800} />
-      {/* The Password option, in the capture's pixels (1080 wide). */}
-      <div style={{ position: "absolute", left: 0, top: 0, transform: `scale(${800 / 1080})`, transformOrigin: "0 0" }}>
-        <Ring x={72} y={356} at={8} size={90} />
+// Turn on a password, then what a visitor sees: OpenTraffic's own sign-in page before the site (captured
+// from a protected share, capture/promo/signin/).
+const SIGNIN_IN = 30 // the browser slides in
+const TYPE_AT = 44 // the password is typed, a character every two frames
+const PRESS_AT = 86 // Continue
+const signinFrame = (frame: number) => {
+  if (frame < TYPE_AT) return "00-empty"
+  const typed = Math.floor((frame - TYPE_AT) / 2) + 1
+  if (typed <= 10) return `20-pw-${String(typed).padStart(2, "0")}`
+  if (typed <= 13) return `25-name-${typed}`
+  if (frame < PRESS_AT) return "30-filled"
+  if (frame < PRESS_AT + 4) return "35-pressed"
+  return "40-opened"
+}
+
+const SigninBrowser = ({ width }: { width: number }) => {
+  const frame = useCurrentFrame()
+  const k = width / 1440
+  // Continue, in the page's pixels (1440 × 813).
+  const button = { x: 720 * k, y: 538 * k + 58 }
+  const p = interpolate(frame, [PRESS_AT - 16, PRESS_AT - 2], [0, 1], { ...clamp, easing: ease })
+  const pressed = interpolate(frame, [PRESS_AT - 1, PRESS_AT + 2, PRESS_AT + 6], [0, 1, 0], clamp)
+  const opened = frame >= PRESS_AT + 4
+  const zoom = interpolate(frame, [SIGNIN_IN + 6, TYPE_AT - 2, PRESS_AT + 4, PRESS_AT + 16], [1, 1.95, 1.95, 1], { ...clamp, easing: ease })
+  return (
+    <div style={{ position: "relative", width, borderRadius: 22, overflow: "hidden", background: "#fff", boxShadow: "0 50px 100px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.12)" }}>
+      <div style={{ height: 58, display: "flex", alignItems: "center", padding: "0 22px", background: "#f2f2f4", borderBottom: "1px solid rgba(0,0,0,.08)", fontFamily: sans }}>
+        <div style={{ display: "flex", gap: 10, width: 200 }}>
+          {["#ff5f57", "#febc2e", "#28c840"].map((c) => <span key={c} style={{ width: 15, height: 15, borderRadius: 99, background: c }} />)}
+        </div>
+        <div style={{ margin: "0 auto", display: "flex", alignItems: "center", gap: 10, background: "#fff", borderRadius: 10, padding: "7px 22px", fontSize: 19, color: "#111", border: "1px solid rgba(0,0,0,.08)" }}>
+          <svg width="13" height="16" viewBox="0 0 16 20"><rect x="1" y="8" width="14" height="11" rx="2.5" fill="#6e6e73" /><path d="M4 8V5.5a4 4 0 0 1 8 0V8" stroke="#6e6e73" strokeWidth="2" fill="none" /></svg>
+          orbit.wbfsgcylfq2x.opentunnel.xyz
+        </div>
+        <div style={{ width: 200 }} />
+      </div>
+      {/* Close on the sign-in card while it's filled in, back out when the site opens. */}
+      <div style={{ position: "relative", width, height: 813 * k, overflow: "hidden" }}>
+        <div style={{ position: "absolute", inset: 0, transformOrigin: `${720 * k}px ${330 * k}px`, transform: `scale(${zoom})` }}>
+          <Img src={staticFile(C(`signin/${signinFrame(frame)}.jpg`))} style={{ display: "block", width, height: 813 * k }} />
+          {!opened ? <Arrow x={(width * 0.62 + (button.x - width * 0.62) * p)} y={(700 * k + (button.y - 58 - 700 * k) * p)} pressed={pressed} /> : null}
+        </div>
       </div>
     </div>
-  </AbsoluteFill>
-)
+  )
+}
 
-const protectionSfx = () => [<Sfx key="c" at={8} name="click" volume={0.8} />, <Sfx key="w" at={0} name="whoosh" volume={0.3} />]
+const Protection = () => {
+  const frame = useCurrentFrame()
+  const swap = interpolate(frame, [SIGNIN_IN - 6, SIGNIN_IN + 8], [0, 1], { ...clamp, easing: ease })
+  return (
+    <AbsoluteFill>
+      <div style={{ position: "absolute", left: 120, top: 330, width: 600 }}>
+        <Slam at={0} size={112}>Password</Slam>
+        <Slam at={6} size={112}><Mark>protect it.</Mark></Slam>
+        <Slam at={TYPE_AT} out={PRESS_AT + 2} size={36} color={dim} style={{ marginTop: 34, fontWeight: 500, letterSpacing: "-0.01em", lineHeight: 1.3 }}>Visitors get a sign-in page first.</Slam>
+      </div>
+      <div style={{ position: "absolute", left: 120, top: 616 }}>
+        <Slam at={PRESS_AT + 6} size={36} color={dim} style={{ fontWeight: 500, letterSpacing: "-0.01em" }}>Then they're in.</Slam>
+      </div>
+      <div style={{ position: "absolute", left: 1010, top: 130, opacity: 1 - swap, transform: `translateX(${-swap * 80}px) scale(${1 - swap * 0.06})` }}>
+        <Capture src={C("protection-dark.png")} width={800} />
+        {/* The Password option, in the capture's pixels (1080 wide). */}
+        <div style={{ position: "absolute", left: 0, top: 0, transform: `scale(${800 / 1080})`, transformOrigin: "0 0" }}>
+          <Ring x={72} y={356} at={8} size={90} />
+        </div>
+      </div>
+      {frame >= SIGNIN_IN - 6 ? (
+        <div style={{ position: "absolute", left: 740, top: 200, opacity: swap, transform: `translateX(${(1 - swap) * 120}px)` }}>
+          <SigninBrowser width={1080} />
+        </div>
+      ) : null}
+    </AbsoluteFill>
+  )
+}
+
+const protectionSfx = () => [
+  <Sfx key="w" at={0} name="whoosh" volume={0.3} />,
+  <Sfx key="c" at={8} name="click" volume={0.8} />,
+  <Sfx key="w2" at={SIGNIN_IN - 4} name="whoosh" volume={0.3} />,
+  ...Array.from({ length: 13 }, (_, i) => <Sfx key={`t${i}`} at={TYPE_AT + i * 2} name={`type${(i % 3) + 1}`} volume={0.28} />),
+  <Sfx key="go" at={PRESS_AT} name="click" volume={0.8} />,
+  <Sfx key="in" at={PRESS_AT + 5} name="chime" volume={0.5} />,
+]
 
 // ---------------------------------------------------------------- 13. the terminal (bars 30-31)
 
@@ -754,7 +820,7 @@ const End = () => {
 // ---------------------------------------------------------------- the cut
 
 // The music's sections (audio/synth.py): intro 1-2, drop 3-15, break and build 16-17, drop 18-28, break and
-// build 29-30, drop 31-35, outro 36-37.
+// build 29-31, drop 32-36, outro 37-38.
 const cut = (session: Session) =>
   [
     { bars: 2, body: <Hook />, sfx: hookSfx() },
@@ -768,7 +834,7 @@ const cut = (session: Session) =>
     { bars: 3, body: <Git />, sfx: gitSfx() },
     { bars: 2, body: <Phone session={session} />, sfx: phoneSfx(session) },
     { bars: 2, body: <Lead session={session} />, sfx: leadSfx(session) },
-    { bars: 1, body: <Protection />, sfx: protectionSfx() },
+    { bars: 2, body: <Protection />, sfx: protectionSfx() },
     { bars: 1, body: <Extras />, sfx: extrasSfx() },
     { bars: 2, body: <Providers />, sfx: providerSfx() },
     { bars: 2, body: <Cli />, sfx: cliSfx() },
@@ -776,7 +842,7 @@ const cut = (session: Session) =>
     { bars: 2, body: <End />, sfx: OPEN_SOURCE ? [<Sfx key="gh" at={34} name="pop" volume={0.45} />] : [] },
   ] as { bars: number; body: React.ReactNode; sfx?: React.ReactNode[] }[]
 
-export const PROMO_FRAMES = 37 * BAR
+export const PROMO_FRAMES = 38 * BAR
 
 export const Promo = ({ session }: { session: Session }) => {
   let from = 0
