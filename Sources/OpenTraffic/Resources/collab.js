@@ -3381,9 +3381,14 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
     if (pings.size >= MAX_PINGS) dropPing(pings.values().next().value);
     const el = h("div", "ping");
     css(el, { color });
-    const tag = h("span", "tag", name);
-    css(tag, { background: color, color: textOn(color) });
-    el.append(h("span", "ring"), h("span", "ring"), tag);
+    el.append(h("span", "ring"), h("span", "ring"));
+    // Their cursor, if it's on screen, already has their name next to it.
+    const c = cursors.get(m.id);
+    if (!c || c.el.hidden) {
+      const tag = h("span", "tag", name);
+      css(tag, { background: color, color: textOn(color) });
+      el.append(tag);
+    }
     const g = { el, pos, timer: 0 };
     g.timer = setTimeout(() => dropPing(g), PING_MS);
     pings.add(g);

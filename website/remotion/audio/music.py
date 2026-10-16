@@ -1,5 +1,5 @@
-"""The promo's music: 23 bars of house at 120 BPM on the arrangement in synth.py, so the drop lands on
-the first click, the breakdown under the coding agent, and the final hit on the end card.
+"""The promo's music: 34 bars of house at 120 BPM on the arrangement in synth.py, so the drop lands on
+the first click, a breakdown under drawing and another before the closing run, and the final hit on the end card.
 
     python3 remotion/audio/music.py   writes music.wav
 """
@@ -7,7 +7,7 @@ the first click, the breakdown under the coding agent, and the final hit on the 
 import numpy as np
 
 from synth import (
-    BAR, BEAT, CHORDS, FIRST, OUT, SECTION, SR, bass, boom, clap, crash, hat, kick, lowpass, master, place,
+    BAR, BEAT, CHORDS, FIRST, OUT, SECTION, STARTS, SR, bass, boom, clap, crash, hat, kick, lowpass, master, place,
     pluck, reverb, riser, snare, supersaw, t_, track,
 )
 
@@ -55,12 +55,12 @@ def house():
                 place(drums, HC * (0.55 if s % 2 else 0.8), t0 + s * BEAT / 4 + (0.008 if s % 2 else 0), 0.16)
             for beat in range(4):
                 place(drums, HO, t0 + beat * BEAT + BEAT / 2, 0.13)
-        if b in (1, FIRST["break"]):
+        if b == 1 or section == "break":
             for s in range(8, 16):
                 place(drums, HC, t0 + s * BEAT / 4, 0.1)
-        if b in (1, FIRST["build"]):
+        if b == 1 or section == "build":
             snare_roll(drums, t0)
-        if b in (FIRST["drop"], FIRST["drop2"], FIRST["outro"]):
+        if b in STARTS and section in ("drop", "drop2", "outro"):
             impact(fx, t0)
         if full:
             for beat in range(4):

@@ -17,7 +17,7 @@ SR = 48000
 BPM = 120
 BEAT = 60 / BPM
 BAR = 4 * BEAT
-BARS = 23
+BARS = 34
 LENGTH = BARS * BAR
 rng = np.random.default_rng(7)
 
@@ -212,9 +212,12 @@ def boom():
 
 # ---------------------------------------------------------------- the arrangement
 
-SECTION = ["intro"] * 2 + ["drop"] * 10 + ["break", "build"] + ["drop2"] * 7 + ["outro"] * 2
+# Two breathers: a break and build before the agent's part, and again before the closing run.
+SECTION = ["intro"] * 2 + ["drop"] * 13 + ["break", "build"] + ["drop2"] * 8 + ["break", "build"] + ["drop2"] * 5 + ["outro"] * 2
 assert len(SECTION) == BARS
 FIRST = {name: SECTION.index(name) for name in ("drop", "break", "build", "drop2", "outro")}
+# Bars where a section starts (the impacts land on the drops and the outro).
+STARTS = {b for b, name in enumerate(SECTION) if b == 0 or SECTION[b - 1] != name}
 
 F_SHARP_M, D, A, E = (
     {"pad": [54, 57, 61, 66], "arp": [66, 69, 73, 78], "bass": 42},
@@ -222,7 +225,15 @@ F_SHARP_M, D, A, E = (
     {"pad": [52, 57, 61, 64], "arp": [64, 69, 73, 76], "bass": 45},
     {"pad": [52, 56, 59, 64], "arp": [64, 68, 71, 76], "bass": 40},
 )
-CHORDS = [A, E] + [F_SHARP_M, D, A, E] * 2 + [F_SHARP_M, D] + [A, E] + [F_SHARP_M, D, A, E, F_SHARP_M, D, E] + [A, A]
+CHORDS = (
+    [A, E]
+    + ([F_SHARP_M, D, A, E] * 4)[:13]
+    + [D, E]
+    + [A, E, F_SHARP_M, D] * 2
+    + [D, E]
+    + [A, E, F_SHARP_M, D, E]
+    + [A, A]
+)
 assert len(CHORDS) == BARS
 
 

@@ -6,7 +6,7 @@ import { SessionView } from "./SessionView"
 
 // A real session on the shared page, recorded in two browsers at once (capture/record-session.mjs):
 // Ava's screen (she's the host) and Lea's, played as a run of slices of the recording, each from one
-// seat, some a little faster than real time.
+// seat, at real speed or exactly twice it (other speeds hold some frames longer than others, which judders).
 const toolbar = 76
 const pageWidth = 1920
 export const browser = { width: pageWidth, height: 1084 + toolbar }
@@ -25,19 +25,19 @@ const slices = (m: Record<string, number>): Slice[] => [
   // Lea picks the trial button, writes, and suggests the change: new words, a bigger button.
   { seat: "lea", from: m.arm - 10, to: m.pick + 70 },
   { seat: "lea", from: m.compose - 40, to: m.style + 20 },
-  { seat: "lea", from: m.style + 20, to: m.post + 12, speed: 1.6 },
+  { seat: "lea", from: m.style + 20, to: m.post + 12, speed: 2 },
   // Ava opens it; the coding agent is already at work.
   { seat: "ava", from: m.pinned - 6, to: m.opened + 80 },
   // Sam draws around the headline (as Ava sees it); Lea comments on the space between two cards.
   { seat: "ava", from: m.draw + 16, to: m.draw + 92 },
-  { seat: "lea", from: m.area + 16, to: m.areaPosted + 12, speed: 1.3 },
+  { seat: "lea", from: m.area + 16, to: m.areaPosted + 12 },
   // The fixes land: Lea's page has them, she's told, and takes a look.
   { seat: "lea", from: m.updated + 16, to: m.look + 80 },
   // Ava looks at the page on Mia's phone, and Mia turns it.
-  { seat: "ava", from: m.people - 4, to: m.phoneClosed - 20, speed: 1.3 },
+  { seat: "ava", from: m.people - 4, to: m.phoneClosed - 20 },
   // Ava leads with her phone open; Lea, following, sees it and scrolls with her.
   { seat: "ava", from: m.lead - 6, to: m.leadPhone + 50 },
-  { seat: "lea", from: m.leadPhone + 30, to: m.end, speed: 1.2 },
+  { seat: "lea", from: m.leadPhone + 30, to: m.end },
 ]
 
 /** The slices laid out in scene frames, and a way to find a recorded moment in them. */
