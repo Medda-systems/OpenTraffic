@@ -399,10 +399,12 @@ const Agent = ({ session }: { session: Session }) => {
           <div style={{ position: "absolute", left: 310, top: 270, opacity: third, transform: `scale(${0.9 + 0.1 * result})`, transformOrigin: "50% 40%" }}>
             <Crop src={C("main-feedback-dark.png")} crop={{ x: 600, y: 540, width: 1150, height: 690 }} width={1300} />
           </div>
+          {/* A dark band under the tool names, so they read over the window. */}
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 210, opacity: third, background: "linear-gradient(to bottom, rgba(0,0,0,0), rgba(0,0,0,.92) 38%, #000)" }} />
           <div style={{ position: "absolute", bottom: 50, left: 0, right: 0, display: "flex", justifyContent: "center", gap: 22 }}>
             {tools.map((t, i) => (
               <Slam key={t} at={168 + i * 8} size={34}>
-                <Pill style={{ fontFamily: mono, fontSize: 32, ...(i === 3 ? { background: fg, color: bg, borderColor: fg } : {}) }}>{t}</Pill>
+                <Pill style={{ fontFamily: mono, fontSize: 32, background: "#0c0c0e", ...(i === 3 ? { background: fg, color: bg, borderColor: fg } : {}) }}>{t}</Pill>
               </Slam>
             ))}
           </div>
@@ -820,7 +822,7 @@ const End = () => {
 // ---------------------------------------------------------------- the cut
 
 // The music's sections (audio/synth.py): intro 1-2, drop 3-15, break and build 16-17, drop 18-28, break and
-// build 29-31, drop 32-36, outro 37-38.
+// build 29-30, drop 31-36, outro 37-38.
 const cut = (session: Session) =>
   [
     { bars: 2, body: <Hook />, sfx: hookSfx() },
