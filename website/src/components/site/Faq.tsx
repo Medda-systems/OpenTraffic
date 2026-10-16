@@ -63,7 +63,7 @@ export function Footer() {
           <img src="/brand/app-icon.png" alt="" className="size-6" />
           <span>
             OpenTraffic by{" "}
-            <a className="inline-flex items-baseline gap-1.5 text-foreground hover:underline" href={links.medda}>
+            <a className="ml-1 inline-flex items-baseline gap-1 text-foreground hover:underline" href={links.medda}>
               <img src="/brand/medda-icon.svg" alt="" className="size-3.5 self-center dark:invert" />
               Medda Systems
             </a>
