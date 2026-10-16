@@ -205,16 +205,20 @@ class Person {
     await this.page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: this.at.x, y: this.at.y, button: "left", buttons: 0, clickCount: 1 })
     this.down = false
   }
-  /** A stroke through `points`, the button held. */
-  async stroke(points, ms) {
+  /** A pen stroke along `path(t)` (t from 0 to 1), the button held: it speeds up and slows down like a
+   * hand, and moves several times a frame, as a real pointer does. */
+  async stroke(path, ms) {
+    await this.glide(path(0), 400)
     this.down = true
-    await this.glide(points[0], 300)
     await this.page.send("Input.dispatchMouseEvent", { type: "mousePressed", x: this.at.x, y: this.at.y, button: "left", buttons: 1, clickCount: 1 })
-    const per = ms / points.length
-    for (const pt of points.slice(1)) {
-      const steps = Math.max(1, Math.round((per / 1000) * FPS))
-      const from = this.at
-      for (let k = 1; k <= steps; k++) { this.at = { x: from.x + (pt.x - from.x) * k / steps, y: from.y + (pt.y - from.y) * k / steps }; await this.move(); await until(frame + 1) }
+    const frames = Math.max(1, Math.round((ms / 1000) * FPS))
+    const SUB = 4
+    for (let k = 1; k <= frames * SUB; k++) {
+      const t = k / (frames * SUB)
+      const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2
+      this.at = path(e)
+      await this.move()
+      if (k % SUB === 0) await until(frame + 1)
     }
     await this.page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: this.at.x, y: this.at.y, button: "left", buttons: 0, clickCount: 1 })
     this.down = false
@@ -425,8 +429,13 @@ try {
     await sam.click()
     const h1 = await samPage.rect("h1")
     const cx = h1.x + h1.width * 0.5, cy = h1.y + h1.height * 0.5
-    const ring = Array.from({ length: 26 }, (_, i) => { const t = (i / 25) * Math.PI * 2.1 - 0.4; return { x: cx + Math.cos(t) * h1.width * 0.56, y: cy + Math.sin(t) * h1.height * 0.72 } })
-    await sam.stroke(ring, 1400)
+    // A loose loop around the headline, a little more than once round, its size wandering like a hand's.
+    const ring = (t) => {
+      const a = t * Math.PI * 2.12 - 0.5
+      const wobble = 1 + 0.035 * Math.sin(t * Math.PI * 3.2) + 0.03 * t
+      return { x: cx + Math.cos(a) * h1.width * 0.56 * wobble, y: cy + Math.sin(a) * h1.height * 0.74 * wobble }
+    }
+    await sam.stroke(ring, 1500)
     await wait(300)
     mark("area")
     still(lea)

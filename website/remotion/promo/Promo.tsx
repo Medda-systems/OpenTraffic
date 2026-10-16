@@ -211,7 +211,8 @@ const pathSfx = () => [
 // ---------------------------------------------------------------- 5-11. the session in the browser (bars 9-25)
 // Every shot plays the recording at exactly 1× or 2×, so no frame is held or skipped unevenly.
 
-type Segment = { from: number; to: number; seat: Seat; rec: [number, number]; shot?: { x: number; y: number; zoom: number } }
+/** A stretch of one seat's recording; the camera eases to `shot` over `ease` frames (10 by default). */
+type Segment = { from: number; to: number; seat: Seat; rec: [number, number]; shot?: { x: number; y: number; zoom: number }; ease?: number }
 
 const segmentAt = (segments: Segment[], frame: number) => {
   const s = segments.find((g) => frame >= g.from && frame < g.to) ?? segments[segments.length - 1]
@@ -227,7 +228,7 @@ const Browser = ({ session, segments, width = 1520 }: { session: Session; segmen
   const { s, rec } = segmentAt(segments, frame)
   const pageHeight = (session.viewport.height / session.viewport.width) * width
   const prev = segments[Math.max(0, segments.indexOf(s) - 1)]
-  const blend = interpolate(frame - s.from, [0, 10], [0, 1], { ...clamp, easing: ease })
+  const blend = interpolate(frame - s.from, [0, s.ease ?? 10], [0, 1], { ...clamp, easing: Easing.inOut(Easing.cubic) })
   const target = s.shot ?? { x: width / 2, y: pageHeight / 2, zoom: 1 }
   const from = prev.shot ?? { x: width / 2, y: pageHeight / 2, zoom: 1 }
   const shot = { x: from.x + (target.x - from.x) * blend, y: from.y + (target.y - from.y) * blend, zoom: from.zoom + (target.zoom - from.zoom) * blend }
@@ -357,41 +358,45 @@ const drawSfx = () => [<Sfx key="w" at={6} name="whoosh" volume={0.3} />, <Sfx k
 
 /** The recorded frame where opencode's change shows up on the page (the dev server swaps it in by itself,
  * while the comment is still open and the agent is still writing its reply). */
-const FIX = 926
+const FIX = 911
 
-const agentSegments = (m: Record<string, number>, k: number): Segment[] => [
-  // Ava opens it: what Lea asked for, and "opencode is working on this"…
-  { from: 0, to: 22, seat: "ava", rec: [m.opened - 2, m.opened + 20], shot: { x: 330 * k, y: 470 * k, zoom: 1.35 } },
-  // …the camera pushes in on the agent at work…
-  { from: 22, to: 52, seat: "ava", rec: [m.opened + 20, FIX - 4], shot: { x: 320 * k, y: 500 * k, zoom: 2.05 } },
-  // …and pulls back for the button: it changes, and the agent's reply arrives.
-  { from: 52, to: 76, seat: "ava", rec: [FIX - 4, FIX + 20], shot: { x: 270 * k, y: 520 * k, zoom: 1.6 } },
-  // Lea, who asked, is told: her page with the bigger button, and the notice.
-  { from: 76, to: 150, seat: "lea", rec: [m.told - 4, m.told + 70], shot: { x: 720 * k, y: 406 * k, zoom: 1.02 } },
-]
+// The recording plays at exactly 1×, or ½× (each frame twice) while the agent works; the camera does the
+// moving. The shots are timed from the moment the fix shows up (FIX).
+const agentSegments = (m: Record<string, number>, k: number): Segment[] => {
+  const open = 24 // Ava opening it
+  const push = 2 * (FIX - 2 - (m.opened + 22)) // the agent at work, up to just before the fix, at ½×
+  const out = 26 // the fix lands, and the camera eases back
+  return [
+    // Ava opens it: what Lea asked for, and "opencode is working on this"…
+    { from: 0, to: open, seat: "ava", rec: [m.opened - 2, m.opened + 22], shot: { x: 330 * k, y: 470 * k, zoom: 1.35 } },
+    // …the camera pushes slowly in on the agent at work…
+    { from: open, to: open + push, seat: "ava", rec: [m.opened + 22, FIX - 2], shot: { x: 320 * k, y: 500 * k, zoom: 1.95 }, ease: push },
+    // …the fix lands, and it eases back out to the bigger button next to the agent's reply.
+    { from: open + push, to: open + push + out, seat: "ava", rec: [FIX - 2, FIX - 2 + out], shot: { x: 300 * k, y: 470 * k, zoom: 1.4 }, ease: 22 },
+    // Lea, who asked: her page picks up where Ava's was, and opens out to the notice that it's fixed.
+    { from: open + push + out, to: 150, seat: "lea", rec: [m.told - 4, m.told - 4 + 150 - (open + push + out)], shot: { x: 720 * k, y: 406 * k, zoom: 1.02 }, ease: 36 },
+  ]
+}
 
-const AGENT_LANDS = 56 // the scene frame the fix appears
+/** The scene frame the fix appears. */
+const agentLands = (m: Record<string, number>) => 24 + 2 * (FIX - 2 - (m.opened + 22)) + 2
 const tools = ["get_feedback", "claim_comment", "reply_to_comment", "resolve_comment"]
 
 const Agent = ({ session }: { session: Session }) => {
   const frame = useCurrentFrame()
   const { fps } = useVideoConfig()
   const k = 1520 / session.viewport.width
+  const AGENT_LANDS = agentLands(session.marks)
   const third = interpolate(frame, [148, 156], [0, 1], { ...clamp, easing: ease })
-  // The hit when the fix lands: a white flash and a little punch in.
-  const flash = interpolate(frame, [AGENT_LANDS, AGENT_LANDS + 9], [0.55, 0], clamp)
-  const punch = spring({ frame: frame - AGENT_LANDS, fps, config: { damping: 9, stiffness: 260 } })
-  const pop = frame >= AGENT_LANDS && frame < 150 ? 1 + 0.035 * Math.sin(Math.min(1, punch) * Math.PI) : 1
   const result = spring({ frame: frame - 152, fps, config: { damping: 13, stiffness: 190 } })
   return (
     <AbsoluteFill>
       <div style={{ opacity: 1 - third }}>
-        <Title top={44}><Slam at={0} out={50} size={96}>Your agent <Mark>picks it up.</Mark></Slam></Title>
+        <Title top={44}><Slam at={0} out={AGENT_LANDS - 5} size={96}>Your agent <Mark>picks it up.</Mark></Slam></Title>
         <Title top={44}><Slam at={AGENT_LANDS} size={110}><Mark>Fixed.</Mark></Slam></Title>
       </div>
-      <div style={{ position: "absolute", left: 200, top: 176, opacity: 1 - third, transform: `scale(${pop * (1 - third * 0.06)})`, transformOrigin: "50% 45%" }}>
+      <div style={{ position: "absolute", left: 200, top: 176, opacity: 1 - third, transform: `scale(${1 - third * 0.06})`, transformOrigin: "50% 45%" }}>
         <Browser session={session} segments={agentSegments(session.marks, k)} />
-        <div style={{ position: "absolute", inset: 0, borderRadius: 22, background: "#fff", opacity: frame >= AGENT_LANDS && frame < 76 ? flash : 0, pointerEvents: "none" }} />
       </div>
       {frame >= 148 ? (
         <>
@@ -416,9 +421,8 @@ const Agent = ({ session }: { session: Session }) => {
 
 const agentSfx = (session: Session) => [
   ...sfxAt(agentSegments(session.marks, 1), [["ava", session.marks.opened, "click", 0.7]]),
-  <Sfx key="w1" at={20} name="whoosh" volume={0.3} />,
-  <Sfx key="hit" at={AGENT_LANDS} name="success" volume={0.75} />,
-  <Sfx key="r" at={AGENT_LANDS + 14} name="pop" volume={0.5} />,
+  <Sfx key="hit" at={agentLands(session.marks)} name="success" volume={0.75} />,
+  <Sfx key="r" at={agentLands(session.marks) + 14} name="pop" volume={0.5} />,
   <Sfx key="t" at={82} name="chime" volume={0.5} />,
   <Sfx key="w2" at={148} name="whoosh" volume={0.35} />,
   ...tools.map((t, i) => <Sfx key={t} at={168 + i * 8} name="pop" volume={0.4} />),

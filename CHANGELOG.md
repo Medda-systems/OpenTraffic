@@ -3,7 +3,8 @@
 ## Unreleased
 
 - **Following is smooth:** when you follow someone, your page glides along with their scrolling and keeps up with them, instead of trailing behind in steps.
-- **Drawing:** while someone draws, their pointer moves with the line instead of lagging behind it.
+- **Drawing:** strokes are smooth curves, drawn out at the pace they were made, and the drawer's pointer moves with the line instead of lagging behind it.
+- Fixed: a comment you had open closed by itself when an agent resolved it; it now stays open, showing it's fixed, until you close it.
 - Fixed: pointing at something showed the person's name twice, on their pointer and on the pulse.
 
 ## 1.0.13 (16 October 2026)

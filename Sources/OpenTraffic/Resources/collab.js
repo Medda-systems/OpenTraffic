@@ -746,7 +746,7 @@
 [hidden] { display: none !important; }
 .layer { position: fixed; inset: 0; overflow: hidden; pointer-events: none; }
 .cursor { position: absolute; left: 0; top: 0; transition: transform 90ms linear; will-change: transform; }
-.cursor.inking { transition-duration: 40ms; }
+.cursor.inking { transition: none; }
 .cursor svg { display: block; width: 16px; height: 20px; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.35)); }
 .tag { position: absolute; left: 12px; top: 17px; max-width: 160px; padding: 2px 6px; border-radius: 6px;
   font: 600 11px/1.35 var(--tb-font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -936,7 +936,7 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
 .areabox.open, .areabox.draft { opacity: 1; }
 .areabox.draft { color: #0a84ff; }
 .ink { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; }
-.ink path { fill: none; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; transition: opacity .6s; }
+.ink path { fill: none; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; transition: opacity .6s; shape-rendering: geometricPrecision; }
 .ink path.fading { opacity: 0; }
 .row .rl, .row .dev { color: var(--muted); font-size: 11px; }
 .list.menu { min-width: 230px; }
@@ -2173,6 +2173,8 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
     openCount = 0;
     pageComments().forEach((c, i) => {
       if (!c.resolved) openCount++;
+      // Resolved while someone has it open (an agent fixed it): it stays until they close it.
+      else if (c.id === bubbleId) forceShow.add(c.id);
       else if (!showResolved && !forceShow.has(c.id)) return;
       keep.add(c.id);
       let p = pins.get(c.id);
@@ -3552,12 +3554,25 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
     }, INK_FADE);
   }
 
+  // A smooth line through the points, like a pen: curves through the midpoints, each point a control.
   function shapeStroke(st) {
     const w = document.documentElement.scrollWidth;
     const sx = window.scrollX;
     const sy = window.scrollY;
-    st.el.setAttribute("d", st.points.map((p, i) => (i ? "L" : "M") + Math.round(p[0] * w - sx) + " " + Math.round(p[1] - sy)).join(" ") +
-      (st.points.length === 1 ? " l0.1 0" : ""));
+    const xy = st.points.map((p) => [p[0] * w - sx, p[1] - sy]);
+    const f = (n) => Math.round(n * 10) / 10;
+    if (xy.length < 3) {
+      st.el.setAttribute("d", xy.map((p, i) => (i ? "L" : "M") + f(p[0]) + " " + f(p[1])).join(" ") + (xy.length === 1 ? " l0.1 0" : ""));
+      return;
+    }
+    let d = "M" + f(xy[0][0]) + " " + f(xy[0][1]);
+    for (let i = 1; i < xy.length - 1; i++) {
+      const mx = (xy[i][0] + xy[i + 1][0]) / 2;
+      const my = (xy[i][1] + xy[i + 1][1]) / 2;
+      d += " Q" + f(xy[i][0]) + " " + f(xy[i][1]) + " " + f(mx) + " " + f(my);
+    }
+    const last = xy[xy.length - 1];
+    st.el.setAttribute("d", d + " L" + f(last[0]) + " " + f(last[1]));
   }
 
   function dropStroke(key) {
@@ -3584,20 +3599,49 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
       points.push([clamp01(x), Math.min(Math.max(0, y), 1e7)]);
     }
     const peer = peers.get(m.id);
-    drawInk(m.id + ":" + stroke, points, typeof m.color === "string" && COLOR_RE.test(m.color) ? m.color : peer ? peer.color : GREY);
-    // Their pointer is at the tip of the line they're drawing, and moves with it (pointer updates come
-    // less often than the stroke, so on its own it would trail behind the line).
-    if (peer && !peer.isAgent && points.length) {
-      const c = cursorOf(m.id, peer);
-      const [x, y] = points[points.length - 1];
-      Object.assign(c, { anchor: null, rx: 0, ry: 0, x, y });
-      c.at = c.inkAt = Date.now();
-      c.el.classList.add("inking");
-      clearTimeout(c.inkTimer);
-      c.inkTimer = setTimeout(() => c.el.classList.remove("inking"), 300);
-      mount();
-      place(m.id, c);
+    const color = typeof m.color === "string" && COLOR_RE.test(m.color) ? m.color : peer ? peer.color : GREY;
+    // Points come in batches (one every INK_BATCH ms); they're drawn out over that time, as they were drawn,
+    // rather than a batch at a time.
+    const key = m.id + ":" + stroke;
+    const q = inkQueues.get(key) || { id: m.id, color, points: [] };
+    q.points.push(...points);
+    // What's waiting, this batch and any left over, is drawn out evenly until the next batch is due.
+    q.start = performance.now();
+    q.total = q.points.length;
+    q.done = 0;
+    q.step = INK_BATCH / q.total;
+    inkQueues.set(key, q);
+    if (!inkFrame) inkFrame = requestAnimationFrame(revealInk);
+  }
+
+  const INK_BATCH = 50; // ms between a drawer's batches (flushStroke's timer)
+  const inkQueues = new Map(); // stroke key -> points still to draw
+  let inkFrame = 0;
+  function revealInk() {
+    inkFrame = 0;
+    const now = performance.now();
+    for (const [key, q] of inkQueues) {
+      const target = Math.min(q.total, Math.floor((now - q.start) / q.step) + 1);
+      if (target <= q.done) continue;
+      const pts = q.points.splice(0, target - q.done);
+      q.done = target;
+      drawInk(key, pts, q.color);
+      // Their pointer is at the tip of the line they're drawing, and moves with it.
+      const peer = peers.get(q.id);
+      if (peer && !peer.isAgent) {
+        const c = cursorOf(q.id, peer);
+        const [x, y] = pts[pts.length - 1];
+        Object.assign(c, { anchor: null, rx: 0, ry: 0, x, y });
+        c.at = c.inkAt = Date.now();
+        c.el.classList.add("inking");
+        clearTimeout(c.inkTimer);
+        c.inkTimer = setTimeout(() => c.el.classList.remove("inking"), 300);
+        mount();
+        place(q.id, c);
+      }
+      if (!q.points.length) inkQueues.delete(key);
     }
+    if (inkQueues.size) inkFrame = requestAnimationFrame(revealInk);
   }
 
   // ---------------------------------------------------------------- devices
