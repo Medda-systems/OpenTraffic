@@ -35,6 +35,12 @@
 .docs-prose .docs-heading-link { display: flex; align-items: center; gap: 10px; text-decoration: none; }
 .docs-heading-link svg { opacity: 0; color: var(--docs-muted); flex-shrink: 0; }
 .docs-heading-link:hover svg, .docs-heading-link:focus-visible svg { opacity: 1; }
+/* Changelog versions: the date is quieter than the version it belongs to. */
+.docs-prose h2.docs-version { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 2px; }
+.docs-version time { font-family: var(--font-sans, inherit); font-size: 14px; font-weight: 400; letter-spacing: 0; color: var(--docs-muted); }
+.docs-toc-date { margin-left: 8px; opacity: .6; font-size: 11px; }
+.docs-sidebar-version a { color: inherit; text-decoration: none; }
+.docs-sidebar-version a:hover { color: var(--foreground); }
 .docs-prose ul, .docs-prose ol { padding-left: 23px; margin: 16px 0; }
 .docs-prose ul { list-style: disc; }
 .docs-prose ol { list-style: decimal; }

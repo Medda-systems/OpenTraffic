@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import { Check, Copy, Link as LinkIcon } from 'lucide-react'
-import { headingId } from './data'
+import { datedHeading, headingId } from './data'
 
 function textOf(children: ReactNode): string {
   return Children.toArray(children).map((child): string => typeof child === 'string' || typeof child === 'number' ? String(child) : isValidElement<{ children?: ReactNode }>(child) ? textOf(child.props.children) : '').join('')
@@ -32,7 +32,14 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 
 export function Markdown({ body }: { body: string }) {
   return <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeHighlight, { detect: false }]]} components={{
-    h2: ({ children }) => { const id = headingId(textOf(children)); return <h2 id={id}><a href={`#${id}`} className="docs-heading-link">{children}<LinkIcon size={16} aria-hidden="true" /></a></h2> },
+    h2: ({ children }) => {
+      const text = textOf(children)
+      const id = headingId(text)
+      const dated = datedHeading(text)
+      // A changelog version: the number is the heading, the day it was published sits beside it, quieter.
+      if (dated) return <h2 id={id} className="docs-version"><a href={`#${id}`} className="docs-heading-link">{dated.title}<LinkIcon size={16} aria-hidden="true" /></a><time dateTime={dated.iso}>{dated.date}</time></h2>
+      return <h2 id={id}><a href={`#${id}`} className="docs-heading-link">{children}<LinkIcon size={16} aria-hidden="true" /></a></h2>
+    },
     h3: ({ children }) => { const id = headingId(textOf(children)); return <h3 id={id}>{children}</h3> },
     pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
     table: ({ children }) => <div className="docs-table" tabIndex={0} role="region" aria-label="Reference table"><table>{children}</table></div>,

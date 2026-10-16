@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, BookOpen, ChevronDown, FileText, Search, X } from 'lucide-react'
 import { Nav } from '@/components/site/Hero'
-import { docs, docPath, groups, headings, searchDocs } from './data'
+import { docs, docPath, groups, headings, searchDocs, version } from './data'
 import { CopyButton, Markdown } from './Markdown'
 import pageDates from './dates.json'
 import './docs.css'
@@ -80,19 +80,19 @@ export default function Docs({ slug = 'introduction' }: { slug?: string }) {
     <Nav docs />
     <div className="docs-toolbar"><div><a href="/docs" className="docs-label"><BookOpen size={16} />Documentation</a><button type="button" onClick={openSearch} className="docs-search-trigger"><Search size={15} /><span>Search docs</span><kbd>⌘ K</kbd></button></div></div>
     <div className="docs-layout">
-      <aside className="docs-sidebar"><div className="docs-sidebar-version"><span className="size-1.5 rounded-full bg-green-500" />OpenTraffic 1.0.3</div><Navigation slug={slug} /><a className="docs-back" href="/">← Back to website</a></aside>
+      <aside className="docs-sidebar"><div className="docs-sidebar-version"><span className="size-1.5 rounded-full bg-green-500" /><a href="/docs/changelog">OpenTraffic {version}</a></div><Navigation slug={slug} /><a className="docs-back" href="/">← Back to website</a></aside>
       <div className="docs-mobile-nav"><details><summary>Browse documentation <ChevronDown size={16} /></summary><Navigation slug={slug} /></details></div>
       <main id="docs-content" className="docs-main">
         {page ? <>
           <div className="docs-breadcrumb"><a href="/docs">Docs</a><span>/</span><span>{page.group}</span></div>
           <header className="docs-article-header"><h1>{page.title}</h1><p>{page.description}</p><div className="docs-article-meta"><span>{Math.max(1, Math.ceil(page.body.split(/\s+/).length / 220))} min read</span>{dates[page.slug] && <span>Updated {updatedText(dates[page.slug])}</span>}<CopyButton text={`# ${page.title}\n\n${page.body}`} label="Copy page as Markdown" /><a href={`/docs/${page.slug}.md`} className="docs-markdown-link">Markdown ↗</a></div></header>
-          <div className="docs-mobile-toc"><details><summary>On this page <ChevronDown size={16} /></summary>{toc.map((heading) => <a key={heading.id} href={`#${heading.id}`}>{heading.title}</a>)}</details></div>
+          <div className="docs-mobile-toc"><details><summary>On this page <ChevronDown size={16} /></summary>{toc.map((heading) => <a key={heading.id} href={`#${heading.id}`}>{heading.title}{heading.date && <span className="docs-toc-date">{heading.date.short}</span>}</a>)}</details></div>
           <article className="docs-prose"><Markdown body={page.body} /></article>
           <nav className="docs-pagination" aria-label="Adjacent guides">{index > 0 ? <a href={docPath(docs[index - 1].slug)}><ArrowLeft size={17} /><span><small>Previous</small>{docs[index - 1].title}</span></a> : <span />}{index < docs.length - 1 && <a href={docPath(docs[index + 1].slug)}><span><small>Next</small>{docs[index + 1].title}</span><ArrowRight size={17} /></a>}</nav>
           <footer className="docs-article-footer"><span>OpenTraffic by <a href="https://medda.se">Medda Systems</a></span><a href="/docs/troubleshooting">Need help? Troubleshooting →</a></footer>
         </> : <div className="docs-not-found"><p>404 · Documentation</p><h1>Guide not found</h1><p>This address doesn’t match a guide. Search the docs or return to the introduction.</p><a href="/docs">Browse documentation →</a></div>}
       </main>
-      <aside className="docs-toc" aria-label="On this page"><p>On this page</p>{toc.map((heading) => <a key={heading.id} href={`#${heading.id}`} aria-current={activeHeading === heading.id ? 'location' : undefined}>{heading.title}</a>)}<div className="docs-toc-help"><span>Ready to try it?</span><a href="/docs/quickstart">Share your first server <ArrowRight size={14} /></a></div></aside>
+      <aside className="docs-toc" aria-label="On this page"><p>On this page</p>{toc.map((heading) => <a key={heading.id} href={`#${heading.id}`} aria-current={activeHeading === heading.id ? 'location' : undefined}>{heading.title}{heading.date && <span className="docs-toc-date">{heading.date.short}</span>}</a>)}<div className="docs-toc-help"><span>Ready to try it?</span><a href="/docs/quickstart">Share your first server <ArrowRight size={14} /></a></div></aside>
     </div><SearchDialog dialogRef={dialog} />
   </div>
 }
