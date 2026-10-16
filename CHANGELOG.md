@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.14 (16 October 2026)
 
 - **Following is smooth:** when you follow someone, your page glides along with their scrolling and keeps up with them, instead of trailing behind in steps.
 - **Drawing:** strokes are smooth curves, drawn out at the pace they were made, and the drawer's pointer moves with the line instead of lagging behind it.
