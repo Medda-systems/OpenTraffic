@@ -1,4 +1,4 @@
-import { Download, Volume2, VolumeX } from "lucide-react"
+import { Download, Play, Volume2, VolumeX } from "lucide-react"
 import { motion } from "motion/react"
 import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
@@ -180,6 +180,14 @@ function Scrubber({ video }: { video: React.RefObject<HTMLVideoElement | null> }
 function PromoVideo() {
   const video = useRef<HTMLVideoElement>(null)
   const [muted, setMuted] = useState(true)
+  const [paused, setPaused] = useState(false)
+  // A click on the video pauses it, or plays it again.
+  const playPause = () => {
+    const v = video.current
+    if (!v) return
+    if (v.paused) void v.play()
+    else v.pause()
+  }
   const toggle = () => {
     const v = video.current
     if (!v) return
@@ -192,15 +200,28 @@ function PromoVideo() {
     <div className="relative overflow-hidden rounded-2xl border bg-black shadow-[0_1px_2px_rgba(15,23,42,.06),0_24px_64px_rgba(15,23,42,.18)]">
       <video
         ref={video}
-        className="block aspect-video w-full"
         src={media("promo.mp4")}
         poster={media("promo-poster.jpg")}
         autoPlay
         muted
         loop
         playsInline
+        onClick={playPause}
+        onPlay={() => setPaused(false)}
+        onPause={() => setPaused(true)}
+        className="block aspect-video w-full cursor-pointer"
         aria-label="OpenTraffic in 76 seconds: it finds your dev servers, shares one in a click, checks every hop, and lets your team point, comment, draw, and suggest changes that your coding agent makes, each its own commit; see it on someone's phone, lead the demo, and password protect it"
       />
+      {paused ? (
+        <button
+          type="button"
+          onClick={playPause}
+          aria-label="Play"
+          className="absolute top-1/2 left-1/2 grid size-14 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-black/55 text-white backdrop-blur transition hover:bg-black/70"
+        >
+          <Play className="ml-0.5 size-6 fill-current" />
+        </button>
+      ) : null}
       <Scrubber video={video} />
       <button
         type="button"
