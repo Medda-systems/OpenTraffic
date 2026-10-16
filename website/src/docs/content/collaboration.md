@@ -13,7 +13,26 @@ Hot-reload WebSockets are relayed byte for byte. The hub lives in OpenTraffic, w
 What visitors share:
 - Everyone sees each other's chosen names and cursors, and which page (path only, never the query string) they're on.
 - Cursor and presence messages do not send page content or form-field values. Explicit comments and element screenshots carry the selected feedback described below.
-- When someone pins a comment, it carries a short label of the element, the page title, a picture of the element (with text fields blanked), their browser and window size, and, if you turned on error collection, the browser errors they hit.
+- When someone pins a comment, it carries a short label of the element, the page title, a picture of the element (with text fields blanked), their browser and window size, and, if you turned on error collection, the browser errors they hit. For you and your agent only, it also records where the element comes from: a CSS selector, a few computed styles, and on development builds of React, Vue, Svelte, or Angular, the component and its source file.
+- Everyone in the session sees each other's window size and system (for **View at their size**).
+
+## Areas, drawing, and devices
+
+- **Comment on an area.** In comment mode, drag a box instead of clicking: the comment covers that region (like "the gap between these cards") and shows as a dashed box on the page.
+- **Draw.** The pen in the pill draws strokes everyone on the same page sees for a few seconds. Nothing is saved.
+- **Everyone's device.** The people list (click the avatars) shows each person's window size, and **View** shows the page they're on at their exact size: a phone, tablet, or browser window over your (blurred) page. **Follow** keeps it on the page they're on and their pointer in view; scrolling it yourself stops following. **Fit** scales it to your window, **100%** shows it at actual size, and the arrow pops it out as a window of their size. When their phone turns, so does the view. OpenTraffic's Live Collaboration card shows each person's size and system too.
+- **Phone or Desktop.** The View button in the pill shows the page as a phone (390 × 844; the arrows turn it) or as your own window (Desktop). In any device view, yours or someone's, Comment, Point, Draw, and suggested edits work on the page inside the device; the comment box and bubbles open beside it at full size, always in the same centred place, and comments record the device's size.
+- **Leading in a phone.** When the host leads with Phone open, everyone following sees that phone, with the host's page and scrolling, and it turns when the host turns it. Followers can turn **Follow** off to look around in it, or close it. Back on Desktop, everyone has their own window, at their own size; the host can switch on **Followers match my window** (in the View menu) when everyone should see their exact layout.
+
+## Who can do what
+
+In OpenTraffic's Live Collaboration card, each person has a role, kept for their browser:
+
+- **Trusted:** comments, and their comments may start your agent by itself.
+- **Can comment** (the default): comments, replies, and resolves; the agent only runs for their comments when you **Send to …**.
+- **View only:** looks, points, and draws, but can't comment, reply, or resolve.
+
+**New people can** sets the role everyone else gets. Roles follow a browser, not a verified identity: someone can clear their browser data and come back as new. Combine them with a [password](/docs/protection#passwords-on-quick-tunnels-and-opentunnel) to control who gets in at all.
 
 Live collaboration works with Quick Tunnel and OpenTunnel shares of `http://` addresses. Other providers and HTTPS local origins are not currently supported for collaboration.
 

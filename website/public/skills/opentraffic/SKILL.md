@@ -38,7 +38,7 @@ A share puts the user's local server on the internet. The `opentraffic` command 
 
 ## Act on feedback
 
-People who open a collaborative link can pin comments to elements. Each comment has an `id`, the element's `label`, the page `path`, the `text`, the visitor's browser (`environment`), `replies`, and often a picture of the element.
+People who open a collaborative link can pin comments to elements. Each comment has an `id`, the element's `label`, the page `path`, the `text`, the visitor's browser (`environment`), `replies`, and often a picture of the element. It may also carry `context` (the element's `selector`, key `styles`, and on development builds its `component` and `source` file: open that file first), `edits` the commenter made on the page (exact old → new text or style values: make those changes), and `area` (the comment is about a region of that size).
 
 ```sh
 opentraffic comments "<share>" --json                 # open comments (--all includes resolved)

@@ -69,7 +69,9 @@ public struct AgentRunRequest: Equatable, Sendable {
         a public link to the dev server of the project in this folder. Handle it with OpenTraffic's MCP tools \
         (or the `opentraffic` command):
         1. claim_comment it. If another app already claimed it or it's resolved, stop.
-        2. Read it with get_feedback (status: all) and look at it with get_screenshot.
+        2. Read it with get_feedback (status: all) and look at it with get_screenshot. Its `context` gives the \
+        element's selector and, on dev servers that expose it, the component and source file: start there. \
+        `edits` are exact changes the commenter typed into the page (new text, or style values): make those.
         3. Fix what it asks for in this project. Call claim_comment again with a short `progress` now and then.
         4. reply_to_comment with what you changed, then resolve_comment.
         If you can't or shouldn't fix it, reply with why and release_comment instead.

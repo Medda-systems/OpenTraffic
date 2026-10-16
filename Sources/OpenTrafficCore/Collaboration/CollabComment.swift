@@ -40,6 +40,13 @@ public struct CollabComment: Codable, Equatable, Sendable, Identifiable {
     public var confirmed: Bool
     /// Attachment id of a picture of the element after it was resolved.
     public var afterScreenshot: String?
+    /// Where the element comes from (selector, key styles, component, source file), for coding agents.
+    /// Only the host and apps using OpenTraffic's API see it.
+    public let context: CollabElementContext?
+    /// Exact changes the commenter suggested: new text, or new values for a few styles.
+    public let edits: [CollabSuggestedEdit]
+    /// For a comment on an area rather than one element: its size from the comment's position.
+    public let area: CollabArea?
 
     public init(
         id: String,
@@ -67,7 +74,10 @@ public struct CollabComment: Codable, Equatable, Sendable, Identifiable {
         resolvedByAuthor: Bool = false,
         resolvedAt: Date? = nil,
         confirmed: Bool = false,
-        afterScreenshot: String? = nil
+        afterScreenshot: String? = nil,
+        context: CollabElementContext? = nil,
+        edits: [CollabSuggestedEdit] = [],
+        area: CollabArea? = nil
     ) {
         self.id = id
         self.author = author
@@ -95,12 +105,16 @@ public struct CollabComment: Codable, Equatable, Sendable, Identifiable {
         self.resolvedAt = resolvedAt
         self.confirmed = confirmed
         self.afterScreenshot = afterScreenshot
+        self.context = context
+        self.edits = edits
+        self.area = area
     }
 
     enum CodingKeys: String, CodingKey {
         case id, author, color, path, text, x, y, anchor, rx, ry, label, title, createdAt, resolved, fromHost
         case replies, screenshot, environment, errors, authorClient
         case resolvedBy, resolvedByAgent, resolvedByAuthor, resolvedAt, confirmed, afterScreenshot
+        case context, edits, area
     }
 
     public init(from decoder: Decoder) throws {
@@ -131,6 +145,9 @@ public struct CollabComment: Codable, Equatable, Sendable, Identifiable {
         resolvedAt = try container.decodeIfPresent(Date.self, forKey: .resolvedAt)
         confirmed = try container.decodeIfPresent(Bool.self, forKey: .confirmed) ?? false
         afterScreenshot = try container.decodeIfPresent(String.self, forKey: .afterScreenshot)
+        context = try container.decodeIfPresent(CollabElementContext.self, forKey: .context)
+        edits = try container.decodeIfPresent([CollabSuggestedEdit].self, forKey: .edits) ?? []
+        area = try container.decodeIfPresent(CollabArea.self, forKey: .area)
     }
 
     /// Resolves (recording who did) or reopens it. Reopening forgets the fix: who made it, the
@@ -155,7 +172,8 @@ public struct CollabComment: Codable, Equatable, Sendable, Identifiable {
         [screenshot, afterScreenshot].compactMap { $0 }
     }
 
-    func json(canDelete: Bool, includeErrors: Bool = true, mine: Bool = false, work: CollabAgentWork? = nil) -> [String: Any] {
+    /// `forHost`: with what only the host sees (browser errors, the element's context).
+    func json(canDelete: Bool, forHost: Bool = true, mine: Bool = false, work: CollabAgentWork? = nil) -> [String: Any] {
         var object: [String: Any] = [
             "id": id, "author": author, "color": color, "path": path, "text": text,
             "x": x, "y": y, "createdAt": Int64(createdAt.timeIntervalSince1970 * 1000),
@@ -185,7 +203,10 @@ public struct CollabComment: Codable, Equatable, Sendable, Identifiable {
         object["replies"] = replies.map(\.json)
         if let screenshot { object["screenshot"] = screenshot }
         if let environment { object["env"] = environment.json }
-        if includeErrors, !errors.isEmpty { object["errors"] = errors.map(\.json) }
+        if forHost, !errors.isEmpty { object["errors"] = errors.map(\.json) }
+        if forHost, let context { object["context"] = context.json }
+        if !edits.isEmpty { object["edits"] = edits.map(\.json) }
+        if let area { object["area"] = area.json }
         return object
     }
 }
@@ -218,6 +239,87 @@ public struct CollabReply: Codable, Equatable, Sendable, Identifiable {
         ]
         if let agent { object["agent"] = agent }
         return object
+    }
+}
+
+/// Where a commented element comes from, as the commenter's browser saw it: a selector readable in
+/// the code, a few computed styles, and (on development servers that expose it) the component and
+/// the source file that rendered it.
+public struct CollabElementContext: Codable, Equatable, Sendable {
+    /// Like `#hero > a.btn.ghost`.
+    public let selector: String?
+    /// Computed values of `CollabElementContext.styleProperties`.
+    public let styles: [String: String]
+    /// The component that rendered it (React, Vue, Svelte, Angular).
+    public let component: String?
+    /// The file (and line) it came from, like `src/components/Hero.tsx:42`.
+    public let source: String?
+
+    public static let styleProperties: Set<String> = [
+        "color", "background-color", "font-size", "font-weight", "font-family", "line-height",
+        "padding", "margin", "border", "border-radius", "display", "width", "height", "opacity", "gap", "text-align",
+    ]
+
+    public init(selector: String? = nil, styles: [String: String] = [:], component: String? = nil, source: String? = nil) {
+        self.selector = selector
+        self.styles = styles
+        self.component = component
+        self.source = source
+    }
+
+    var json: [String: Any] {
+        var object: [String: Any] = ["styles": styles]
+        if let selector { object["selector"] = selector }
+        if let component { object["component"] = component }
+        if let source { object["source"] = source }
+        return object
+    }
+}
+
+/// A change someone suggested by editing the page: new text for the element, or a new value for one
+/// of its styles.
+public struct CollabSuggestedEdit: Codable, Equatable, Sendable {
+    public enum Kind: String, Codable, Sendable {
+        case text, style
+    }
+
+    public let kind: Kind
+    /// The CSS property, for a style edit (one of `CollabSuggestedEdit.styleProperties`).
+    public let property: String?
+    public let old: String
+    public let new: String
+
+    public static let styleProperties: Set<String> = [
+        "color", "background-color", "font-size", "font-weight", "line-height", "letter-spacing",
+        "padding", "margin", "gap", "border-radius", "border", "width", "height", "text-align", "opacity",
+    ]
+
+    public init(kind: Kind, property: String? = nil, old: String, new: String) {
+        self.kind = kind
+        self.property = property
+        self.old = old
+        self.new = new
+    }
+
+    var json: [String: Any] {
+        var object: [String: Any] = ["kind": kind.rawValue, "old": old, "new": new]
+        if let property { object["property"] = property }
+        return object
+    }
+}
+
+/// The size of a commented area, in CSS pixels from the comment's position (its top-left corner).
+public struct CollabArea: Codable, Equatable, Sendable {
+    public let width: Double
+    public let height: Double
+
+    public init(width: Double, height: Double) {
+        self.width = width
+        self.height = height
+    }
+
+    var json: [String: Any] {
+        ["width": width, "height": height]
     }
 }
 
@@ -347,7 +449,15 @@ public enum FeedbackExport {
                 let box = comment.resolved ? "[x]" : "[ ]"
                 let target = comment.label.map { " on “\($0)”" } ?? ""
                 let text = comment.text.replacingOccurrences(of: "\n", with: "\n  ")
-                return "- \(box) **\(comment.author)**\(target): \(text)"
+                var lines = ["- \(box) **\(comment.author)**\(target): \(text)"]
+                for edit in comment.edits {
+                    let what = edit.property.map { "`\($0)` " } ?? ""
+                    lines.append("  - Suggested: \(what)\(edit.old.isEmpty ? "" : "“\(edit.old)” → ")“\(edit.new)”")
+                }
+                if let source = comment.context?.source {
+                    lines.append("  - Source: `\(source)`" + (comment.context?.component.map { " (\($0))" } ?? ""))
+                }
+                return lines.joined(separator: "\n")
             }
             return ([heading, ""] + lines).joined(separator: "\n")
         }.joined(separator: "\n\n") + "\n"

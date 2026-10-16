@@ -9,12 +9,18 @@ public struct APIPerson: Codable, Equatable, Sendable {
     public let isHost: Bool
     /// A coding agent working on a comment (absent for people).
     public let isAgent: Bool?
+    /// "trusted", "commenter", or "viewer" (absent for the host and agents).
+    public let role: String?
+    /// Their browser, system, and window size, when their overlay said.
+    public let device: CollabEnvironment?
 
-    public init(name: String, path: String, isHost: Bool, isAgent: Bool? = nil) {
+    public init(name: String, path: String, isHost: Bool, isAgent: Bool? = nil, role: String? = nil, device: CollabEnvironment? = nil) {
         self.name = name
         self.path = path
         self.isHost = isHost
         self.isAgent = isAgent
+        self.role = role
+        self.device = device
     }
 }
 
@@ -353,6 +359,13 @@ public struct APIComment: Codable, Equatable, Sendable {
     public let resolvedAt: Date?
     /// A picture of the element after it was resolved (get it with `which: after`).
     public let hasAfterScreenshot: Bool?
+    /// Where the element comes from: a selector, key styles, and on development servers that expose
+    /// it, the component and source file. Start there rather than searching for the element.
+    public let context: CollabElementContext?
+    /// Exact changes the commenter suggested by editing the page (apply these as given).
+    public let edits: [CollabSuggestedEdit]?
+    /// For a comment on an area: its size in CSS pixels from the comment's position.
+    public let area: CollabArea?
 
     public init(_ comment: CollabComment, shareID: UUID, claim: AgentClaim? = nil) {
         shareId = shareID
@@ -376,6 +389,9 @@ public struct APIComment: Codable, Equatable, Sendable {
         resolvedBy = comment.resolved ? comment.resolvedBy : nil
         resolvedAt = comment.resolved ? comment.resolvedAt : nil
         hasAfterScreenshot = comment.afterScreenshot != nil
+        context = comment.context
+        edits = comment.edits.isEmpty ? nil : comment.edits
+        area = comment.area
     }
 }
 

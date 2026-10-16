@@ -15,6 +15,10 @@ private final class MockSecretStore: SecretStore, @unchecked Sendable {
     var migrationDelayMicroseconds: useconds_t = 0
     private(set) var migrations = 0
     private(set) var deletes = 0
+    private var started = 0
+
+    /// A migration has reached the store (and is now in its delay).
+    var migrationStarted: Bool { lock.withLock { started > 0 } }
 
     func contains(key: String) throws -> Bool { kind != nil }
     func storageKind(key: String) throws -> SecretStorageKind? { kind }
@@ -39,6 +43,7 @@ private final class MockSecretStore: SecretStore, @unchecked Sendable {
     }
 
     func migrateLegacyToUserPresence(key: String, value: String, reason: String) throws -> SecretMigrationResult {
+        lock.withLock { started += 1 }
         if migrationDelayMicroseconds > 0 { usleep(migrationDelayMicroseconds) }
         lock.lock()
         defer { lock.unlock() }
@@ -70,7 +75,8 @@ private final class MockSecretStore: SecretStore, @unchecked Sendable {
     _ = try await service.unlock(key: "token", reason: "Unlock")
     store.migrationDelayMicroseconds = 120_000
     let migration = Task { try await service.migrateLegacyToUserPresence(key: "token", reason: "Verify") }
-    try await Task.sleep(for: .milliseconds(15))
+    // Wait until it's really under way; a fixed pause loses the race on a busy machine.
+    #expect(await eventually { store.migrationStarted })
     await service.clearSessionCache(key: "token")
     do {
         _ = try await migration.value
@@ -87,7 +93,8 @@ private final class MockSecretStore: SecretStore, @unchecked Sendable {
     _ = try await service.unlock(key: "token", reason: "Unlock")
     store.migrationDelayMicroseconds = 120_000
     let migration = Task { try await service.migrateLegacyToUserPresence(key: "token", reason: "Verify") }
-    try await Task.sleep(for: .milliseconds(15))
+    // Wait until it's really under way; a fixed pause loses the race on a busy machine.
+    #expect(await eventually { store.migrationStarted })
     do {
         try await service.delete(key: "token")
         Issue.record("Overlapping delete should be rejected")

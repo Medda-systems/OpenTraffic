@@ -61,6 +61,7 @@ struct CollaborationCard: View {
             } else if tunnel.collaboration {
                 if store.isCollaborating(tunnel.id) {
                     peopleList
+                    rolesSection
                     HStack {
                         Button("Open as Host", systemImage: "person.crop.circle.badge.checkmark") {
                             store.openAsCollaborationHost(tunnel.id)
@@ -214,16 +215,83 @@ struct CollaborationCard: View {
                                 .padding(.vertical, 1)
                                 .background(.quaternary, in: Capsule())
                         }
+                        if let device = peer.device {
+                            Text("\(device.viewport.replacingOccurrences(of: "x", with: "×")) · \(device.os)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .help("\(device.browser), \(device.os), window \(device.viewport)")
+                        }
                         Spacer(minLength: Spacing.s)
                         Text(peer.path)
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                        if !peer.isHost, !peer.isAgent, let client = peer.client {
+                            roleMenu(current: peer.role, client: client, name: peer.name)
+                        }
                     }
-                    .accessibilityElement(children: .combine)
+                    .accessibilityElement(children: .contain)
                 }
             }
+        }
+    }
+
+    /// What new people may do, and the people given a role who aren't here now.
+    @ViewBuilder
+    private var rolesSection: some View {
+        let present = Set(store.peers(for: tunnel.id).compactMap(\.client))
+        let away = tunnel.collabMembers.filter { !present.contains($0.key) }.sorted { $0.value.name < $1.value.name }
+        Picker("New people can", selection: Binding(
+            get: { tunnel.collabDefaultRole },
+            set: { store.setCollabDefaultRole($0, in: tunnel.id) }
+        )) {
+            ForEach(CollabRole.allCases, id: \.self) { role in Text(role.title).tag(role) }
+        }
+        .help("What people can do unless you give them a role. Only trusted people's comments start your agent by themselves.")
+        ForEach(away, id: \.key) { client, member in
+            HStack(spacing: Spacing.s) {
+                Text(member.name).lineLimit(1).foregroundStyle(.secondary)
+                Text("not here").font(.caption).foregroundStyle(.tertiary)
+                Spacer(minLength: Spacing.s)
+                roleMenu(current: member.role, client: client, name: member.name)
+            }
+        }
+    }
+
+    private func roleMenu(current: CollabRole, client: String, name: String) -> some View {
+        Menu {
+            ForEach(CollabRole.allCases, id: \.self) { role in
+                Button {
+                    store.setCollabRole(role == tunnel.collabDefaultRole ? nil : role, forClient: client, name: name, in: tunnel.id)
+                } label: {
+                    if role == current { Label(role.title, systemImage: "checkmark") } else { Text(role.title) }
+                }
+            }
+        } label: {
+            Text(current.shortTitle)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("What \(name) can do here. Roles follow their browser.")
+    }
+}
+
+extension CollabRole {
+    var title: String {
+        switch self {
+        case .trusted: "Comment and start your agent"
+        case .commenter: "Comment"
+        case .viewer: "Only view"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .trusted: "Trusted"
+        case .commenter: "Can comment"
+        case .viewer: "View only"
         }
     }
 }

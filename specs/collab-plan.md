@@ -426,3 +426,52 @@ only); a protected OpenTunnel share likewise.
   error, and whether to ask for a name. No script runs on it.
 * The app never sees OpenTraffic's cookie or basic auth with the share's password. OpenTraffic's pages
   send a CSP that loads nothing from elsewhere and forbids framing.
+
+### 3.9 Element context, suggested edits, areas, drawing, devices, and roles
+
+* **Context** (`CollabElementContext`): with each comment the overlay sends a readable selector (tag, id,
+  non-generated classes, under the nearest ancestor with an id), the computed values of a fixed list of
+  styles, and on development builds the component and source file: React's fiber (`_debugSource` when it
+  exists, with its line; React 19's `_debugStack`, file only, since the dev server's transform shifts
+  lines), Vue's `__vueParentComponent`/`__vue__` `__file`, Svelte's `__svelte_meta`, Angular's
+  `ng.getOwningComponent`. Paths are cut to `src/…` (or their last three segments). Only the host's page
+  and the API get it.
+* **Suggested edits** (`CollabSuggestedEdit`, at most six): new text for an element whose text is a single
+  text node (changed in place through `nodeValue`, so frameworks keep their node), or new values for an
+  allow-listed set of style properties. The hub drops values that could leave the declaration (`;{}<>\"'`
+  backslash, backtick, comments). Previews are local and undone on post, cancel, or close.
+* **Areas** (`CollabArea`): dragging in comment mode pins the comment to the smallest element containing
+  the box's corners, at the box's top-left; the size is in CSS pixels.
+* **Drawing**: `ink` messages (≤ 64 `[x, y]` points, ≤ 25 a second) go to everyone else on the path,
+  ephemeral; never stored.
+* **Devices**: `hello` carries the overlay's environment; `env` updates it (≤ 1 a second). Peers carry
+  `device` (browser, system, viewport). "View at their size" frames their path in a same-origin iframe of
+  their viewport (the overlay doesn't run in frames), scaled into a phone, tablet, or browser-window frame
+  on a stage over the page. `watch` (`{id}` or `{id: null}`) asks the hub for that person's `cursor` and
+  `cursor-hide` from any path, so the stage can show their pointer and follow them; a reload is a new
+  connection, so the stage re-attaches to the same name and device within 15 s.
+* **Device views you can work in**: the stage's iframe gets `__opentrafficStage` (scale, screen and device
+  rects, armed, followsLead, leadView, following); the overlay starts inside it only then (same origin,
+  `frameElement` set by us) and says `hello {inView: true}`. The hub keeps in-view connections out of
+  `peers` (the app, API) and fix captures, gives them the person's colour, and still sends them to
+  overlays (their pointer), which don't list them. The framed overlay has no pill (the stage's pill tools
+  call its `arm`), uses an in-memory session, and puts its comment box and bubbles in a shadow root on the
+  stage's page, beside the device.
+* **Phone / Desktop and leading**: `lead {on, view}` with `view = {kind: phone|window, w, h}` or null;
+  left out keeps it. `lead` messages and the welcome carry it. Only the connection that turned leading on
+  (`leadConnection`) moves followers with `path`/`scroll` (any other host page while it's reloading,
+  never a device view unless it's the one), so the host's phone leads while it's open. Followers open
+  the host's phone or window as a stage whose overlay follows; a window the size of theirs is skipped.
+* **Roles** (`CollabRole`: trusted, commenter, viewer), kept per share by overlay client id
+  (`collabMembers`) with a default (`collabDefaultRole`), pushed to the hub with `setRoles`. Viewers can't
+  comment, reply, resolve, confirm, or delete; the hub refuses those messages. Automatic agent runs only
+  start for comments by trusted people (or the host). Roles follow a browser, not a verified identity.
+
+### Planned: following anyone (groups instead of one leader)
+
+Today only the host leads and every visitor follows them. Planned: anyone can be followed. You follow a
+person (from the people list), not "the lead"; whoever is being followed sees who follows them and can
+stop being followed. Each follower picks one person, so two leaders never pull the same visitor.
+Following someone who follows someone else follows the person at the front, so there are no loops.
+The host keeps one override, **Everyone follow me**, for demos. The shared viewport (Phone, Desktop, or
+Match my window) belongs to whoever is being followed and reaches only their own followers.

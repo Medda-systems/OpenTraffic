@@ -16,7 +16,7 @@ the background. Environment:
 | `list_shares` | Shares with state, URLs, people in the session, comment counts. |
 | `share` | Publishes a local `port` or `url` (`provider`: `quick`, `tailscale`, `ngrok`, `opentunnel`; `name`; `collaboration`, default on). |
 | `start_share`, `stop_share` | By id or name. |
-| `get_feedback` | Comments (`status`: `open`, `resolved`, `all`). Each says whether it's `open`, `working` (and who's on it), `resolved`, or `confirmed`. |
+| `get_feedback` | Comments (`status`: `open`, `resolved`, `all`). Each says whether it's `open`, `working` (and who's on it), `resolved`, or `confirmed`, and carries `context` (selector, styles, component, source file), suggested `edits` to apply as given, and `area` for a comment on a region. |
 | `claim_comment`, `release_comment` | Say you're working on a comment (with optional `progress`), or stop. The session sees the app at the element; other apps' claims are refused. A claim lapses after 15 minutes unless claimed again. |
 | `resolve_comment`, `reply_to_comment` | Replies and fixes show the app's name; the commenter is told it's fixed and can confirm or reopen it. |
 | `get_screenshot` | The pinned element, as an image; `which: after` for the picture of it once fixed. |

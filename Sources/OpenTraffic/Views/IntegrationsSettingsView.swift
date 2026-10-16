@@ -165,7 +165,7 @@ struct IntegrationsSettingsView: View {
         guard agentPreset != nil else {
             return "OpenTraffic can start a coding agent to handle a comment when no agent is watching the share: you send comments to it from the Feedback tab, or let it run by itself. The agent uses its own sign-in or API key; OpenTraffic doesn't run any model."
         }
-        return "Runs in the share's project folder with $OPENTRAFFIC_PROMPT, $OPENTRAFFIC_SHARE and $OPENTRAFFIC_COMMENT_ID set, and needs OpenTraffic's MCP server (above) to read and answer the comment. Running by itself lets anyone with a share's link start the agent on this Mac: comments reach it as untrusted feedback, but only turn this on for people you trust."
+        return "Runs in the share's project folder with $OPENTRAFFIC_PROMPT, $OPENTRAFFIC_SHARE and $OPENTRAFFIC_COMMENT_ID set, and needs OpenTraffic's MCP server (above) to read and answer the comment. Running by itself only starts it for comments from people you've made trusted in a share's Live Collaboration card; others' comments wait for Send to. Comments reach it as untrusted feedback."
     }
 
     private func choose(_ preset: AgentPreset?) {

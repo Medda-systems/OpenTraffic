@@ -475,9 +475,18 @@ struct Context {
             if comment.resolved { meta += comment.resolvedBy.map { " · resolved by \($0)" } ?? " · resolved" }
             if comment.status == "confirmed" { meta += " (confirmed)" }
             if let agent = comment.claimedBy { meta += " · \(agent) is on it" + (comment.progress.map { ": \($0)" } ?? "") }
+            if let area = comment.area { meta += " · area \(Int(area.width))×\(Int(area.height))" }
             let target = comment.label.map { " on “\($0)”" } ?? ""
             say("\(style.yellow(comment.id))  \(style.bold(comment.author))\(target) \(style.dim("at \(comment.path) · \(meta)"))")
             say("  \(comment.text)")
+            for edit in comment.edits ?? [] {
+                let what = edit.property.map { "\($0): " } ?? ""
+                say("  \(style.cyan("✎")) \(what)\(edit.old.isEmpty ? "" : style.dim(edit.old) + " → ")\(style.bold(edit.new))")
+            }
+            if let context = comment.context, context.source != nil || context.component != nil || context.selector != nil {
+                let parts = [context.component, context.source, context.selector].compactMap { $0 }
+                say("  \(style.dim("⌖ " + parts.joined(separator: " · ")))")
+            }
             for reply in comment.replies {
                 let badge = reply.agent.map { _ in style.dim(" (agent)") } ?? ""
                 say("  \(style.dim("↳")) \(style.bold(reply.author))\(badge): \(reply.text)")

@@ -1,5 +1,17 @@
 import Foundation
 
+/// What someone in a session may do. The host decides, per browser; new people get the share's default.
+public enum CollabRole: String, Codable, Hashable, Sendable, CaseIterable {
+    /// Comments, and their comments may start the coding agent by themselves.
+    case trusted
+    /// Comments and replies.
+    case commenter
+    /// Looks, points and draws; can't comment, reply, or resolve.
+    case viewer
+
+    public var canComment: Bool { self != .viewer }
+}
+
 /// Someone viewing a collaborative share, or a coding agent working on one of its comments.
 public struct CollabPeer: Equatable, Sendable, Identifiable {
     public let id: String
@@ -9,6 +21,15 @@ public struct CollabPeer: Equatable, Sendable, Identifiable {
     public let isHost: Bool
     /// An app working through OpenTraffic's API, shown in the session while it holds a comment.
     public var isAgent = false
+    /// Their browser, system, and window size.
+    public var device: CollabEnvironment?
+    /// What they may do (the host may do everything).
+    public internal(set) var role: CollabRole = .commenter
+    /// Their browser's overlay id, which roles are kept by. Never sent to other people.
+    public internal(set) var client: String?
+    /// The overlay inside someone's device view (Phone, or another person's window): a second connection
+    /// from the same browser, so they can comment there. Not listed as a person.
+    public internal(set) var inView = false
     /// Where an agent's cursor rests: the element of the comment it's working on.
     var spot: CollabSpot?
 
@@ -16,6 +37,9 @@ public struct CollabPeer: Equatable, Sendable, Identifiable {
         var object: [String: Any] = ["id": id, "name": name, "color": color, "path": path, "isHost": isHost]
         if isAgent { object["isAgent"] = true }
         if let spot { object["at"] = spot.json }
+        if let device { object["device"] = ["browser": device.browser, "os": device.os, "viewport": device.viewport] }
+        if !isHost, !isAgent { object["role"] = role.rawValue }
+        if inView { object["inView"] = true }
         return object
     }
 }
@@ -79,6 +103,11 @@ public struct CollabRoom {
     static let pointInterval: TimeInterval = 0.5
     /// How often someone may confirm a fix or send a picture of one.
     static let afterInterval: TimeInterval = 2
+    /// Window size changes, at most once a second.
+    static let deviceInterval: TimeInterval = 1
+    /// Drawing: batches of stroke points, up to 25 a second.
+    static let inkInterval: TimeInterval = 0.04
+    static let maximumInkPoints = 64
     /// Agents' cursors and badges.
     public static let agentColor = "#BF5AF2"
     public static let palette = [
@@ -95,6 +124,11 @@ public struct CollabRoom {
     public private(set) var leading = false
     private var leadPath = "/"
     private var leadRatio = 0.0
+    /// The size the host shows followers ("Phone", or their own window), or nil for everyone's own window.
+    private var leadView: LeadView?
+    /// The host's connection that turned leading on: its page and scrolling are what followers get (a
+    /// host's other tabs, or the page in their device view, don't move anyone unless it's that one).
+    private var leadConnection: String?
     private let hostName: String
     /// Every comment on every page, oldest first.
     public private(set) var comments: [CollabComment]
@@ -105,11 +139,16 @@ public struct CollabRoom {
     /// Comments resolved by someone other than their author that have no picture of the fix yet.
     /// The host's page takes one when it's on that page; the author's when they look at the fix.
     private var awaitingAfter: Set<String> = []
+    /// Roles the host gave people, by their browser's overlay id, and the role of everyone else.
+    private var roles: [String: CollabRole] = [:]
+    private var defaultRole: CollabRole = .commenter
 
     private struct Connection {
         var peer: CollabPeer
         var client: String?
         var joined = false
+        /// Whose window this person is looking at ("View at their size"): they get that person's pointer on any page.
+        var watching: String?
         var windowStart = Date.distantPast
         var windowCount = 0
         var lastComment = Date.distantPast
@@ -119,6 +158,8 @@ public struct CollabRoom {
         var lastResolve = Date.distantPast
         var lastRename = Date.distantPast
         var lastAfter = Date.distantPast
+        var lastDevice = Date.distantPast
+        var lastInk = Date.distantPast
         /// Authorizes this connection's screenshot uploads; sent only to it.
         let uploadToken = CollabRoom.makeToken()
     }
@@ -170,8 +211,11 @@ public struct CollabRoom {
         return reportedErrors
     }
 
-    /// Everyone who has joined, in join order, then the agents at work.
-    public var peers: [CollabPeer] {
+    /// Everyone who has joined, in join order, then the agents at work (without device views, which
+    /// are the same people).
+    public var peers: [CollabPeer] { allPeers.filter { !$0.inView } }
+
+    private var allPeers: [CollabPeer] {
         joinOrder.compactMap { id in connections[id].flatMap { $0.joined ? $0.peer : nil } }
             + agentPeers.values.sorted { $0.id < $1.id }
     }
@@ -195,6 +239,7 @@ public struct CollabRoom {
         // Leading ends when no host is left to lead.
         if leading, connection.peer.isHost, !connections.values.contains(where: { $0.joined && $0.peer.isHost }) {
             leading = false
+            leadView = nil
             output += broadcast(["type": "lead", "on": false], except: id)
         }
         return output
@@ -219,6 +264,10 @@ public struct CollabRoom {
             return hello(object, id: id)
         }
         let peer = connection.peer
+        // People who may only look can still move, point, and draw.
+        if !peer.isHost, !peer.role.canComment, ["comment", "reply", "resolve", "confirm", "delete", "after"].contains(type) {
+            return []
+        }
         switch type {
         case "rename":
             guard now.timeIntervalSince(connection.lastRename) >= Self.renameInterval,
@@ -228,20 +277,24 @@ public struct CollabRoom {
         case "path":
             guard let path = Self.validPath(object["path"]) else { return [] }
             var output = update(id) { $0.path = path }
-            if leading, peer.isHost {
+            if leading, leads(id) {
                 leadPath = path
                 leadRatio = 0
                 output += broadcast(leadMessage(), except: id)
             }
-            if peer.isHost { output += captureRequests(for: id, path: path) }
+            if peer.isHost, !peer.inView { output += captureRequests(for: id, path: path) }
             return output
         case "cursor":
             guard let message = Self.cursorMessage(object, id: id) else { return [] }
-            return [Outgoing(target: .others(except: id, path: peer.path), text: Self.encode(message), isEphemeral: true)]
+            return pointer(message, from: id, path: peer.path)
         case "cursor-hide":
-            return [Outgoing(target: .others(except: id, path: peer.path), text: Self.encode(["type": "cursor-hide", "id": id]), isEphemeral: true)]
+            return pointer(["type": "cursor-hide", "id": id], from: id, path: peer.path)
+        case "watch":
+            let target = (object["id"] as? String).flatMap { $0 != id && connections[$0]?.joined == true ? $0 : nil }
+            connections[id]?.watching = target
+            return []
         case "scroll":
-            guard leading, peer.isHost, let ratio = Self.unitNumber(object["ratio"]) else { return [] }
+            guard leading, leads(id), let ratio = Self.unitNumber(object["ratio"]) else { return [] }
             leadRatio = ratio
             leadPath = peer.path
             return broadcast(leadMessage(), except: id)
@@ -249,6 +302,9 @@ public struct CollabRoom {
             guard peer.isHost, let on = object["on"] as? Bool else { return [] }
             leading = on
             leadPath = peer.path
+            leadConnection = on ? id : nil
+            // "view" left out keeps the current one (a page reload re-asserting leading); null clears it.
+            if !on { leadView = nil } else if object.keys.contains("view") { leadView = LeadView(object["view"]) }
             return broadcast(on ? leadMessage() : ["type": "lead", "on": false], except: id)
         case "comment":
             return addComment(object, from: id, now: now)
@@ -297,6 +353,18 @@ public struct CollabRoom {
                   let comment = comments.first(where: { $0.id == commentID }),
                   canDelete(comment, connection: connection) else { return [] }
             return deleteComment(commentID)
+        case "env":
+            guard now.timeIntervalSince(connection.lastDevice) >= Self.deviceInterval,
+                  let device = Self.environment(object["env"]) else { return [] }
+            connections[id]?.lastDevice = now
+            return update(id) { $0.device = device }
+        case "ink":
+            guard now.timeIntervalSince(connection.lastInk) >= Self.inkInterval,
+                  let points = Self.inkPoints(object["points"]) else { return [] }
+            connections[id]?.lastInk = now
+            let stroke = (object["stroke"] as? Int).flatMap { (0...1_000_000_000).contains($0) ? $0 : nil } ?? 0
+            let message: [String: Any] = ["type": "ink", "id": id, "color": peer.color, "stroke": stroke, "points": points]
+            return [Outgoing(target: .others(except: id, path: peer.path), text: Self.encode(message), isEphemeral: true)]
         case "point":
             guard now.timeIntervalSince(connection.lastPoint) >= Self.pointInterval,
                   var message = Self.cursorMessage(object, id: id) else { return [] }
@@ -337,7 +405,10 @@ public struct CollabRoom {
             screenshot: (object["screenshot"] as? String).flatMap { attachments[$0] == id ? $0 : nil },
             environment: Self.environment(object["env"]),
             errors: capturesErrors ? ((object["errors"] as? [Any]) ?? []).prefix(10).compactMap { Self.errorItem($0) } : [],
-            authorClient: connection.client
+            authorClient: connection.client,
+            context: Self.elementContext(object["context"]),
+            edits: Self.suggestedEdits(object["edits"]),
+            area: Self.area(object["area"])
         )
         // Full: make room by dropping resolved comments, but never push out open ones; refuse instead.
         guard makeRoom(for: comment.text.utf8.count) else { return [] }
@@ -398,6 +469,30 @@ public struct CollabRoom {
 
     private func captureMessage(_ commentID: String, to id: String) -> Outgoing {
         Outgoing(target: .peer(id), text: Self.encode(["type": "capture", "id": commentID]))
+    }
+
+    // MARK: Roles
+
+    /// Sets what people may do: `roles` by their browser's overlay id, `defaultRole` for everyone
+    /// else. People in the session get their new role right away.
+    public mutating func setRoles(_ roles: [String: CollabRole], default defaultRole: CollabRole) -> [Outgoing] {
+        self.roles = roles
+        self.defaultRole = defaultRole
+        var output: [Outgoing] = []
+        for id in joinedIDs {
+            guard var connection = connections[id], !connection.peer.isHost else { continue }
+            let role = role(for: connection.client)
+            guard connection.peer.role != role else { continue }
+            connection.peer.role = role
+            connections[id] = connection
+            // Everyone, them included: their overlay hides what they may no longer do.
+            output += broadcastToJoined(["type": "update", "peer": connection.peer.json])
+        }
+        return output
+    }
+
+    private func role(for client: String?) -> CollabRole {
+        client.flatMap { roles[$0] } ?? defaultRole
     }
 
     // MARK: Agents
@@ -489,7 +584,7 @@ public struct CollabRoom {
     private func json(_ comment: CollabComment, for connection: Connection) -> [String: Any] {
         comment.json(
             canDelete: canDelete(comment, connection: connection),
-            includeErrors: connection.peer.isHost,
+            forHost: connection.peer.isHost,
             mine: comment.isAuthor(connection.client),
             work: agentWork[comment.id]
         )
@@ -510,14 +605,23 @@ public struct CollabRoom {
         if let name = Self.sanitizedName(object["name"]) { connection.peer.name = name }
         connection.peer.path = Self.validPath(object["path"]) ?? "/"
         connection.client = Self.validClient(object["client"])
+        connection.peer.client = connection.client
+        connection.peer.device = Self.environment(object["env"])
+        connection.peer.role = connection.peer.isHost ? .trusted : role(for: connection.client)
+        connection.peer.inView = object["inView"] as? Bool == true
+        // A device view is the same person: their colour too.
+        if connection.peer.inView, let client = connection.client,
+           let twin = connections.values.first(where: { $0.joined && !$0.peer.inView && $0.client == client }) {
+            connection.peer.color = twin.peer.color
+        }
         connection.joined = true
         connections[id] = connection
         joinOrder.append(id)
-        let captures = connection.peer.isHost ? captureRequests(for: id, path: connection.peer.path) : []
+        let captures = connection.peer.isHost && !connection.peer.inView ? captureRequests(for: id, path: connection.peer.path) : []
         var welcome: [String: Any] = [
             "type": "welcome",
             "you": connection.peer.json,
-            "peers": peers.filter { $0.id != id }.map(\.json),
+            "peers": allPeers.filter { $0.id != id }.map(\.json),
             "leading": leading,
             "features": ["errors": capturesErrors],
             "comments": comments.map { json($0, for: connection) },
@@ -526,6 +630,7 @@ public struct CollabRoom {
         if leading {
             welcome["path"] = leadPath
             welcome["ratio"] = leadRatio
+            welcome["view"] = leadView?.json ?? NSNull()
         }
         return [Outgoing(target: .peer(id), text: Self.encode(welcome))]
             + broadcast(["type": "join", "peer": connection.peer.json], except: id)
@@ -542,7 +647,7 @@ public struct CollabRoom {
     }
 
     private func leadMessage() -> [String: Any] {
-        ["type": "lead", "on": true, "path": leadPath, "ratio": leadRatio]
+        ["type": "lead", "on": true, "path": leadPath, "ratio": leadRatio, "view": leadView?.json ?? NSNull()]
     }
 
     private func broadcast(_ message: [String: Any], except id: String) -> [Outgoing] {
@@ -550,6 +655,24 @@ public struct CollabRoom {
     }
 
     /// Whether `target` includes the connection `id`.
+    /// Whether `id`'s page and scrolling lead: the connection that started leading, or while it's gone
+    /// (reloading), any host page that isn't a device view.
+    private func leads(_ id: String) -> Bool {
+        guard let connection = connections[id], connection.peer.isHost else { return false }
+        if let leadConnection, connections[leadConnection]?.joined == true { return leadConnection == id }
+        return !connection.peer.inView
+    }
+
+    /// A pointer update: for everyone on the page, and for anyone elsewhere looking at this person's window.
+    private func pointer(_ message: [String: Any], from id: String, path: String) -> [Outgoing] {
+        let text = Self.encode(message)
+        var output = [Outgoing(target: .others(except: id, path: path), text: text, isEphemeral: true)]
+        for (watcher, connection) in connections where connection.watching == id && connection.joined && connection.peer.path != path {
+            output.append(Outgoing(target: .peer(watcher), text: text, isEphemeral: true))
+        }
+        return output
+    }
+
     public func includes(_ target: Target, _ id: String) -> Bool {
         guard let connection = connections[id] else { return false }
         switch target {
@@ -615,6 +738,69 @@ public struct CollabRoom {
               viewport.range(of: #"^\d{1,5}x\d{1,5}$"#, options: .regularExpression) != nil else { return nil }
         let dpr = (object["dpr"] as? Double ?? (object["dpr"] as? Int).map(Double.init)).flatMap { $0.isFinite && $0 > 0 && $0 <= 10 ? $0 : nil } ?? 1
         return CollabEnvironment(browser: browser, os: os, viewport: viewport, dpr: dpr, language: shortText(object["language"], limit: 20) ?? "")
+    }
+
+    /// What the commenter's browser recorded about the element; nil when there's nothing usable.
+    static func elementContext(_ value: Any?) -> CollabElementContext? {
+        guard let object = value as? [String: Any] else { return nil }
+        var styles: [String: String] = [:]
+        for (property, raw) in (object["styles"] as? [String: Any] ?? [:]).prefix(32)
+        where CollabElementContext.styleProperties.contains(property) {
+            if let value = cssValue(raw, limit: 120) { styles[property] = value }
+        }
+        let selector = shortText(object["selector"], limit: 300)
+        let component = shortText(object["component"], limit: 80)
+        let source = shortText(object["source"], limit: 200).map(withoutQueries)
+        guard selector != nil || component != nil || source != nil || !styles.isEmpty else { return nil }
+        return CollabElementContext(selector: selector, styles: styles, component: component, source: source)
+    }
+
+    /// Up to six suggested changes: new text (up to 500 characters) or new values for known styles.
+    static func suggestedEdits(_ value: Any?) -> [CollabSuggestedEdit] {
+        guard let items = value as? [Any] else { return [] }
+        return items.prefix(6).compactMap { item in
+            guard let object = item as? [String: Any],
+                  let kind = (object["kind"] as? String).flatMap(CollabSuggestedEdit.Kind.init(rawValue:)) else { return nil }
+            switch kind {
+            case .text:
+                guard let new = shortText(object["new"], limit: 500) else { return nil }
+                let old = shortText(object["old"], limit: 500) ?? ""
+                return old == new ? nil : CollabSuggestedEdit(kind: .text, old: old, new: new)
+            case .style:
+                guard let property = object["property"] as? String, CollabSuggestedEdit.styleProperties.contains(property),
+                      let new = cssValue(object["new"], limit: 120) else { return nil }
+                let old = cssValue(object["old"], limit: 120) ?? ""
+                return old == new ? nil : CollabSuggestedEdit(kind: .style, property: property, old: old, new: new)
+            }
+        }
+    }
+
+    /// A CSS value without anything that could end the declaration or open a block or comment.
+    static func cssValue(_ value: Any?, limit: Int) -> String? {
+        guard let text = shortText(value, limit: limit),
+              !text.contains(where: { ";{}<>\\\"'`".contains($0) }), !text.contains("/*") else { return nil }
+        return text
+    }
+
+    static func area(_ value: Any?) -> CollabArea? {
+        guard let object = value as? [String: Any],
+              let width = (object["width"] as? Double ?? (object["width"] as? Int).map(Double.init)),
+              let height = (object["height"] as? Double ?? (object["height"] as? Int).map(Double.init)),
+              width.isFinite, height.isFinite, (4...20_000).contains(width), (4...20_000).contains(height) else { return nil }
+        return CollabArea(width: width.rounded(), height: height.rounded())
+    }
+
+    /// A batch of stroke points, each `[x, y]` like a cursor's page position (x as a fraction of the
+    /// page's width, y in pixels from the top).
+    static func inkPoints(_ value: Any?) -> [[Double]]? {
+        guard let items = value as? [Any], (1...maximumInkPoints).contains(items.count) else { return nil }
+        var points: [[Double]] = []
+        for item in items {
+            guard let pair = item as? [Any], pair.count == 2, let x = unitNumber(pair[0]),
+                  let y = pair[1] as? Double ?? (pair[1] as? Int).map(Double.init), y.isFinite, (0...10_000_000).contains(y) else { return nil }
+            points.append([(x * 10_000).rounded() / 10_000, y.rounded()])
+        }
+        return points
     }
 
     static func errorItem(_ value: Any?) -> CollabErrorItem? {
@@ -698,4 +884,24 @@ public struct CollabRoom {
     private static func generatedName() -> String {
         "\(adjectives.randomElement()!) \(animals.randomElement()!)"
     }
+}
+
+/// What the host shows the people following them: a phone, or a window of the host's own size.
+struct LeadView: Equatable, Sendable {
+    enum Kind: String { case phone, window }
+    let kind: Kind
+    let width: Int
+    let height: Int
+
+    init?(_ value: Any?) {
+        guard let object = value as? [String: Any],
+              let kind = (object["kind"] as? String).flatMap(Kind.init(rawValue:)),
+              let width = object["w"] as? Int, let height = object["h"] as? Int,
+              (200...8000).contains(width), (200...8000).contains(height) else { return nil }
+        self.kind = kind
+        self.width = width
+        self.height = height
+    }
+
+    var json: [String: Any] { ["kind": kind.rawValue, "w": width, "h": height] }
 }

@@ -148,8 +148,15 @@ private func roundTrip(_ message: String, port: UInt16) async throws -> String {
 }
 
 @Test func forwarderRelaysLoopbackTrafficToAnIPv6OnlyServer() async throws {
-    let server = try EchoServer()
-    let serverPort = try await server.start()
+    // IPv4 and IPv6 ports are separate, so on a busy machine something else may already have the
+    // same number on 127.0.0.1. Take a port that's free there too, so the server is IPv6-only.
+    var server = try EchoServer()
+    var serverPort = try await server.start()
+    for _ in 0..<10 where await LoopbackForwarder.canConnect(host: "127.0.0.1", port: serverPort) {
+        server.listener.cancel()
+        server = try EchoServer()
+        serverPort = try await server.start()
+    }
     defer { server.listener.cancel() }
 
     #expect(await LoopbackForwarder.canConnect(host: "::1", port: serverPort))

@@ -74,6 +74,15 @@ private final class ReceiverHandler: ChannelInboundHandler {
             body.append(contentsOf: buffer.readableBytesView)
         case .end:
             guard let head else { return }
+            // Only webhook deliveries count. Anything else listing local servers (a running
+            // OpenTraffic finds new ports and probes them with GET) is answered and ignored.
+            guard head.method == .POST, head.headers.first(name: "user-agent") == "OpenTraffic" else {
+                var headers = HTTPHeaders()
+                headers.add(name: "content-length", value: "0")
+                context.write(wrapOutboundOut(.head(HTTPResponseHead(version: head.version, status: .notFound, headers: headers))), promise: nil)
+                context.writeAndFlush(wrapOutboundOut(.end(nil)), promise: nil)
+                return
+            }
             let status = receiver.receive(.init(path: head.uri, headers: head.headers, body: body))
             var headers = HTTPHeaders()
             headers.add(name: "content-length", value: "0")

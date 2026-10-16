@@ -139,6 +139,7 @@ extension AppStore {
                 }
             }
             await proxy.setAgentWork(agentClaims.claims(share: id).map(\.work))
+            await proxy.setRoles(definition.collabMembers.mapValues(\.role), default: definition.collabDefaultRole)
         }
         _ = try await proxy.start()
         guard runtime(for: id).generation == generation, let proxyURL = proxy.localURL else {
@@ -149,6 +150,34 @@ extension AppStore {
         updateReservedPorts()
         if collaboration { Task { await beginBranchSession(for: id) } }
         return proxyURL
+    }
+
+    // MARK: Roles
+
+    /// Gives the person with this browser a role in the share's sessions (nil: back to the default).
+    func setCollabRole(_ role: CollabRole?, forClient client: String, name: String, in id: UUID) {
+        guard let index = definitions.firstIndex(where: { $0.id == id }) else { return }
+        if let role {
+            definitions[index].collabMembers[client] = CollabMember(role: role, name: name)
+        } else {
+            definitions[index].collabMembers[client] = nil
+        }
+        saveDefinitions()
+        applyRoles(for: id)
+    }
+
+    /// What people without a role of their own may do.
+    func setCollabDefaultRole(_ role: CollabRole, in id: UUID) {
+        guard let index = definitions.firstIndex(where: { $0.id == id }), definitions[index].collabDefaultRole != role else { return }
+        definitions[index].collabDefaultRole = role
+        saveDefinitions()
+        applyRoles(for: id)
+    }
+
+    private func applyRoles(for id: UUID) {
+        guard let definition = definitions.first(where: { $0.id == id }), let proxy = collabProxies[id] else { return }
+        let roles = definition.collabMembers.mapValues(\.role)
+        Task { await proxy.setRoles(roles, default: definition.collabDefaultRole) }
     }
 
     // MARK: People and comments
@@ -499,6 +528,9 @@ extension AppStore {
 
 extension APIPerson {
     init(_ peer: CollabPeer) {
-        self.init(name: peer.name, path: peer.path, isHost: peer.isHost, isAgent: peer.isAgent ? true : nil)
+        self.init(
+            name: peer.name, path: peer.path, isHost: peer.isHost, isAgent: peer.isAgent ? true : nil,
+            role: peer.isHost || peer.isAgent ? nil : peer.role.rawValue, device: peer.device
+        )
     }
 }

@@ -121,6 +121,16 @@ private struct CommentRow: View {
                     .strikethrough(comment.resolved, color: .secondary)
                     .foregroundStyle(comment.resolved ? .secondary : .primary)
                     .fixedSize(horizontal: false, vertical: true)
+                if !comment.edits.isEmpty {
+                    SuggestedEditsView(edits: comment.edits)
+                }
+                if let context = comment.context, context.component != nil || context.source != nil {
+                    Text([context.component, context.source].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .help(context.selector.map { "Where it comes from in the code\n\($0)" } ?? "Where it comes from in the code")
+                }
                 CommentStatus(store: store, tunnelID: tunnelID, comment: comment)
                 if let afterScreenshot {
                     HStack(alignment: .top, spacing: Spacing.s) {
@@ -431,5 +441,30 @@ private struct ErrorGroupRow: View {
     private var detail: String {
         let time = group.lastAt.formatted(date: .omitted, time: .shortened)
         return group.location.isEmpty ? time : "\(group.location) · \(time)"
+    }
+}
+
+/// Changes a commenter suggested by editing the page: old → new.
+struct SuggestedEditsView: View {
+    let edits: [CollabSuggestedEdit]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Label("Suggested edit", systemImage: "pencil.line")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            ForEach(Array(edits.enumerated()), id: \.offset) { _, edit in
+                (Text(edit.property.map { "\($0): " } ?? "").foregroundStyle(.secondary)
+                    + Text(edit.old).strikethrough().foregroundStyle(.secondary)
+                    + Text(edit.old.isEmpty ? "" : " → ")
+                    + Text(edit.new).fontWeight(.semibold))
+                    .font(edit.kind == .style ? .callout.monospaced() : .callout)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
     }
 }

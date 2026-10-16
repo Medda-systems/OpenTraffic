@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.13
+
+- **Suggest an edit:** in the comment box, **Edit text** and **Edit style** change the element right on the page while you work. Colours come from a palette, the colours the page already uses, any colour, or the eyedropper; size, padding, and corners have sliders; weight is a row of samples. Each change has its own undo, and the comment box stays put while the element changes size. The comment carries the exact change, old → new (colours as hex, with swatches); anyone can **Preview on the page**, and agents apply it as given.
+- **Agents start in the right file:** comments now record the element's selector and key styles, and on development builds of React, Vue, Svelte, and Angular, the component and its source file (`HeroActions · src/components/Hero.tsx`). You and your agent see it; other visitors don't.
+- **Comment on an area, and draw:** drag a box in comment mode to comment on a region, like the gap between two cards. The new pen draws strokes everyone on the page sees for a few seconds; nothing is saved.
+- **See it at their size:** the people list shows everyone's window size and system, and **View** shows the page they're on at exactly their size, as a phone, tablet, or browser window over your page. It follows them to other pages, shows their pointer, turns when their phone does, and fits your window or shows actual size. OpenTraffic's Live Collaboration card shows everyone's size too.
+- **Phone or Desktop:** the new View button in the pill shows the page as a phone (390 × 844, and it turns), or as your own window. Comment, point, draw, and suggest edits inside any device view, someone's or your own phone: you pick on the page in the device, the comment box and bubbles open beside it at full size, always in the same place (centred, so they never clip), and the comment records the device's size.
+- **Lead in a phone:** when the host leads with Phone open, everyone following sees the same phone, its page and scrolling, and turns with it. Back to Desktop, everyone has their own window again. **Followers match my window** gives them the host's exact window size instead.
+- **Who can do what:** give each person a role in the Live Collaboration card (trusted, can comment, or view only), and choose what new people can do. View-only people can look, point, and draw, but not comment. **Only trusted people's comments start your agent by itself now**; others wait for **Send to …**.
+- `opentraffic comments` shows suggested edits, the element's source, and an area's size; the API and MCP tools return `context`, `edits`, and `area` with comments, and `role` and `device` with people.
+- Fixed: comment bubbles and the comment box scroll when they're taller than the window, and their buttons (Post, Reply, Resolve) stay in view. Local builds record the SDK they're built with, so they look exactly like releases (before, a fix could look right locally and still be wrong in the release, like the menu icons in 1.0.10).
+
 ## 1.0.12
 
 - **Agent marks in Settings are white in dark mode too:** the Claude Code, Codex, Cursor, and opencode marks in Settings → Integrations → Agent for comments now follow the menu's text colour like the rest of the menu; 1.0.11 fixed the other menus but not this one.

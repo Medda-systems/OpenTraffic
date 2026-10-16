@@ -60,6 +60,27 @@ struct Comment: Decodable {
     let progress: String?
     let resolvedBy: String?
     let hasAfterScreenshot: Bool?
+    let context: Context?
+    let edits: [Edit]?
+    let area: Area?
+
+    struct Context: Decodable {
+        let selector: String?
+        let component: String?
+        let source: String?
+    }
+
+    struct Edit: Decodable {
+        let kind: String
+        let property: String?
+        let old: String
+        let new: String
+    }
+
+    struct Area: Decodable {
+        let width: Double
+        let height: Double
+    }
 
     struct Reply: Decodable {
         let author: String

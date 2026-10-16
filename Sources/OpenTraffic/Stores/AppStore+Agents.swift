@@ -133,6 +133,11 @@ extension AppStore {
                   ) else { return }
             // Comments that read like orders, and more than the budget allows, wait for the host's Send to ….
             let name = self.definitions.first { $0.id == id }?.name ?? "a share"
+            // Only people the host trusts start the agent by themselves.
+            if !comment.fromHost, self.definitions.first(where: { $0.id == id })?.collabRole(forClient: comment.authorClient) != .trusted {
+                self.notice = AppNotice(.info, "\(comment.author)'s comment on “\(name)” is waiting for you: only people you trust start \(self.agentClientName) by themselves. Trust them in Live Collaboration, or use Send to \(self.agentClientName).")
+                return
+            }
             let host = self.definitions.first { $0.id == id }.flatMap { self.publicURL(for: $0) }.flatMap { URL(string: $0)?.host }
             if AgentDispatchPolicy.looksSuspicious(comment, siteHost: host) {
                 self.notice = AppNotice(.info, "\(comment.author)'s comment on “\(name)” is waiting for you: it reads more like instructions than feedback, so \(self.agentClientName) didn't start by itself.")

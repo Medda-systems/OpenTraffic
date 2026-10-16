@@ -83,7 +83,9 @@ opencode run "$OPENTRAFFIC_PROMPT"
 
 Each may edit files in the project and use OpenTraffic's MCP tools, so the agent needs the MCP server set up as above. The Claude Code preset can also read the project but not run shell commands; the others follow their tool's own permissions (Codex's `workspace-write` sandbox, for example, may run commands inside the project). Edit the command to change that. The command gets `OPENTRAFFIC_PROMPT` (what to do), `OPENTRAFFIC_SHARE`, `OPENTRAFFIC_SHARE_ID`, `OPENTRAFFIC_COMMENT_ID`, and `OPENTRAFFIC_CLIENT` (the name it shows in the session). Never the comment's text: the agent reads that through OpenTraffic, marked as written by a visitor. The agent uses its own sign-in or API key; OpenTraffic doesn't run any model. A script of your own can use the same variables, with the [`opentraffic` command](/docs/cli) or the [REST API](/docs/rest-api).
 
-Running by itself lets anyone with a share's link start the agent on your Mac. OpenTraffic limits what that agent can do: one comment only, no shell or web, secrets hidden from replies, a budget, and comments that read like orders wait for you. See [Agents and visitors' words](/docs/security#agents-and-visitors-words). Still, turn it on only for people you trust.
+Running by itself only starts the agent for comments from people you've made **Trusted** in the Live Collaboration card (or everyone, if **New people can** is set to trusted); others' comments wait for **Send to …**. See [Who can do what](/docs/collaboration#who-can-do-what). OpenTraffic also limits what that agent can do: one comment only, no shell or web, secrets hidden from replies, a budget, and comments that read like orders wait for you. See [Agents and visitors' words](/docs/security#agents-and-visitors-words).
+
+A comment the agent reads carries `context` (the element's selector, key styles, and, on development builds that expose it, its component and source file), any `edits` the commenter suggested on the page (apply them as given), and `area` for a comment on a region.
 
 ## Try the connection
 

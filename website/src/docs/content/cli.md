@@ -70,7 +70,7 @@ opentraffic stop --all
 
 | Command | Does |
 | --- | --- |
-| `comments <share> [--resolved \| --all]` | Comments with their element, browser, picture, and replies. |
+| `comments <share> [--resolved \| --all]` | Comments with their element, browser, picture, and replies, plus suggested edits (`✎`), where the element comes from (`⌖` component, source file, selector), and an area's size. |
 | `reply <share> <comment> <text>` | Reply. |
 | `resolve <share> <comment> [--reopen]` | Resolve, or reopen. The commenter is told it's fixed. |
 | `claim <share> <comment> [progress]` | Say you're working on it, so other agents leave it alone and the session sees it; again to update the progress and keep the claim (it lapses after 15 minutes). |

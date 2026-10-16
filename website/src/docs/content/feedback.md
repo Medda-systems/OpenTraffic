@@ -2,6 +2,10 @@
 
 In a collaborative page, choose **Comment**, select an element, and describe the problem. A comment includes the element’s label, page title and path, a picture of the selected element with text fields blanked, and the visitor’s browser and viewport information. Optional browser error collection adds errors associated with the session.
 
+**Suggest an edit.** In the comment box, **Edit text** rewrites the element's text and **Edit style** changes its colours, size, weight, padding, or corner radius: click a swatch for a palette (with the colours the page already uses, any colour, and an eyedropper in Chrome and Edge), drag the sliders, or pick a weight. Each row has its own undo. You see the result on the page while you work; posting sends the exact change (old → new) with the comment and puts the page back. Anyone opening the comment can **Preview on the page**, in their own browser only. An agent applies the change as given.
+
+**Where it comes from.** You (not other visitors) see the component and source file of the commented element, like `HeroActions · src/components/Hero.tsx`, on development builds that expose it. Agents get the same, with the selector and key styles, so they open the right file instead of searching.
+
 A screenshot can still contain visible page content. Review sensitive pages accordingly; blanking text fields is not a guarantee that every sensitive detail is removed.
 
 ## Reply and resolve

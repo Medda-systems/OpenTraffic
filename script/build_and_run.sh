@@ -61,6 +61,19 @@ chmod +x "$APP_MACOS/opentraffic-mcp"
 # The opentraffic command-line tool, a client of the local API (Sources/opentraffic-cli).
 cp "$BUILD_BIN/opentraffic-cli" "$APP_MACOS/opentraffic-cli"
 chmod +x "$APP_MACOS/opentraffic-cli"
+# Record the SDK the binaries were built with. SwiftPM's newer build engine (Swift 6.4) writes the
+# deployment target (14.0) as the SDK version, and AppKit and SwiftUI then behave as if the app were
+# built years ago: a local build could look right while a release, built with the real SDK, doesn't.
+SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+for binary in "$APP_BINARY" "$APP_MACOS/opentraffic-mcp" "$APP_MACOS/opentraffic-cli"; do
+  recorded="$(otool -l "$binary" | awk '/LC_BUILD_VERSION/ { getline; getline; getline; getline; print $2; exit }')"
+  if [[ -n "$recorded" && "$recorded" != "$SDK_VERSION" ]]; then
+    minimum="$(otool -l "$binary" | awk '/LC_BUILD_VERSION/ { getline; getline; getline; print $2; exit }')"
+    xcrun vtool -set-build-version macos "$minimum" "$SDK_VERSION" -replace -output "$binary.sdk" "$binary" 2>/dev/null
+    mv "$binary.sdk" "$binary"
+    chmod +x "$binary"
+  fi
+done
 # Sparkle, for updates. The app finds it in Contents/Frameworks, never in the build folder.
 mkdir -p "$APP_CONTENTS/Frameworks"
 ditto "$BUILD_BIN/Sparkle.framework" "$APP_CONTENTS/Frameworks/Sparkle.framework"

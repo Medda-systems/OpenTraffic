@@ -170,6 +170,10 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
     public var workOnBranch: Bool
     /// The branch session in progress, kept so a restart (or a crash) carries on with the same branch.
     public var branchSession: GitBranchSession?
+    /// Collaboration: people the host gave a role, by their browser's overlay id.
+    public var collabMembers: [String: CollabMember]
+    /// Collaboration: what everyone else may do.
+    public var collabDefaultRole: CollabRole
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -195,6 +199,8 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         case agentDirectory
         case workOnBranch
         case branchSession
+        case collabMembers
+        case collabDefaultRole
     }
 
     public init(
@@ -220,7 +226,9 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         openTunnelRoute: String? = nil,
         agentDirectory: String? = nil,
         workOnBranch: Bool = false,
-        branchSession: GitBranchSession? = nil
+        branchSession: GitBranchSession? = nil,
+        collabMembers: [String: CollabMember] = [:],
+        collabDefaultRole: CollabRole = .commenter
     ) {
         self.id = id
         self.name = name
@@ -245,6 +253,8 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         self.agentDirectory = agentDirectory?.nilIfBlank
         self.workOnBranch = workOnBranch
         self.branchSession = branchSession
+        self.collabMembers = collabMembers
+        self.collabDefaultRole = collabDefaultRole
     }
 
     public init(from decoder: Decoder) throws {
@@ -272,6 +282,13 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         agentDirectory = try container.decodeIfPresent(String.self, forKey: .agentDirectory)?.nilIfBlank
         workOnBranch = try container.decodeIfPresent(Bool.self, forKey: .workOnBranch) ?? false
         branchSession = try? container.decodeIfPresent(GitBranchSession.self, forKey: .branchSession)
+        collabMembers = (try? container.decodeIfPresent([String: CollabMember].self, forKey: .collabMembers)) ?? [:]
+        collabDefaultRole = (try? container.decodeIfPresent(CollabRole.self, forKey: .collabDefaultRole)) ?? .commenter
+    }
+
+    /// What the person with this browser may do.
+    public func collabRole(forClient client: String?) -> CollabRole {
+        client.flatMap { collabMembers[$0]?.role } ?? collabDefaultRole
     }
 
     /// Whether OpenTraffic can make this share send the local host as the Host header. cloudflared
@@ -285,6 +302,18 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
     public var originHostHeader: String? {
         guard let url = URL(string: localURL), let host = url.host else { return nil }
         return url.port.map { "\(host):\($0)" } ?? host
+    }
+}
+
+/// Someone the host gave a role in a share's live collaboration.
+public struct CollabMember: Codable, Hashable, Sendable {
+    public var role: CollabRole
+    /// The name they had then, to show while they're away.
+    public var name: String
+
+    public init(role: CollabRole, name: String) {
+        self.role = role
+        self.name = name
     }
 }
 
