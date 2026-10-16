@@ -1,11 +1,15 @@
-// opentraffic.dev: the built site (npm run build) served as a static Cloudflare Worker.
+// opentraffic.dev: the built site (npm run build) served by a Cloudflare Worker.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "opentraffic-site",
   "compatibility_date": "2026-10-01",
+  // Media goes through worker/index.ts first, for range requests (scrubbing); everything else is static.
+  "main": "worker/index.ts",
   "assets": {
     "directory": "./dist",
-    "not_found_handling": "404-page"
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/media/*"]
   },
   "routes": [
     { "pattern": "opentraffic.dev", "custom_domain": true },

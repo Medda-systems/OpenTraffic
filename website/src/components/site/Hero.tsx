@@ -114,6 +114,68 @@ export function Hero({ version }: { version: string | null }) {
   )
 }
 
+/** A hairline along the bottom of the video: how far it's got, and where to jump to (click, drag, or arrow keys). */
+function Scrubber({ video }: { video: React.RefObject<HTMLVideoElement | null> }) {
+  const bar = useRef<HTMLDivElement>(null)
+  const [progress, setProgress] = useState(0)
+  const [duration, setDuration] = useState(0)
+  useEffect(() => {
+    let frame = 0
+    const tick = () => {
+      const v = video.current
+      if (v && v.duration) {
+        setProgress(v.currentTime / v.duration)
+        setDuration(v.duration)
+      }
+      frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [video])
+  const seek = (clientX: number) => {
+    const v = video.current
+    const r = bar.current?.getBoundingClientRect()
+    if (!v || !r || !v.duration) return
+    v.currentTime = Math.min(1, Math.max(0, (clientX - r.left) / r.width)) * v.duration
+  }
+  const step = (seconds: number) => {
+    const v = video.current
+    if (v && v.duration) v.currentTime = Math.min(v.duration, Math.max(0, v.currentTime + seconds))
+  }
+  const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`
+  return (
+    <div
+      ref={bar}
+      role="slider"
+      tabIndex={0}
+      aria-label="Video position"
+      aria-valuemin={0}
+      aria-valuemax={Math.round(duration)}
+      aria-valuenow={Math.round(progress * duration)}
+      aria-valuetext={`${clock(progress * duration)} of ${clock(duration)}`}
+      className="group absolute inset-x-0 bottom-0 flex h-4 cursor-pointer touch-none items-end outline-none"
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture(e.pointerId)
+        seek(e.clientX)
+      }}
+      onPointerMove={(e) => {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) seek(e.clientX)
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowRight") step(5)
+        else if (e.key === "ArrowLeft") step(-5)
+        else return
+        e.preventDefault()
+      }}
+    >
+      {/* Inverts what's behind it, so it shows on the video's dark and light scenes alike. */}
+      <div className="relative h-[2px] w-full bg-white/20 mix-blend-difference transition-[height] duration-200 group-hover:h-1 group-focus-visible:h-1">
+        <div className="absolute inset-y-0 left-0 bg-white/80 group-hover:bg-white" style={{ width: `${progress * 100}%` }} />
+      </div>
+    </div>
+  )
+}
+
 /** The promo: plays muted (as browsers require), with a button to start it over with sound. */
 function PromoVideo() {
   const video = useRef<HTMLVideoElement>(null)
@@ -137,8 +199,9 @@ function PromoVideo() {
         muted
         loop
         playsInline
-        aria-label="OpenTraffic in 46 seconds: it finds your dev servers, shares one in a click, checks every hop, and lets your team point, pick elements, and comment while your coding agent replies"
+        aria-label="OpenTraffic in 76 seconds: it finds your dev servers, shares one in a click, checks every hop, and lets your team point, comment, draw, and suggest changes that your coding agent makes, each its own commit; see it on someone's phone, lead the demo, and password protect it"
       />
+      <Scrubber video={video} />
       <button
         type="button"
         onClick={toggle}
