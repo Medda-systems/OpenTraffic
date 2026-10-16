@@ -795,6 +795,7 @@ const End = () => {
   const text = spring({ frame: frame - 8, fps, config: { damping: 18 } })
   const more = spring({ frame: frame - 22, fps, config: { damping: 18 } })
   const source = spring({ frame: frame - 34, fps, config: { damping: 16 } })
+  const maker = spring({ frame: frame - 46, fps, config: { damping: 18 } })
   const fade = interpolate(frame, [100, 120], [0, 1], clamp)
   return (
     <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", textAlign: "center", fontFamily: sans, color: fg }}>
@@ -817,6 +818,9 @@ const End = () => {
             Open source on GitHub
           </div>
         ) : null}
+      </div>
+      <div style={{ position: "absolute", bottom: 70, left: 0, right: 0, opacity: maker, transform: `translateY(${(1 - maker) * 12}px)`, fontSize: 28, letterSpacing: "0.02em", color: dim }}>
+        Made by <span style={{ color: fg, fontWeight: 600 }}>Medda</span>
       </div>
       <AbsoluteFill style={{ background: bg, opacity: fade }} />
     </AbsoluteFill>

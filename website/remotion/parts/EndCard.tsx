@@ -9,6 +9,7 @@ export const EndCard = () => {
   const icon = spring({ frame, fps, config: { damping: 14 } })
   const text = spring({ frame: frame - 8, fps, config: { damping: 18 } })
   const source = spring({ frame: frame - 24, fps, config: { damping: 16 } })
+  const maker = spring({ frame: frame - 36, fps, config: { damping: 18 } })
   return (
     <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontFamily: sans, color: ink, textAlign: "center" }}>
       <div>
@@ -27,6 +28,9 @@ export const EndCard = () => {
             Open source on GitHub
           </div>
         ) : null}
+      </div>
+      <div style={{ position: "absolute", bottom: 56, left: 0, right: 0, opacity: maker, fontSize: 22, letterSpacing: "0.02em", color: muted }}>
+        Made by <span style={{ color: ink, fontWeight: 600 }}>Medda</span>
       </div>
     </div>
   )
