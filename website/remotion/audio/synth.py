@@ -1,9 +1,9 @@
 """Synthesis for the promo's music and sound effects: helpers, instruments, and the arrangement the
 video is cut to. Everything is made from scratch, so there's nothing to license.
 
-The arrangement is 23 bars at 120 BPM, a bar every two seconds: an intro with a riser (bars 1-2), the
-drop (3-12), a breakdown and build (13-14), a second drop (15-21), and a final hit that rings out under
-the end card (22-23).
+The arrangement is 34 bars at 120 BPM, a bar every two seconds: an intro with a riser (bars 1-2), the
+drop (3-15), a breakdown and build (16-17), a second drop (18-25), another breakdown and build (26-27),
+the second drop again (28-32), and a final hit that rings out under the end card (33-34).
 """
 
 import os
