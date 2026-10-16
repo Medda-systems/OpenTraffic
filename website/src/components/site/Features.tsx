@@ -74,7 +74,7 @@ function Loop({ name, label, still = false }: { name: string; label: string; sti
   )
 }
 
-const story = [
+const story: { loop: string; title: string; text: string; label: string; still?: boolean }[] = [
   {
     loop: "share",
     title: "One click from localhost to a link",
@@ -84,21 +84,26 @@ const story = [
   {
     loop: "collaborate",
     title: "Collaborate on the real thing",
-    text: "Everyone who opens the link sees each other's cursors and can follow you as you browse. They point at things and pin comments to the exact element, with a picture of it.",
+    text: "Everyone who opens the link sees each other's cursors and can follow you as you browse. They point, draw, and pin comments to an element or an area, with a picture of it.",
     label: "Visitors' cursors on a shared page, one of them pinning a comment to a button",
+  },
+  {
+    loop: "suggest",
+    title: "Suggest the exact change",
+    text: "Change the text, colours, size, or spacing right on the page, with a palette and sliders. The comment carries the exact change, old to new, so nobody has to guess.",
+    label: "A visitor editing a button's text and dragging its size while the page updates live",
+  },
+  {
+    loop: "phone",
+    title: "See it on their phone",
+    text: "Everyone's device shows up. View the page at anyone's exact size and comment right inside it, or lead with your phone open and everyone following sees it too.",
+    label: "The page shown on a visitor's phone, which turns, then everyone following the host's phone",
   },
   {
     loop: "agent",
     title: "Your coding agent fixes it",
-    text: "Claude Code, Codex, Cursor, and other agents read the comments, fix what people pointed at, and reply in the thread while you watch.",
-    label: "A comment on the shared page getting a reply from Claude Code",
-  },
-  {
-    loop: "health",
-    still: true,
-    title: "Every hop checked",
-    text: "OpenTraffic checks your server, this Mac, the tunnel, and the public URL, and offers the fix when something's off, like the Host header Vite and Next.js insist on.",
-    label: "The connection path from localhost to the public URL, each stage checked",
+    text: "Claude Code, Codex, Cursor, opencode, and other agents get the comment with the exact change, fix it, and reply. Each fix is its own commit on a branch, and only people you trust can start a run.",
+    label: "A comment being fixed by a coding agent, and the visitor told it's done",
   },
 ]
 
@@ -154,8 +159,8 @@ export function More() {
             <Item icon={<SquareTerminal className={icon} />} title="A complete command line">
               <span className="font-mono text-[0.92em] text-foreground">opentraffic share 5173 --collab</span>, then read and answer comments, follow logs, or protect it. Everything the app does, with JSON for scripts.
             </Item>
-            <Item icon={<ShieldCheck className={icon} />} title="Protection when you need it">
-              A password or Google and GitHub sign-in on ngrok, and email sign-in on your own domain.
+            <Item icon={<ShieldCheck className={icon} />} title="Protection and roles">
+              A password or Google and GitHub sign-in on ngrok, email sign-in on your own domain, and per person: trusted, can comment, or view only.
             </Item>
             <Item icon={<Network className={icon} />} title="Apps made of several servers">
               Your frontend calls an API on another port? Those calls go through the same share, so the whole app works for visitors.

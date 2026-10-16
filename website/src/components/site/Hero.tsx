@@ -72,8 +72,8 @@ export function Hero({ version }: { version: string | null }) {
             Share localhost. <br className="hidden sm:block" />Collaborate live.
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg text-pretty text-muted-foreground md:text-xl">
-            Put your dev server on a public URL in one click. Your team points and comments, and your coding agent
-            fixes what they find.
+            Put your dev server on a public URL in one click. Your team points, comments, and suggests the fix, and
+            your coding agent makes it.
           </p>
           <div className="mx-auto mt-6 flex max-w-xl flex-col items-stretch gap-3 sm:flex-row sm:items-center">
             <CopyCommand command={links.installCommand} className="flex-1" />

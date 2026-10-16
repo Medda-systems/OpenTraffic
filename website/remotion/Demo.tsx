@@ -1,6 +1,6 @@
 import { AbsoluteFill, interpolate, Sequence, useCurrentFrame } from "remotion"
 import { BrowserScene, browserTimeline } from "./parts/BrowserScene"
-import { CliScene } from "./parts/CliScene"
+import { CliScene, GitScene } from "./parts/CliScene"
 import { EndCard } from "./parts/EndCard"
 import { detection, SHARE_SCENE_FRAMES, ShareScene } from "./parts/ShareScene"
 import { fit, window, WindowScene } from "./parts/WindowScene"
@@ -12,8 +12,6 @@ import { ink, sans } from "./theme"
 type Line = { at: number; step: string; text: string }
 
 const whole = { x: window.width / 2, y: window.height / 2 }
-// The Protection sheet as captured (540 × 520 pt at 2x).
-const protection = { width: 1080, height: 1040 }
 
 type Scene = { length: number; lines: Line[]; render: () => React.ReactNode }
 
@@ -25,27 +23,20 @@ const scenes = (session: Session): Scene[] => {
     length: SHARE_SCENE_FRAMES,
     lines: [
       { at: 0, step: "1", text: "OpenTraffic finds every dev server running on your Mac" },
-      { at: detection.uptime - 4, step: "1", text: "With its name, port, and how long it's been up" },
       { at: detection.uptime + 40, step: "1", text: "Pick one and share it" },
     ],
     render: () => <ShareScene />,
   },
   {
-    length: 180,
-    lines: [
-      { at: 0, step: "2", text: "Every hop is checked, from localhost to the public link" },
-      { at: 112, step: "2", text: "See who's on the page right now" },
-    ],
+    length: 130,
+    lines: [{ at: 0, step: "2", text: "See who's here, on what, and decide who can comment" }],
     render: () => (
       <WindowScene
         src="capture/main-overview.png"
         shots={[
-          { at: 0, ...whole, zoom: fit * 0.96 },
-          { at: 16, ...whole, zoom: fit },
-          { at: 34, ...whole, zoom: fit },
-          { at: 66, x: 1450, y: 560, zoom: 1.1 },
-          { at: 104, x: 1450, y: 560, zoom: 1.1 },
-          { at: 136, x: 1180, y: 1080, zoom: 1.25 },
+          { at: 0, ...whole, zoom: fit },
+          { at: 18, ...whole, zoom: fit },
+          { at: 60, x: 1220, y: 1180, zoom: 1.05 },
         ]}
       />
     ),
@@ -55,45 +46,39 @@ const scenes = (session: Session): Scene[] => {
     lines: [
       { at: 0, step: "3", text: "Everyone with the link sees each other's cursors" },
       { at: at("ping", -20), step: "3", text: "Hold ⌥ and click to point at something" },
-      { at: at("arm", -10), step: "3", text: "Pick any element to comment on it" },
-      { at: at("compose", 4), step: "3", text: "Say what's wrong: a picture of the element goes with it" },
-      { at: at("pinned", 10), step: "3", text: "Open a comment to see what they saw, and in which browser" },
-      { at: at("reply", 6), step: "4", text: "Your coding agent replies, over MCP" },
+      { at: at("arm", -6, "lea"), step: "3", text: "Pick any element to comment on it" },
+      { at: at("edit", -4, "lea"), step: "3", text: "Suggest the fix: new text, colours, and sizes, live on the page" },
+      { at: at("pinned", 4, "ava"), step: "4", text: "Your coding agent picks it up, with the exact change" },
+      { at: at("draw", 18, "ava"), step: "5", text: "Draw to show what you mean" },
+      { at: at("area", 18, "lea"), step: "5", text: "Or comment on an area" },
+      { at: at("updated", 18, "lea"), step: "4", text: "Fixed: whoever commented is told, and can take a look" },
+      { at: at("people", -2, "ava"), step: "6", text: "See the page at someone's size, on their phone" },
+      { at: at("lead", -4, "ava"), step: "6", text: "Lead with your phone open, and everyone following sees it" },
     ],
     render: () => <BrowserScene session={session} />,
   },
   {
-    length: 140,
-    lines: [{ at: 0, step: "4", text: "Every comment lands in OpenTraffic, ready to resolve" }],
+    length: 130,
+    lines: [{ at: 0, step: "7", text: "Every comment lands in OpenTraffic, with the agent's reply" }],
     render: () => (
       <WindowScene
         src="capture/main-feedback.png"
         shots={[
           { at: 0, ...whole, zoom: fit },
-          { at: 22, ...whole, zoom: fit },
-          { at: 62, x: 1420, y: 650, zoom: 1.05 },
+          { at: 20, ...whole, zoom: fit },
+          { at: 60, x: 1250, y: 760, zoom: 1.05 },
         ]}
       />
     ),
   },
   {
-    length: 120,
-    lines: [{ at: 0, step: "5", text: "Lock an ngrok share with a password, or Google or GitHub sign-in" }],
-    render: () => (
-      <WindowScene
-        src="capture/protection.png"
-        size={protection}
-        shots={[
-          { at: 0, x: protection.width / 2, y: protection.height / 2, zoom: 0.8 },
-          { at: 20, x: protection.width / 2, y: protection.height / 2, zoom: 0.8 },
-          { at: 70, x: 540, y: 440, zoom: 1.05 },
-        ]}
-      />
-    ),
+    length: 110,
+    lines: [{ at: 0, step: "7", text: "Each fix is its own commit, on a branch merged when you stop" }],
+    render: () => <GitScene />,
   },
   {
     length: 150,
-    lines: [{ at: 0, step: "6", text: "Prefer the terminal? Share, copy, and stop from the command line" }],
+    lines: [{ at: 0, step: "8", text: "Prefer the terminal? Share, copy, and stop from the command line" }],
     render: () => <CliScene />,
   },
   { length: 100, lines: [], render: () => <EndCard /> },

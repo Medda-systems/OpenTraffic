@@ -5,7 +5,8 @@ import { Camera, type Shot } from "./Camera"
 import { SessionView } from "./SessionView"
 
 // A real session on the shared page, recorded in two browsers at once (capture/record-session.mjs):
-// Ava's screen, then Lea's while she picks an element and comments on it, then Ava's again.
+// Ava's screen (she's the host) and Lea's, played as a run of slices of the recording, each from one
+// seat, some a little faster than real time.
 const toolbar = 76
 const pageWidth = 1920
 export const browser = { width: pageWidth, height: 1084 + toolbar }
@@ -15,15 +16,55 @@ const seats: Record<Seat, { name: string; color: string }> = {
   lea: { name: "Lea", color: "#2F80ED" },
 }
 
-/** Where the scene starts in the recording, and when it switches seats (in scene frames). */
+/** A slice of the recording: from one seat, between two recorded frames, at a speed. */
+type Slice = { seat: Seat; from: number; to: number; speed?: number }
+
+const slices = (m: Record<string, number>): Slice[] => [
+  // Everyone's cursors; Sam points at the headline.
+  { seat: "ava", from: m.wander - 8, to: m.ping + 34 },
+  // Lea picks the trial button, writes, and suggests the change: new words, a bigger button.
+  { seat: "lea", from: m.arm - 10, to: m.pick + 70 },
+  { seat: "lea", from: m.compose - 40, to: m.style + 20 },
+  { seat: "lea", from: m.style + 20, to: m.post + 12, speed: 1.6 },
+  // Ava opens it; the coding agent is already at work.
+  { seat: "ava", from: m.pinned - 6, to: m.opened + 80 },
+  // Sam draws around the headline (as Ava sees it); Lea comments on the space between two cards.
+  { seat: "ava", from: m.draw + 16, to: m.draw + 92 },
+  { seat: "lea", from: m.area + 16, to: m.areaPosted + 12, speed: 1.3 },
+  // The fixes land: Lea's page has them, she's told, and takes a look.
+  { seat: "lea", from: m.updated + 16, to: m.look + 80 },
+  // Ava looks at the page on Mia's phone, and Mia turns it.
+  { seat: "ava", from: m.people - 4, to: m.phoneClosed - 20, speed: 1.3 },
+  // Ava leads with her phone open; Lea, following, sees it and scrolls with her.
+  { seat: "ava", from: m.lead - 6, to: m.leadPhone + 50 },
+  { seat: "lea", from: m.leadPhone + 30, to: m.end, speed: 1.2 },
+]
+
+/** The slices laid out in scene frames, and a way to find a recorded moment in them. */
 export function browserTimeline(session: Session) {
-  const start = Math.max(0, session.marks.wander - 8)
-  const at = (mark: string, offset = 0) => session.marks[mark] - start + offset
+  let start = 0
+  const laid = slices(session.marks).map((s) => {
+    const length = Math.round((s.to - s.from) / (s.speed ?? 1))
+    const slice = { ...s, start, length }
+    start += length
+    return slice
+  })
+  const sliceAt = (frame: number) => laid.find((s) => frame < s.start + s.length) ?? laid[laid.length - 1]
+  /** The scene frame where the recording reaches `mark` (+ offset, in recorded frames), in the first slice that has it. */
+  const at = (mark: string, offset = 0, seat?: Seat) => {
+    const rec = session.marks[mark] + offset
+    const s = laid.find((l) => (!seat || l.seat === seat) && rec >= l.from && rec <= l.to) ?? laid.find((l) => l.from >= rec) ?? laid[laid.length - 1]
+    return s.start + Math.round((Math.max(rec, s.from) - s.from) / (s.speed ?? 1))
+  }
   return {
-    start,
-    length: session.frames - start,
+    slices: laid,
+    length: start,
     at,
-    seatAt: (frame: number): Seat => (frame >= at("arm", -10) && frame < at("pinned", 10) ? "lea" : "ava"),
+    /** The seat and recorded frame shown at a scene frame. */
+    recAt: (frame: number) => {
+      const s = sliceAt(frame)
+      return { seat: s.seat, rec: s.from + (frame - s.start) * (s.speed ?? 1), slice: s }
+    },
   }
 }
 
@@ -46,34 +87,49 @@ const Chrome = ({ seat }: { seat: Seat }) => (
 
 export const BrowserScene = ({ session }: { session: Session }) => {
   const frame = useCurrentFrame()
-  const { start, at, seatAt } = browserTimeline(session)
-  const seat = seatAt(frame)
-  // A short dip to white when the seat changes, so the cut reads as "another screen".
-  const cuts = [at("arm", -10), at("pinned", 10)]
+  const timeline = browserTimeline(session)
+  const { at, recAt, slices: laid } = timeline
+  const { seat, rec } = recAt(frame)
+  // A short dip to white at each cut, so it reads as "another moment" (or "another screen").
+  const cuts = laid.slice(1).map((s) => s.start)
   const dip = Math.min(...cuts.map((c) => interpolate(Math.abs(frame - c), [0, 5], [0.55, 0], { extrapolateRight: "clamp" })))
   const fit = 1600 / browser.width
   const whole = { x: browser.width / 2, y: browser.height / 2, zoom: fit }
+  // Page pixels (1440 wide) to scene pixels.
+  const k = pageWidth / session.viewport.width
+  const on = (x: number, y: number, zoom: number) => ({ x: x * k, y: y * k + toolbar, zoom })
   const shots: Shot[] = [
     { at: 0, ...whole },
     // Sam points at the headline.
     { at: at("ping", -24), ...whole },
-    { at: at("ping", -6), x: 760, y: 470, zoom: 1.05 },
-    { at: at("ping", 26), x: 760, y: 470, zoom: 1.05 },
-    { at: at("arm", -2), ...whole },
-    // Lea picks, then writes.
-    { at: at("compose", -16), ...whole },
-    { at: at("compose", 6), x: 740, y: 700, zoom: 1.3 },
-    { at: at("post", 2), x: 740, y: 700, zoom: 1.3 },
-    { at: at("pinned", 18), ...whole },
-    // The comment opens, then the agent's reply arrives.
-    { at: at("open", 18), ...whole },
-    { at: at("opened", 10), x: 720, y: 480, zoom: 1.35 },
+    { at: at("ping", -6), ...on(560, 230, 1.05) },
+    { at: at("ping", 30), ...on(560, 230, 1.05) },
+    { at: at("arm", -4, "lea"), ...whole },
+    // Lea writes, then suggests the change.
+    { at: at("compose", -16, "lea"), ...whole },
+    { at: at("compose", 6, "lea"), ...on(560, 300, 1.3) },
+    { at: at("post", 4, "lea"), ...on(560, 300, 1.3) },
+    // Ava opens it.
+    { at: at("pinned", 4, "ava"), ...whole },
+    { at: at("opened", 2, "ava"), ...on(560, 300, 1.3) },
+    { at: at("opened", 70, "ava"), ...on(560, 300, 1.3) },
+    // Sam's circle, Lea's area.
+    { at: at("draw", 18, "ava"), ...on(560, 220, 1.15) },
+    { at: at("draw", 90, "ava"), ...on(560, 220, 1.15) },
+    { at: at("area", 18, "lea"), ...on(520, 420, 1.2) },
+    { at: at("areaPosted", 10, "lea"), ...on(520, 420, 1.2) },
+    // The fix, the notice, the look.
+    { at: at("updated", 18, "lea"), ...whole },
+    // Mia's phone, then the lead.
+    { at: at("people", -2, "ava"), ...whole },
   ]
+  // In time order, one per frame (interpolation needs strictly increasing frames).
+  const ordered = [...shots].sort((a, b) => a.at - b.at).filter((s, i, all) => i === 0 || s.at > all[i - 1].at)
   return (
-    <Camera shots={shots}>
+    <Camera shots={ordered}>
       <div style={{ width: browser.width, height: browser.height, borderRadius: 18, overflow: "hidden", background: "#fff", boxShadow: "0 1px 2px rgba(15,23,42,.06), 0 30px 70px rgba(15,23,42,.18)", position: "relative" }}>
         <Chrome seat={seat} />
-        <SessionView session={session} seat={seat} frame={start + frame} width={pageWidth} />
+        <SessionView session={session} seat={seat} frame={rec} width={pageWidth} />
         <div style={{ position: "absolute", inset: 0, background: "#fff", opacity: dip }} />
       </div>
     </Camera>

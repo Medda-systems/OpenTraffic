@@ -15,6 +15,8 @@ import SwiftUI
 ///   Protection sheet (`"quick"`: a temporary share, whose password OpenTraffic checks); `"off"` removes both. `"alert": "git"` shows the offer to set up git for the
 ///   selected share. Settings → Integrations has a window of its own, `integrations`. `"agent":
 ///   "codex"` (an `AgentPreset`) picks the agent command; `"showResolved": "off"` hides resolved feedback.
+///   `"hostLink": "1"` writes the selected share's host link to `host-url.txt`; `"sendToAgent": "<comment id>"`
+///   does what the comment's Send to button does.
 @MainActor
 enum DemoCapture {
     static let folder: URL? = {
@@ -195,6 +197,14 @@ enum DemoCapture {
         }
         if let preset = command["agent"].flatMap(AgentPreset.init(rawValue:)) {
             store.agentCommand = preset.command
+        }
+        if command["hostLink"] != nil, let id = store.selectedID, let url = store.collabProxies[id]?.hostJoinURL {
+            // The host's link to the selected share, for a capture's host browser (the app opens it in yours).
+            try? url.absoluteString.write(to: folder.appending(path: "host-url.txt"), atomically: true, encoding: .utf8)
+        }
+        if let comment = command["sendToAgent"], let id = store.selectedID {
+            // What "Send to …" does, at a moment a recording chooses.
+            store.sendToAgent(comment, for: id)
         }
         if let show = command["showResolved"] {
             UserDefaults.standard.set(show != "off", forKey: "feedbackShowResolved")

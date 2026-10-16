@@ -1,5 +1,6 @@
 import { Img, Sequence, staticFile, useCurrentFrame } from "remotion"
-import { cliSession, Terminal, typedAt } from "./Terminal"
+import { GIT } from "../git"
+import { cliSession, Terminal, type TerminalLine, typedAt } from "./Terminal"
 
 const START = 12
 
@@ -21,3 +22,17 @@ export const CliScene = () => {
     </div>
   )
 }
+
+const gitLines: TerminalLine[] = [
+  { at: 0, command: "git branch --show-current", output: GIT.branch },
+  { at: 30, command: "git log --oneline -2", output: GIT.commits },
+]
+
+/** The project's real history after the session: the share's branch, a commit per fixed comment. */
+export const GitScene = () => (
+  <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
+    <Sequence from={10} layout="none">
+      <Terminal width={1200} dark={false} fontSize={28} lines={gitLines} title="Terminal — orbit" />
+    </Sequence>
+  </div>
+)

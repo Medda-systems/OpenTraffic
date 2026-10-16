@@ -43,31 +43,41 @@ Every web server on your Mac shows up in the menu bar. Share it on a temporary C
 
 ### Live collaboration on the real thing
 
-Everyone who opens the link sees each other's cursors and can follow you as you browse. They point at things and pin comments to elements, with a picture of it, their browser, and the errors they ran into.
+Everyone who opens the link sees each other's cursors and can follow you as you browse. They point, draw, and pin comments to an element or an area, with a picture of it, their browser, and the errors they ran into.
 
 <p align="center"><img src="docs/images/collaborate.png" width="720" alt="Lea picking an element to comment on, with Ava's and Sam's cursors on the page"></p>
 
 <br>
 
-### Feedback your coding agent can act on
+### Suggest the exact change
 
-Claude Code, Codex, Cursor, opencode, or any MCP client can share your server, read the comments, fix what people pointed at, reply, and resolve them.
+Change the text, colours, size, or spacing right on the page, with a palette and sliders. The comment carries the exact change, old to new, so nobody has to guess.
 
-<p align="center"><img src="docs/images/agent.png" width="720" alt="A comment thread on the shared page with a reply from Claude Code"></p>
+<p align="center"><img src="docs/images/suggest.png" width="720" alt="Lea suggesting a bigger button with the style editor, the page changing as she drags"></p>
 
 <br>
 
-### Every hop checked
+### See it on their phone
 
-OpenTraffic checks your server, this Mac, the tunnel, and the public URL, and offers the fix when something's off, like the Host header Vite and Next.js insist on.
+Everyone's device shows up. View the page at anyone's exact size and comment inside it, or lead with your phone open and everyone following sees it too.
 
-<p align="center"><img src="docs/images/health.png" width="720" alt="The connection path from localhost to the public URL, each stage checked"></p>
+<p align="center"><img src="docs/images/phone.png" width="720" alt="Lea following Ava into her phone view"></p>
+
+<br>
+
+### Feedback your coding agent can act on
+
+Claude Code, Codex, Cursor, opencode, or any MCP client can share your server, read the comments with the exact change and the element's source file, fix them, reply, and resolve them. Each fix is its own commit on a branch, and only people you trust can start a run.
+
+<p align="center"><img src="docs/images/agent.png" width="720" alt="Lea's comment with its suggested edit, and opencode working on it"></p>
 
 <br>
 
 ### And also
 
 - **Protection:** a password on any temporary, OpenTunnel, or ngrok share (with a link that has it built in), Google/GitHub sign-in on ngrok, email sign-in on your own domain.
+- **Who can do what:** per person, trusted, can comment, or view only.
+- **Every hop checked:** your server, this Mac, the tunnel, and the public URL, with the fix when something's off.
 - **Apps made of several servers:** calls to an API on another port go through the same share.
 - **Stays out of your way:** auto-stop timers, projects that start together, notifications, and global shortcuts.
 - **Signed and notarized:** releases come from Medda Systems and update themselves.

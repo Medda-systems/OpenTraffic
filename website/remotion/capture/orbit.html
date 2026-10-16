@@ -24,6 +24,23 @@
   .card h3 { margin:14px 0 6px; font-size:18px; }
   .card p { margin:0; color:var(--muted); font-size:15px; }
   .dot { width:38px; height:38px; border-radius:11px; display:grid; place-items:center; font-size:18px; }
+  .quotes { padding:8px 72px 72px; }
+  .quotes h2 { font-size:32px; letter-spacing:-0.02em; margin:0 0 20px; }
+  .quote { border-top:1px solid var(--line); padding:20px 0; }
+  .quote p { margin:0 0 6px; font-size:18px; }
+  .quote span { color:var(--muted); font-size:14px; }
+  footer { padding:28px 72px 48px; color:var(--muted); font-size:14px; border-top:1px solid var(--line); }
+  /* Phones */
+  @media (max-width: 640px) {
+    nav { padding:16px 20px; gap:14px; }
+    nav span:not(.cta) { display:none; }
+    header { padding:36px 20px 20px; }
+    h1 { font-size:42px; }
+    header p { font-size:17px; margin-bottom:26px; }
+    .cards { grid-template-columns:1fr; gap:14px; padding:16px 20px 40px; }
+    .quotes { padding:8px 20px 48px; }
+    footer { padding:24px 20px 40px; }
+  }
 </style>
 </head>
 <body>
@@ -39,5 +56,12 @@
     <div class="card"><div class="dot" style="background:#e7f6ee">✅</div><h3>Launch checklists</h3><p>Every launch gets the same steps, owners, and due dates.</p></div>
     <div class="card"><div class="dot" style="background:#fff1e6">📅</div><h3>Shared calendar</h3><p>One calendar for marketing, product, and support.</p></div>
   </section>
+  <section class="quotes">
+    <h2>Loved by launch teams</h2>
+    <div class="quote"><p>“Our launches finally happen on the day we planned.”</p><span>Priya, Head of Product at Lumen</span></div>
+    <div class="quote"><p>“Marketing and engineering look at the same calendar now.”</p><span>Jonas, Engineering Manager at Fieldnote</span></div>
+    <div class="quote"><p>“The checklists alone saved us a week every quarter.”</p><span>Maya, Founder of Parcel</span></div>
+  </section>
+  <footer>◆ Orbit · Plan launches with your whole team.</footer>
 </body>
 </html>
