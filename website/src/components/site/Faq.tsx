@@ -62,7 +62,11 @@ export function Footer() {
         <div className="flex items-center gap-2.5">
           <img src="/brand/app-icon.png" alt="" className="size-6" />
           <span>
-            OpenTraffic by <a className="text-foreground hover:underline" href={links.medda}>Medda Systems</a>
+            OpenTraffic by{" "}
+            <a className="inline-flex items-baseline gap-1.5 text-foreground hover:underline" href={links.medda}>
+              <img src="/brand/medda-icon.svg" alt="" className="size-3.5 self-center dark:invert" />
+              Medda Systems
+            </a>
           </span>
         </div>
         <nav className="flex flex-wrap gap-x-6 gap-y-2 md:ml-auto">
