@@ -14,7 +14,7 @@ export const links = {
 }
 
 /** Bumped when a video or poster changes, so browsers and Cloudflare's cache fetch the new one. */
-const mediaVersion = "2026-10-16g"
+const mediaVersion = "2026-10-16h"
 export const media = (file: string) => `/media/${file}?v=${mediaVersion}`
 
 export const homebrewCommands = [

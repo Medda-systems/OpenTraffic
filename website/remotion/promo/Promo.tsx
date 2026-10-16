@@ -819,8 +819,12 @@ const End = () => {
           </div>
         ) : null}
       </div>
-      <div style={{ position: "absolute", bottom: 70, left: 0, right: 0, opacity: maker, transform: `translateY(${(1 - maker) * 12}px)`, fontSize: 28, letterSpacing: "0.02em", color: dim }}>
-        Made by <span style={{ color: fg, fontWeight: 600 }}>Medda</span>
+      <div style={{ position: "absolute", bottom: 70, left: 0, right: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, opacity: maker, transform: `translateY(${(1 - maker) * 12}px)`, fontSize: 28, letterSpacing: "0.02em", color: dim }}>
+        Made by
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 9, color: fg, fontWeight: 600 }}>
+          <Img src={staticFile("brand/medda-icon.svg")} style={{ height: 28, filter: "invert(1)" }} />
+          Medda
+        </span>
       </div>
       <AbsoluteFill style={{ background: bg, opacity: fade }} />
     </AbsoluteFill>

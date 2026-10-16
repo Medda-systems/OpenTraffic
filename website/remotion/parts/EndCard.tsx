@@ -29,8 +29,12 @@ export const EndCard = () => {
           </div>
         ) : null}
       </div>
-      <div style={{ position: "absolute", bottom: 56, left: 0, right: 0, opacity: maker, fontSize: 22, letterSpacing: "0.02em", color: muted }}>
-        Made by <span style={{ color: ink, fontWeight: 600 }}>Medda</span>
+      <div style={{ position: "absolute", bottom: 56, left: 0, right: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: maker, fontSize: 22, letterSpacing: "0.02em", color: muted }}>
+        Made by
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 7, color: ink, fontWeight: 600 }}>
+          <Img src={staticFile("brand/medda-icon.svg")} style={{ height: 22 }} />
+          Medda
+        </span>
       </div>
     </div>
   )
