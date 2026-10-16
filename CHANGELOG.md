@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Following is smooth:** when you follow someone, your page glides along with their scrolling and keeps up with them, instead of trailing behind in steps.
+- **Drawing:** while someone draws, their pointer moves with the line instead of lagging behind it.
+- Fixed: pointing at something showed the person's name twice, on their pointer and on the pulse.
+
 ## 1.0.13 (16 October 2026)
 
 - **Suggest an edit:** in the comment box, **Edit text** and **Edit style** change the element right on the page while you work. Colours come from a palette, the colours the page already uses, any colour, or the eyedropper; size, padding, and corners have sliders; weight is a row of samples. Each change has its own undo, and the comment box stays put while the element changes size. The comment carries the exact change, old → new (colours as hex, with swatches); anyone can **Preview on the page**, and agents apply it as given.

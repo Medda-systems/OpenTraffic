@@ -1,9 +1,9 @@
 """Synthesis for the promo's music and sound effects: helpers, instruments, and the arrangement the
 video is cut to. Everything is made from scratch, so there's nothing to license.
 
-The arrangement is 34 bars at 120 BPM, a bar every two seconds: an intro with a riser (bars 1-2), the
-drop (3-15), a breakdown and build (16-17), a second drop (18-25), another breakdown and build (26-27),
-the second drop again (28-32), and a final hit that rings out under the end card (33-34).
+The arrangement is 37 bars at 120 BPM, a bar every two seconds: an intro with a riser (bars 1-2), the
+drop (3-15), a breakdown and build (16-17), a second drop (18-28), another breakdown and build (29-30),
+the second drop again (31-35), and a final hit that rings out under the end card (36-37).
 """
 
 import os
@@ -17,7 +17,7 @@ SR = 48000
 BPM = 120
 BEAT = 60 / BPM
 BAR = 4 * BEAT
-BARS = 34
+BARS = 37
 LENGTH = BARS * BAR
 rng = np.random.default_rng(7)
 
@@ -213,7 +213,7 @@ def boom():
 # ---------------------------------------------------------------- the arrangement
 
 # Two breathers: a break and build before the agent's part, and again before the closing run.
-SECTION = ["intro"] * 2 + ["drop"] * 13 + ["break", "build"] + ["drop2"] * 8 + ["break", "build"] + ["drop2"] * 5 + ["outro"] * 2
+SECTION = ["intro"] * 2 + ["drop"] * 13 + ["break", "build"] + ["drop2"] * 11 + ["break", "build"] + ["drop2"] * 5 + ["outro"] * 2
 assert len(SECTION) == BARS
 FIRST = {name: SECTION.index(name) for name in ("drop", "break", "build", "drop2", "outro")}
 # Bars where a section starts (the impacts land on the drops and the outro).
@@ -229,7 +229,7 @@ CHORDS = (
     [A, E]
     + ([F_SHARP_M, D, A, E] * 4)[:13]
     + [D, E]
-    + [A, E, F_SHARP_M, D] * 2
+    + ([A, E, F_SHARP_M, D] * 3)[:11]
     + [D, E]
     + [A, E, F_SHARP_M, D, E]
     + [A, A]

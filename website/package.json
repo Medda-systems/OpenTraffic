@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "deploy": "npm run build && wrangler deploy",
     "video": "remotion render remotion/index.ts Demo public/media/demo.mp4 --public-dir=remotion/public --codec=h264 --crf=24 && remotion still remotion/index.ts Demo public/media/demo-poster.jpg --public-dir=remotion/public --frame=1030 --image-format=jpeg --jpeg-quality=85",
-    "video:gif": "ffmpeg -v error -y -i out/opentraffic-promo.mp4 -an -vf 'fps=10,scale=720:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle' -loop 0 ../docs/images/demo.gif",
+    "video:gif": "ffmpeg -v error -y -i out/opentraffic-promo.mp4 -an -vf 'fps=10,scale=640:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle' -loop 0 ../docs/images/demo.gif",
     "promo": "python3 remotion/audio/sfx.py && python3 remotion/audio/music.py && remotion render remotion/index.ts Promo out/promo-unmastered.mp4 --public-dir=remotion/public --codec=h264 --crf=18 --audio-codec=aac --audio-bitrate=320k && remotion/audio/master.sh out/promo-unmastered.mp4 out/opentraffic-promo.mp4",
     "studio": "remotion studio remotion/index.ts --public-dir=remotion/public",
     "docs:check": "node scripts/check-docs.mjs",

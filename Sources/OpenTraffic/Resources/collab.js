@@ -34,7 +34,7 @@
   const WS_PATH = "/__opentraffic/ws";
   const MAX_FRAME = 4000; // UTF-8 bytes; the hub drops frames over 4 KB
   const CURSOR_INTERVAL = 50; // <= 20 cursor messages/s
-  const SCROLL_INTERVAL = 100; // <= 10 scroll messages/s
+  const SCROLL_INTERVAL = 50; // <= 20 scroll messages/s
   const CURSOR_TTL = 30000;
   const COMMENT_INTERVAL = 2200; // hub: one comment per 2 s (plus a little jitter margin)
   const POINT_WINDOW = 1100; // hub: two points per second
@@ -746,6 +746,7 @@
 [hidden] { display: none !important; }
 .layer { position: fixed; inset: 0; overflow: hidden; pointer-events: none; }
 .cursor { position: absolute; left: 0; top: 0; transition: transform 90ms linear; will-change: transform; }
+.cursor.inking { transition-duration: 40ms; }
 .cursor svg { display: block; width: 16px; height: 20px; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.35)); }
 .tag { position: absolute; left: 12px; top: 17px; max-width: 160px; padding: 2px 6px; border-radius: 6px;
   font: 600 11px/1.35 var(--tb-font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2018,17 +2019,23 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
     place(peer.id, c);
   }
 
+  function cursorOf(id, peer) {
+    let c = cursors.get(id);
+    if (!c) {
+      c = makeCursor(peer);
+      cursors.set(id, c);
+      layer.append(c.el);
+      if (!sweepTimer) sweepTimer = setInterval(sweep, 5000);
+    }
+    return c;
+  }
+
   function onCursor(m) {
     const peer = peers.get(m.id);
     const pos = cleanPos(m);
     if (!peer || !pos || peer.isAgent) return;
-    let c = cursors.get(m.id);
-    if (!c) {
-      c = makeCursor(peer);
-      cursors.set(m.id, c);
-      layer.append(c.el);
-      if (!sweepTimer) sweepTimer = setInterval(sweep, 5000);
-    }
+    const c = cursorOf(m.id, peer);
+    if (c.inkAt && Date.now() - c.inkAt < 250) return; // drawing: the pointer rides on the stroke
     Object.assign(c, pos);
     c.at = Date.now();
     mount();
@@ -3578,6 +3585,19 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
     }
     const peer = peers.get(m.id);
     drawInk(m.id + ":" + stroke, points, typeof m.color === "string" && COLOR_RE.test(m.color) ? m.color : peer ? peer.color : GREY);
+    // Their pointer is at the tip of the line they're drawing, and moves with it (pointer updates come
+    // less often than the stroke, so on its own it would trail behind the line).
+    if (peer && !peer.isAgent && points.length) {
+      const c = cursorOf(m.id, peer);
+      const [x, y] = points[points.length - 1];
+      Object.assign(c, { anchor: null, rx: 0, ry: 0, x, y });
+      c.at = c.inkAt = Date.now();
+      c.el.classList.add("inking");
+      clearTimeout(c.inkTimer);
+      c.inkTimer = setTimeout(() => c.el.classList.remove("inking"), 300);
+      mount();
+      place(m.id, c);
+    }
   }
 
   // ---------------------------------------------------------------- devices
@@ -4009,8 +4029,40 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
       location.assign(path); // safePath() guarantees a same-origin path
     } else if (withScroll && ratio !== undefined) {
       const max = maxScroll();
-      if (max > 0) window.scrollTo({ top: ratio * max, behavior: reducedMotion.matches ? "auto" : "smooth" });
+      if (max > 0) glideTo(ratio * max);
     }
+  }
+
+  // Following someone's scrolling: glide toward where they are a little every frame, so we keep up with
+  // them. (Starting a fresh smooth scroll on every update lags behind and restarts its easing, which stutters.)
+  const GLIDE_TIME = 90; // ms to close most of the gap
+  let glide = null; // { target, at }
+  function glideTo(top) {
+    if (reducedMotion.matches) {
+      glide = null;
+      window.scrollTo(0, top);
+      return;
+    }
+    const was = glide;
+    glide = { target: top, at: was ? was.at : performance.now() };
+    if (!was) requestAnimationFrame(glideStep);
+  }
+  function glideStep() {
+    if (!glide) return;
+    if (!following) { glide = null; return; }
+    const now = performance.now();
+    const dt = Math.max(0, now - glide.at);
+    glide.at = now;
+    const y = window.scrollY;
+    const gap = glide.target - y;
+    if (Math.abs(gap) < 1) {
+      window.scrollTo(0, glide.target);
+      glide = null;
+      return;
+    }
+    const step = gap * (1 - Math.exp(-dt / (GLIDE_TIME / 3)));
+    window.scrollTo(0, y + (Math.abs(step) < 1 ? Math.sign(gap) : step));
+    requestAnimationFrame(glideStep);
   }
 
   // Merges path/ratio from a lead or welcome message. Returns whether a ratio was present.

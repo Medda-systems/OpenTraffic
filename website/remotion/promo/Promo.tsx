@@ -8,7 +8,7 @@ import type { Seat, Session } from "../session"
 import { mono, sans, serif } from "../theme"
 import { BAR, BEAT, bg, Capture, clamp, dim, ease, fg, Mark, Pill, Sfx, Slam, Stage } from "./kit"
 
-// A 68-second promo for social posts: 34 bars at 120 BPM, black and white around the app's own windows.
+// A 74-second promo for social posts: 37 bars at 120 BPM, black and white around the app's own windows.
 // Everything on screen is the real app or a real session in a browser (capture/), and the cuts land
 // on the beat of the soundtrack (audio/music.py).
 
@@ -351,38 +351,57 @@ const Draw = ({ session }: { session: Session }) => {
 
 const drawSfx = () => [<Sfx key="w" at={6} name="whoosh" volume={0.3} />, <Sfx key="c" at={62} name="click" volume={0.6} />]
 
-// Ava opens it while the agent works on it; Lea's page gets the fix; it's in OpenTraffic, resolved (bars 18-19).
+// ---------------------------------------------------------------- 8. the agent fixes it (bars 18-21)
+// Three moves: a push in on the comment as the agent picks it up, the fix landing on the page (with a
+// hit), and the Before and After in OpenTraffic.
+
+/** The recorded frame where opencode's change shows up on the page (the dev server swaps it in by itself,
+ * while the comment is still open and the agent is still writing its reply). */
+const FIX = 926
+
 const agentSegments = (m: Record<string, number>, k: number): Segment[] => [
-  { from: 0, to: 42, seat: "ava", rec: [m.opened - 2, m.opened + 40], shot: { x: 330 * k, y: 480 * k, zoom: 1.5 } },
-  { from: 42, to: 78, seat: "lea", rec: [m.updated - 6, m.updated + 30], shot: { x: 720 * k, y: 406 * k, zoom: 1.02 } },
+  // Ava opens it: what Lea asked for, and "opencode is working on this"…
+  { from: 0, to: 22, seat: "ava", rec: [m.opened - 2, m.opened + 20], shot: { x: 330 * k, y: 470 * k, zoom: 1.35 } },
+  // …the camera pushes in on the agent at work…
+  { from: 22, to: 52, seat: "ava", rec: [m.opened + 20, FIX - 4], shot: { x: 320 * k, y: 500 * k, zoom: 2.05 } },
+  // …and pulls back for the button: it changes, and the agent's reply arrives.
+  { from: 52, to: 76, seat: "ava", rec: [FIX - 4, FIX + 20], shot: { x: 270 * k, y: 520 * k, zoom: 1.6 } },
+  // Lea, who asked, is told: her page with the bigger button, and the notice.
+  { from: 76, to: 150, seat: "lea", rec: [m.told - 4, m.told + 70], shot: { x: 720 * k, y: 406 * k, zoom: 1.02 } },
 ]
 
+const AGENT_LANDS = 56 // the scene frame the fix appears
 const tools = ["get_feedback", "claim_comment", "reply_to_comment", "resolve_comment"]
 
 const Agent = ({ session }: { session: Session }) => {
   const frame = useCurrentFrame()
+  const { fps } = useVideoConfig()
   const k = 1520 / session.viewport.width
-  const second = interpolate(frame, [76, 84], [0, 1], { ...clamp, easing: ease })
+  const third = interpolate(frame, [148, 156], [0, 1], { ...clamp, easing: ease })
+  // The hit when the fix lands: a white flash and a little punch in.
+  const flash = interpolate(frame, [AGENT_LANDS, AGENT_LANDS + 9], [0.55, 0], clamp)
+  const punch = spring({ frame: frame - AGENT_LANDS, fps, config: { damping: 9, stiffness: 260 } })
+  const pop = frame >= AGENT_LANDS && frame < 150 ? 1 + 0.035 * Math.sin(Math.min(1, punch) * Math.PI) : 1
+  const result = spring({ frame: frame - 152, fps, config: { damping: 13, stiffness: 190 } })
   return (
     <AbsoluteFill>
-      <Title top={44}>
-        <div style={{ opacity: 1 - second }}><Slam at={0} out={39} size={96}>Your agent gets <Mark>the change.</Mark></Slam></div>
-      </Title>
-      <Title top={44}>
-        <div style={{ opacity: 1 - second }}><Slam at={42} size={96}>And <Mark>fixes it.</Mark></Slam></div>
-      </Title>
-      <div style={{ position: "absolute", left: 200, top: 176, opacity: 1 - second, transform: `scale(${1 - second * 0.08})` }}>
-        <Browser session={session} segments={agentSegments(session.marks, k)} />
+      <div style={{ opacity: 1 - third }}>
+        <Title top={44}><Slam at={0} out={50} size={96}>Your agent <Mark>picks it up.</Mark></Slam></Title>
+        <Title top={44}><Slam at={AGENT_LANDS} size={110}><Mark>Fixed.</Mark></Slam></Title>
       </div>
-      {frame >= 76 ? (
+      <div style={{ position: "absolute", left: 200, top: 176, opacity: 1 - third, transform: `scale(${pop * (1 - third * 0.06)})`, transformOrigin: "50% 45%" }}>
+        <Browser session={session} segments={agentSegments(session.marks, k)} />
+        <div style={{ position: "absolute", inset: 0, borderRadius: 22, background: "#fff", opacity: frame >= AGENT_LANDS && frame < 76 ? flash : 0, pointerEvents: "none" }} />
+      </div>
+      {frame >= 148 ? (
         <>
-          <Title top={70}><Slam at={78} size={120}>Over <Mark>MCP.</Mark></Slam></Title>
-          <div style={{ position: "absolute", left: 310, top: 300, opacity: second }}>
-            <Crop src={C("main-feedback-dark.png")} crop={{ x: 520, y: 440, width: 1800, height: 720 }} width={1300} />
+          <Title top={60}><Slam at={152} size={110}>Before, after. <Mark>Over MCP.</Mark></Slam></Title>
+          <div style={{ position: "absolute", left: 310, top: 270, opacity: third, transform: `scale(${0.9 + 0.1 * result})`, transformOrigin: "50% 40%" }}>
+            <Crop src={C("main-feedback-dark.png")} crop={{ x: 600, y: 540, width: 1150, height: 690 }} width={1300} />
           </div>
-          <div style={{ position: "absolute", bottom: 90, left: 0, right: 0, display: "flex", justifyContent: "center", gap: 22 }}>
+          <div style={{ position: "absolute", bottom: 50, left: 0, right: 0, display: "flex", justifyContent: "center", gap: 22 }}>
             {tools.map((t, i) => (
-              <Slam key={t} at={84 + i * 6} size={34}>
+              <Slam key={t} at={168 + i * 8} size={34}>
                 <Pill style={{ fontFamily: mono, fontSize: 32, ...(i === 3 ? { background: fg, color: bg, borderColor: fg } : {}) }}>{t}</Pill>
               </Slam>
             ))}
@@ -393,39 +412,109 @@ const Agent = ({ session }: { session: Session }) => {
   )
 }
 
-const agentSfx = () => [<Sfx key="s" at={44} name="success" volume={0.6} />, <Sfx key="w" at={76} name="whoosh" volume={0.35} />, ...tools.map((t, i) => <Sfx key={t} at={84 + i * 6} name="pop" volume={0.4} />)]
+const agentSfx = (session: Session) => [
+  ...sfxAt(agentSegments(session.marks, 1), [["ava", session.marks.opened, "click", 0.7]]),
+  <Sfx key="w1" at={20} name="whoosh" volume={0.3} />,
+  <Sfx key="hit" at={AGENT_LANDS} name="success" volume={0.75} />,
+  <Sfx key="r" at={AGENT_LANDS + 14} name="pop" volume={0.5} />,
+  <Sfx key="t" at={82} name="chime" volume={0.5} />,
+  <Sfx key="w2" at={148} name="whoosh" volume={0.35} />,
+  ...tools.map((t, i) => <Sfx key={t} at={168 + i * 8} name="pop" volume={0.4} />),
+]
 
-// ---------------------------------------------------------------- 8. a commit per fix (bars 20-21)
+// ---------------------------------------------------------------- 9. a commit per fix (bars 22-24)
 
 /** The demo project's history after the recorded session (remotion/git.ts). */
 const gitSession: TerminalLine[] = [
-  { at: 18, command: "git branch --show-current", output: GIT.branch },
-  { at: 50, command: "git log --oneline -2", output: GIT.commits },
+  { at: 14, command: "git branch --show-current", output: GIT.branch },
+  { at: 44, command: "git log --oneline -2", output: GIT.commits },
 ]
+
+// The branch graph: main along the bottom, the share's branch above it, a commit per fix, merged back.
+const G = { left: 150, right: 1770, main: 905, branch: 735, out: 330, back: 1560 }
+const commitsAt = [{ x: 760, at: 78 }, { x: 1180, at: 108 }]
+
+/** A line that draws itself from `at` over `len` frames. */
+const Drawn = ({ d, at, len, stroke, width = 6, dash }: { d: string; at: number; len: number; stroke: string; width?: number; dash?: string }) => {
+  const frame = useCurrentFrame()
+  const t = interpolate(frame, [at, at + len], [0, 1], { ...clamp, easing: ease })
+  return <path d={d} pathLength={1} fill="none" stroke={stroke} strokeWidth={width} strokeLinecap="round" strokeDasharray={dash ?? "1 1"} strokeDashoffset={dash ? 0 : 1 - t} opacity={dash ? t : 1} />
+}
+
+const Dot = ({ x, y, at, size = 30, filled = true }: { x: number; y: number; at: number; size?: number; filled?: boolean }) => {
+  const frame = useCurrentFrame()
+  const { fps } = useVideoConfig()
+  const s = spring({ frame: frame - at, fps, config: { damping: 10, stiffness: 300 } })
+  if (frame < at) return null
+  return <circle cx={x} cy={y} r={(size / 2) * s} fill={filled ? fg : bg} stroke={fg} strokeWidth={6} />
+}
+
+const Label = ({ x, y, at, children, mono: isMono = false, color = fg, size = 26, anchor = "start" }: { x: number; y: number; at: number; children: React.ReactNode; mono?: boolean; color?: string; size?: number; anchor?: "start" | "middle" | "end" }) => {
+  const frame = useCurrentFrame()
+  const t = interpolate(frame, [at, at + 10], [0, 1], { ...clamp, easing: ease })
+  return (
+    <text x={x} y={y + (1 - t) * 12} opacity={t} fill={color} fontSize={size} fontFamily={isMono ? mono : sans} fontWeight={isMono ? 500 : 600} textAnchor={anchor} letterSpacing={isMono ? 0 : -0.3}>
+      {children}
+    </text>
+  )
+}
+
+const BranchGraph = () => {
+  const curve = (x1: number, y1: number, x2: number, y2: number) => `M ${x1} ${y1} C ${x1 + 110} ${y1}, ${x2 - 110} ${y2}, ${x2} ${y2}`
+  const short = (line: string) => line.replace(/^\w+ /, "")
+  const clip = (text: string, n: number) => (text.length > n ? text.slice(0, n - 1).trimEnd() + "…" : text)
+  return (
+    <svg width={1920} height={1080} style={{ position: "absolute", inset: 0 }}>
+      <Drawn d={`M ${G.left} ${G.main} L ${G.right} ${G.main}`} at={0} len={40} stroke={dim} />
+      <Label x={G.left} y={G.main + 52} at={6} color={dim} size={24} mono>main</Label>
+      <Dot x={G.left + 40} y={G.main} at={4} size={22} />
+      <Drawn d={curve(G.out, G.main, G.out + 220, G.branch) + ` L ${G.back - 220} ${G.branch}`} at={22} len={36} stroke={fg} />
+      <Dot x={G.out} y={G.main} at={20} size={22} />
+      <Label x={G.out + 230} y={G.branch - 34} at={34} color={dim} size={22} mono>{GIT.branch}</Label>
+      <Label x={G.out - 10} y={G.main + 52} at={26} color={dim} size={24}>The share starts</Label>
+      {commitsAt.map((c, i) => {
+        const line = GIT.commits[GIT.commits.length - 1 - i] ?? ""
+        return (
+          <g key={i}>
+            <Dot x={c.x} y={G.branch} at={c.at} size={34} />
+            <Label x={c.x} y={G.branch + 58} at={c.at + 3} size={22} anchor="middle" color={dim} mono>{line.split(" ")[0]}</Label>
+            <Label x={c.x} y={G.branch + 92} at={c.at + 5} size={24} anchor="middle">{clip(short(line), 30)}</Label>
+          </g>
+        )
+      })}
+      <Drawn d={curve(G.back - 220, G.branch, G.back, G.main)} at={132} len={22} stroke={fg} />
+      <Dot x={G.back} y={G.main} at={152} size={34} filled={false} />
+      <Label x={G.back} y={G.main + 52} at={154} color={dim} size={24} anchor="middle">Merged when you stop</Label>
+    </svg>
+  )
+}
 
 const Git = () => (
   <AbsoluteFill>
-    <div style={{ position: "absolute", left: 130, top: 300, width: 760 }}>
-      <Slam at={0} size={110}>Every fix,</Slam>
-      <Slam at={6} size={110}><Mark>its own commit.</Mark></Slam>
-      <Slam at={36} size={38} color={dim} style={{ marginTop: 34, fontWeight: 500, letterSpacing: "-0.01em" }}>On a branch of its own, merged when you stop.</Slam>
+    <div style={{ position: "absolute", left: 130, top: 120, width: 820 }}>
+      <Slam at={0} size={104}>Every fix,</Slam>
+      <Slam at={6} size={104}><Mark>its own commit.</Mark></Slam>
     </div>
-    <div style={{ position: "absolute", left: 900, top: 360 }}>
-      <Terminal width={960} fontSize={21} lines={gitSession} />
+    <div style={{ position: "absolute", left: 930, top: 150 }}>
+      <Terminal width={870} fontSize={20} lines={gitSession} />
     </div>
+    <BranchGraph />
   </AbsoluteFill>
 )
 
 const gitSfx = () => {
   const out: React.ReactNode[] = []
   for (const line of gitSession) {
-    for (let i = 0; i < Math.ceil(line.command.length / 2); i += 2) out.push(<Sfx key={`${line.at}-${i}`} at={line.at + i} name={`type${(i % 3) + 1}`} volume={0.25} />)
-    out.push(<Sfx key={`${line.at}-enter`} at={typedAt(line) - 1} name="click" volume={0.5} />)
+    for (let i = 0; i < Math.ceil(line.command.length / 2); i += 2) out.push(<Sfx key={`${line.at}-${i}`} at={line.at + i} name={`type${(i % 3) + 1}`} volume={0.22} />)
+    out.push(<Sfx key={`${line.at}-enter`} at={typedAt(line) - 1} name="click" volume={0.45} />)
   }
+  out.push(<Sfx key="br" at={22} name="whoosh" volume={0.3} />)
+  commitsAt.forEach((c, i) => out.push(<Sfx key={`c${i}`} at={c.at} name="pop" volume={0.6} />))
+  out.push(<Sfx key="m" at={152} name="success" volume={0.5} />)
   return out
 }
 
-// ---------------------------------------------------------------- 9. their phone (bars 22-23)
+// ---------------------------------------------------------------- 10. their phone (bars 25-26)
 
 const phoneSegments = (m: Record<string, number>, k: number): Segment[] => [
   { from: 0, to: 30, seat: "ava", rec: [m.phone - 24, m.phone + 6], shot: { x: 1120 * k, y: 600 * k, zoom: 1.35 } },
@@ -447,7 +536,7 @@ const Phone = ({ session }: { session: Session }) => {
 
 const phoneSfx = (session: Session) => [...sfxAt(phoneSegments(session.marks, 1), [["ava", session.marks.phone, "click", 0.7]]), <Sfx key="w" at={62} name="whoosh" volume={0.35} />]
 
-// ---------------------------------------------------------------- 10. lead everyone into it (bars 24-25)
+// ---------------------------------------------------------------- 11. lead the demo, everyone in sync (bars 27-28)
 
 const leadSegments = (m: Record<string, number>, seat: Seat): Segment[] => {
   // Close on the phone (the page is 1440 × 813 at 880 wide).
@@ -460,7 +549,7 @@ const leadSegments = (m: Record<string, number>, seat: Seat): Segment[] => {
 
 const Lead = ({ session }: { session: Session }) => (
   <AbsoluteFill>
-    <Title top={60}><Slam at={0} size={100}>Lead everyone <Mark>into it.</Mark></Slam></Title>
+    <Title top={60}><Slam at={0} size={96}>Lead the demo. <Mark>Everyone's in sync.</Mark></Slam></Title>
     <div style={{ position: "absolute", left: 60, top: 270, display: "flex", gap: 40 }}>
       <Browser session={session} segments={leadSegments(session.marks, "ava")} width={880} />
       <Browser session={session} segments={leadSegments(session.marks, "lea")} width={880} />
@@ -664,8 +753,8 @@ const End = () => {
 
 // ---------------------------------------------------------------- the cut
 
-// The music's sections (audio/synth.py): intro 1-2, drop 3-15, break and build 16-17, drop 18-25, break and
-// build 26-27, drop 28-32, outro 33-34.
+// The music's sections (audio/synth.py): intro 1-2, drop 3-15, break and build 16-17, drop 18-28, break and
+// build 29-30, drop 31-35, outro 36-37.
 const cut = (session: Session) =>
   [
     { bars: 2, body: <Hook />, sfx: hookSfx() },
@@ -675,8 +764,8 @@ const cut = (session: Session) =>
     { bars: 4, body: <Collab session={session} />, sfx: collabSfx(session) },
     { bars: 3, body: <Suggest session={session} />, sfx: suggestSfx(session) },
     { bars: 2, body: <Draw session={session} />, sfx: drawSfx() },
-    { bars: 2, body: <Agent session={session} />, sfx: agentSfx() },
-    { bars: 2, body: <Git />, sfx: gitSfx() },
+    { bars: 4, body: <Agent session={session} />, sfx: agentSfx(session) },
+    { bars: 3, body: <Git />, sfx: gitSfx() },
     { bars: 2, body: <Phone session={session} />, sfx: phoneSfx(session) },
     { bars: 2, body: <Lead session={session} />, sfx: leadSfx(session) },
     { bars: 1, body: <Protection />, sfx: protectionSfx() },
@@ -687,7 +776,7 @@ const cut = (session: Session) =>
     { bars: 2, body: <End />, sfx: OPEN_SOURCE ? [<Sfx key="gh" at={34} name="pop" volume={0.45} />] : [] },
   ] as { bars: number; body: React.ReactNode; sfx?: React.ReactNode[] }[]
 
-export const PROMO_FRAMES = 34 * BAR
+export const PROMO_FRAMES = 37 * BAR
 
 export const Promo = ({ session }: { session: Session }) => {
   let from = 0
