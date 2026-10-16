@@ -3,7 +3,16 @@ import { ArrowLeft, ArrowRight, BookOpen, ChevronDown, FileText, Search, X } fro
 import { Nav } from '@/components/site/Hero'
 import { docs, docPath, groups, headings, searchDocs } from './data'
 import { CopyButton, Markdown } from './Markdown'
+import pageDates from './dates.json'
 import './docs.css'
+
+const dates: Record<string, string> = pageDates
+
+// "2026-10-16" as "October 16, 2026", the same everywhere (no time zone shifts).
+const updatedText = (day: string) => {
+  const [y, m, d] = day.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+}
 
 function Navigation({ slug }: { slug: string }) {
   return <nav aria-label="Documentation">{groups.map((group) => <div className="docs-nav-group" key={group}>
@@ -76,7 +85,7 @@ export default function Docs({ slug = 'introduction' }: { slug?: string }) {
       <main id="docs-content" className="docs-main">
         {page ? <>
           <div className="docs-breadcrumb"><a href="/docs">Docs</a><span>/</span><span>{page.group}</span></div>
-          <header className="docs-article-header"><h1>{page.title}</h1><p>{page.description}</p><div className="docs-article-meta"><span>{Math.max(1, Math.ceil(page.body.split(/\s+/).length / 220))} min read</span><span>Updated October 9, 2026</span><CopyButton text={`# ${page.title}\n\n${page.body}`} label="Copy page as Markdown" /><a href={`/docs/${page.slug}.md`} className="docs-markdown-link">Markdown ↗</a></div></header>
+          <header className="docs-article-header"><h1>{page.title}</h1><p>{page.description}</p><div className="docs-article-meta"><span>{Math.max(1, Math.ceil(page.body.split(/\s+/).length / 220))} min read</span>{dates[page.slug] && <span>Updated {updatedText(dates[page.slug])}</span>}<CopyButton text={`# ${page.title}\n\n${page.body}`} label="Copy page as Markdown" /><a href={`/docs/${page.slug}.md`} className="docs-markdown-link">Markdown ↗</a></div></header>
           <div className="docs-mobile-toc"><details><summary>On this page <ChevronDown size={16} /></summary>{toc.map((heading) => <a key={heading.id} href={`#${heading.id}`}>{heading.title}</a>)}</details></div>
           <article className="docs-prose"><Markdown body={page.body} /></article>
           <nav className="docs-pagination" aria-label="Adjacent guides">{index > 0 ? <a href={docPath(docs[index - 1].slug)}><ArrowLeft size={17} /><span><small>Previous</small>{docs[index - 1].title}</span></a> : <span />}{index < docs.length - 1 && <a href={docPath(docs[index + 1].slug)}><span><small>Next</small>{docs[index + 1].title}</span><ArrowRight size={17} /></a>}</nav>

@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build && vite build --ssr src/docs/prerender.tsx --outDir dist-ssr && node scripts/prerender-docs.mjs && node scripts/package-skill.mjs",
+    "dev": "node scripts/doc-dates.mjs && vite",
+    "build": "node scripts/doc-dates.mjs && tsc -b && vite build && vite build --ssr src/docs/prerender.tsx --outDir dist-ssr && node scripts/prerender-docs.mjs && node scripts/package-skill.mjs",
     "lint": "oxlint",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler deploy",

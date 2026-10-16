@@ -47,7 +47,9 @@ in future versions of OpenTraffic. You keep the copyright to your contribution.
 
 ## Releases
 
-Maintainers release by setting `VERSION`, adding the version's section to `CHANGELOG.md`, and pushing a tag:
+Maintainers release by setting `VERSION`, turning "Unreleased" in `CHANGELOG.md` into the version's dated section
+(`## 1.2.3 (16 October 2026)`, the day it's published; the Release workflow refuses a section without a date), and
+pushing a tag:
 
 ```sh
 git tag -a v1.2.3 -m "OpenTraffic 1.2.3" && git push origin v1.2.3

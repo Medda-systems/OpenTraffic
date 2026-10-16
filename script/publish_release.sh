@@ -31,7 +31,7 @@ built="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$OUT_DIR/OpenTraffi
 NOTES="$(mktemp)"
 trap 'rm -f "$NOTES"' EXIT
 {
-  awk -v version="$VERSION" '$0 == "## " version { found = 1; next } /^## / && found { exit } found' "$ROOT_DIR/CHANGELOG.md"
+  awk -v version="$VERSION" '$0 == "## " version || index($0, "## " version " (") == 1 { found = 1; next } /^## / && found { exit } found' "$ROOT_DIR/CHANGELOG.md"
   cat <<TEXT
 
 ## Install

@@ -32,7 +32,7 @@ Snapshots use a fixed 1440×900 master viewport and proportional Retina small, m
 
 ## Collaboration data
 
-Presence carries chosen names, paths, and cursor positions. Explicit comments carry text, selected-element context and screenshots, browser information, and optional errors. Text fields are blanked in element screenshots, but other visible page content can remain. Feedback and screenshots are stored locally with the share.
+Presence carries chosen names, paths, cursor positions, and each person's browser, system, and window size (everyone in the session sees these, for **View at their size**). Drawings go to the people on the same page and are never stored. Explicit comments carry text, suggested edits, an optional area, selected-element context (a selector, a few computed styles, and on development builds the component and source file, seen only by the host and their agent), screenshots, browser information, and optional errors. Text fields are blanked in element screenshots, but other visible page content can remain. Feedback and screenshots are stored locally with the share.
 
 ## Data sent to integrations
 

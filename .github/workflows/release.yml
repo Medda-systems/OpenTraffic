@@ -43,7 +43,8 @@ jobs:
         run: |
           version="$(tr -d '[:space:]' < VERSION)"
           [[ "${GITHUB_REF_NAME}" == "v${version}" ]] || { echo "Tag ${GITHUB_REF_NAME} doesn't match VERSION ${version}" >&2; exit 1; }
-          grep -q "^## ${version}$" CHANGELOG.md || { echo "CHANGELOG.md has no section for ${version}" >&2; exit 1; }
+          # The section is dated: "## 1.0.13 (16 October 2026)".
+          grep -qE "^## ${version//./\\.} \([0-9]{1,2} [A-Z][a-z]+ [0-9]{4}\)$" CHANGELOG.md || { echo "CHANGELOG.md has no dated section for ${version}, like \"## ${version} ($(date '+%-d %B %Y'))\"" >&2; exit 1; }
       - name: Build, sign, and notarize
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}

@@ -141,7 +141,7 @@ import html, re, sys
 from email.utils import formatdate
 changelog, version, build, minimum, url, signature = sys.argv[1:]
 # This version's section of the changelog, as simple HTML for Sparkle's update window.
-section = re.search(r"^## " + re.escape(version) + r"\n(.*?)(?=^## |\Z)", open(changelog).read(), re.S | re.M)
+section = re.search(r"^## " + re.escape(version) + r"(?: \([^)\n]*\))?\n(.*?)(?=^## |\Z)", open(changelog).read(), re.S | re.M)
 notes = []
 for line in (section.group(1) if section else "").splitlines():
     text = html.escape(line.strip())

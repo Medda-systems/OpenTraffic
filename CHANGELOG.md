@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.13
+## 1.0.13 (16 October 2026)
 
 - **Suggest an edit:** in the comment box, **Edit text** and **Edit style** change the element right on the page while you work. Colours come from a palette, the colours the page already uses, any colour, or the eyedropper; size, padding, and corners have sliders; weight is a row of samples. Each change has its own undo, and the comment box stays put while the element changes size. The comment carries the exact change, old → new (colours as hex, with swatches); anyone can **Preview on the page**, and agents apply it as given.
 - **Agents start in the right file:** comments now record the element's selector and key styles, and on development builds of React, Vue, Svelte, and Angular, the component and its source file (`HeroActions · src/components/Hero.tsx`). You and your agent see it; other visitors don't.
@@ -12,19 +12,19 @@
 - `opentraffic comments` shows suggested edits, the element's source, and an area's size; the API and MCP tools return `context`, `edits`, and `area` with comments, and `role` and `device` with people.
 - Fixed: comment bubbles and the comment box scroll when they're taller than the window, and their buttons (Post, Reply, Resolve) stay in view. Local builds record the SDK they're built with, so they look exactly like releases (before, a fix could look right locally and still be wrong in the release, like the menu icons in 1.0.10).
 
-## 1.0.12
+## 1.0.12 (15 October 2026)
 
 - **Agent marks in Settings are white in dark mode too:** the Claude Code, Codex, Cursor, and opencode marks in Settings → Integrations → Agent for comments now follow the menu's text colour like the rest of the menu; 1.0.11 fixed the other menus but not this one.
 
-## 1.0.11
+## 1.0.11 (15 October 2026)
 
 - **Menu icons are really white in dark mode now:** 1.0.10's fix didn't reach the released app. The Claude Code, Codex, Cursor, and opencode marks in Settings → Integrations, and the Cloudflare, OpenTunnel, Tailscale, and ngrok marks in the New, New Tunnel, and Share menus, now follow the menu's text colour: white in dark mode, black in light mode.
 
-## 1.0.10
+## 1.0.10 (15 October 2026)
 
 - **Icons in menus follow the menu in dark mode:** the Claude Code, Codex, Cursor, and opencode marks in Settings → Integrations, and the Cloudflare, OpenTunnel, Tailscale, and ngrok marks in the New, New Tunnel, and Share menus, are now white in dark mode like the rest of the menu instead of dark. The custom agent's sparkle is now the same size as the other marks.
 
-## 1.0.9
+## 1.0.9 (15 October 2026)
 
 - **See agents at work:** a coding agent working on a comment now claims it (`claim_comment`, or `opentraffic claim`). Everyone on the page sees it in the session, its cursor beside the element ("✦ Claude Code · working") and what it's doing, and two agents never take the same comment. Claims lapse after 15 minutes unless renewed, so a stopped agent never leaves a comment stuck.
 - **"Fixed: take a look":** when someone else resolves a comment, its author is told, right away or the next time they open the link. **Take a look** opens the element, with **Before** and **After** pictures, and asks them to confirm the fix or reopen it. The Feedback tab shows who resolved each comment and whether its author agreed, and OpenTraffic can notify you when they do.
@@ -35,11 +35,11 @@
 - **Passwords for temporary and OpenTunnel shares:** **Protection…** now offers a password for Quick Tunnels and OpenTunnel too. OpenTraffic checks it on your Mac before anything reaches your app: visitors see an OpenTraffic sign-in page (and, with live collaboration, can give their name there), **Copy Link with Password** sends a link that signs them in directly, and scripts can use basic auth. A new password signs everyone out without restarting the share. `opentraffic protect <share> password` works for them, and `opentraffic password` prints the link.
 - `opentraffic claim`, `release`, `screenshot --after`, and `comments` showing who's on a comment and who resolved it; `comment.claimed` and `comment.released` events; REST `…/claim` and `screenshot?which=after`. `opentraffic` uses `OPENTRAFFIC_CLIENT` as its name when it's set.
 
-## 1.0.8
+## 1.0.8 (15 October 2026)
 
 - **The command line and coding agents just work:** `opentraffic` and the MCP bridge are now part of OpenTraffic itself. They talk to the app over a private connection that only OpenTraffic's own signed tools can use, so there's no `opentraffic setup`, no token, no Integrations switch to turn on, and no "Allow" dialog before sharing. If OpenTraffic isn't running, they start it in the background. Other apps still use the local API, with its token, and still ask.
 
-## 1.0.7
+## 1.0.7 (15 October 2026)
 
 - **Online as soon as it's online:** a share now shows as online within about a second of its link working, instead of up to 45 seconds later (ngrok and custom domains) or 9 seconds (OpenTunnel). While a share starts, OpenTraffic checks every second, and a provider's "not ready yet" page no longer counts as a failure.
 - **`opentraffic share` and `start` say "live" only once the link answers**, and "starting" (with what it's waiting for) when the provider needs longer, such as a custom domain whose DNS record was just replaced.
@@ -48,7 +48,7 @@
 - **One-click tools:** OpenTraffic installs what it shares through for you. The setup assistant, Settings, and New Tunnel show an **Install** button for Cloudflare's, OpenTunnel's, and ngrok's tools that says what it downloads (version, size, where from, who signed it), shows its progress, and checks the download against its maker's published checksum or Developer ID signature before installing it into OpenTraffic's own folder. No Homebrew, Terminal, or password needed. ngrok's account connects by pasting your authtoken. Tailscale installs from its own signed, notarized installer, opened in Apple's Installer (or from the App Store or Homebrew, under ⋯).
 - **`opentraffic install cloudflared`** (or `opentunnel`, `ngrok`, `tailscale`) does the same from the command line, and `opentraffic doctor` says which to run.
 
-## 1.0.6
+## 1.0.6 (14 October 2026)
 
 - **Clearer when temporary URLs can't work:** if your network's DNS filter blocks Cloudflare's temporary tunnels (some ISPs' "safe browsing" filters do), OpenTraffic and `opentraffic doctor` say so, instead of "cloudflared exited with status 1". Other cloudflared failures now say what went wrong too.
 - **Host header fix for Tailscale shares:** Vite, Next.js, and other dev servers that reject your tailnet name now work with **Fix Host Header**, like the other providers.
@@ -57,31 +57,31 @@
 - **Health checks:** a new custom-domain hostname that this Mac looked up too early no longer shows as failing while everyone else can open it.
 - `opentraffic stop` waits until the share has stopped, so the next command can change it right away. Browser errors list each page once, the Logs tab names the right connector, the reply field is ready to type in, and Settings no longer suggests a token can turn on email sign-in when Cloudflare refuses it.
 
-## 1.0.5
+## 1.0.5 (13 October 2026)
 
 - **Signed by Medda Systems and notarized by Apple:** OpenTraffic now opens like any other app, from the disk image, Homebrew, or the installer, with no trip to Privacy & Security. The first update to this version may ask once for access to OpenTraffic's saved Keychain items, because the app's signature changes.
 - **`opentraffic watch` stops when nothing reads it anymore**, so `opentraffic watch | head -1` and similar pipelines end instead of running on.
 - **Agent skill:** `curl -fsSL https://opentraffic.dev/skill | sh` teaches Claude Code, Codex, opencode, and other agents to share your dev server and act on feedback. See https://opentraffic.dev/docs/agent-skill.
 
-## 1.0.4
+## 1.0.4 (11 October 2026)
 
 - **A complete `opentraffic` command:** everything the app's windows do, from a terminal. List and inspect shares (with each hop's health and who's there), share through any provider including custom domains (with DNS replacement), Tailscale Funnel, and password-protected ngrok, change settings, protect, rename, restart, and remove shares, read and answer feedback, follow logs and live events, see the web servers running on this Mac with their uptime, run projects, and show QR codes. Every command takes `--json` and returns meaningful exit codes. It comes with the app: the installer links it into your PATH and OpenTraffic keeps it linked whenever it runs from Applications, however you installed it (Settings → General turns that off). `opentraffic setup` turns on the local API it uses, and the command starts OpenTraffic in the background when needed, without opening a window.
 - **Local API:** new endpoints for status, local services, projects, Cloudflare domains, share details, editing, restarting, removing, protection, passwords, and deleting comments. Shares for a provider that isn't set up are refused instead of being created in a failed state.
 
-## 1.0.3
+## 1.0.3 (9 October 2026)
 
 - **OpenTunnel branding:** Anomaly’s logo now appears throughout the app, including both New Tunnel menus, Settings, the sidebar, and connection details.
 - **Custom-domain DNS replacement:** explicitly choose to replace an existing hostname’s DNS route when creating a Cloudflare tunnel. CNAMEs are updated in place; A/AAAA records are replaced with the new tunnel’s CNAME. Replacement is refused when unrelated record types such as TXT or MX are present.
 - **Clearer labels:** OpenTunnel shares show “anyone with the link”, and coding-agent replies are labeled “Agent” in the Feedback view.
 - **Documentation:** installation, providers, collaboration, CLI, REST API, MCP, and troubleshooting guides are now available at https://opentraffic.dev/docs.
 
-## 1.0.2
+## 1.0.2 (8 October 2026)
 
 - **One-line install:** `curl -fsSL https://github.com/Medda-systems/OpenTraffic-releases/releases/latest/download/install.sh | sh` downloads the latest release, checks its checksum and signature, and puts OpenTraffic in Applications.
 - **Homebrew:** current Homebrew asks you to trust casks from other taps first; the install instructions now include `brew trust --cask medda-systems/tap/opentraffic`.
 - Builds with Swift 6.3, and every release is now built, signed, and published automatically.
 
-## 1.0.1
+## 1.0.1 (8 October 2026)
 
 - **Automatic updates.** OpenTraffic checks for new versions once a day and installs them, verified with Medda Systems' signing key. **Check for Updates…** is in the app menu, and Settings → General has the options.
 - **Homebrew:** `brew tap medda-systems/tap`, `brew trust --cask medda-systems/tap/opentraffic`, then `brew install --cask opentraffic`.
@@ -89,7 +89,7 @@
 - Webhook signing secrets are kept in the Keychain.
 - The `opentraffic` command checks its arguments and accepts `host:port` without `http://`.
 
-## 1.0.0
+## 1.0.0 (8 October 2026)
 
 First public release.
 

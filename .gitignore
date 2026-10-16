@@ -19,4 +19,5 @@ notes/
 # Website
 website/node_modules/
 website/dist/
+website/src/docs/dates.json
 website/.wrangler/
