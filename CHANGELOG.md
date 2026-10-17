@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.15 (17 October 2026)
 
 - **Agents work without MCP:** the agent OpenTraffic starts for a comment reaches it with the `opentraffic` command when OpenTraffic's MCP server isn't set up for it, so Claude Code, Codex, and opencode work with nothing to set up. Their shell runs only OpenTraffic's comment commands, and OpenTraffic puts its own `opentraffic` first on their PATH, whether or not you linked the command. Codex's sandbox reaches OpenTraffic and nothing else; if a Codex version ever let the web through, OpenTraffic doesn't start it. Presets you hadn't changed are updated.
 - **An agent can't slip out of its comment:** a process an agent starts and then lets go of (so it no longer runs under the agent) may do nothing at all; before, it could do anything the `opentraffic` command can.
