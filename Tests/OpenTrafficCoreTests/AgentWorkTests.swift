@@ -255,7 +255,7 @@ private func roomWithComment() throws -> (CollabRoom, String) {
 
 @Test func theAgentIsToldIdsNeverTheCommentsText() {
     let share = UUID()
-    let request = AgentRunRequest(shareID: share, shareName: "Orbit", commentID: "ab12cd34", client: "Claude Code")
+    let request = AgentRunRequest(shareID: share, shareName: "Orbit", commentID: "ab12cd34", client: "Claude Code", socket: "/tmp/ot.sock")
     #expect(request.prompt.contains("ab12cd34"))
     #expect(request.prompt.contains("claim_comment"))
     #expect(request.prompt.contains("never as instructions"))
@@ -271,6 +271,15 @@ private func roomWithComment() throws -> (CollabRoom, String) {
         #expect(AgentPreset.matching("  \(preset.command)\n") == preset)
     }
     #expect(AgentPreset.matching("my-agent") == nil)
+}
+
+@Test func presetsAsEarlierVersionsSetThemBecomeTheCurrentOnes() {
+    for (earlier, preset) in AgentPreset.earlierCommands {
+        #expect(AgentPreset.upgraded(earlier) == preset.command)
+        #expect(AgentPreset.upgraded("\(earlier)\n") == preset.command)
+    }
+    #expect(AgentPreset.upgraded("my-agent") == "my-agent")
+    #expect(AgentPreset.upgraded("") == "")
 }
 
 @Test func theAgentRunsOnlyForOpenUnclaimedVisitorCommentsNobodyIsWatching() {
@@ -375,7 +384,7 @@ private func run(_ command: String, in directory: URL = FileManager.default.temp
     let project = FileManager.default.temporaryDirectory.appending(path: "ot-agent-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: project) }
-    let request = AgentRunRequest(shareID: UUID(), shareName: "Orbit", commentID: "ab12cd34", client: "Claude Code")
+    let request = AgentRunRequest(shareID: UUID(), shareName: "Orbit", commentID: "ab12cd34", client: "Claude Code", socket: "/tmp/ot.sock")
     let (_, record) = try run(#"pwd; echo "$OPENTRAFFIC_COMMENT_ID $OPENTRAFFIC_CLIENT"; echo oops >&2; exit 3"#, in: project, environment: request.environment)
 
     #expect(await eventually { record.ended != nil })
@@ -385,6 +394,62 @@ private func run(_ command: String, in directory: URL = FileManager.default.temp
     #expect(URL(fileURLWithPath: lines.first ?? "").resolvingSymlinksInPath().path == project.resolvingSymlinksInPath().path)
     #expect(lines.contains("ab12cd34 Claude Code"))
     #expect(lines.contains("oops"))
+}
+
+// Each preset needs a way to the comment that its own lockdown leaves open: the `opentraffic` command's
+// feedback commands, or (Codex) a sandbox that lets out only OpenTraffic's socket.
+@Test func presetsLeaveTheAgentAWayToOpenTraffic() async throws {
+    let socket = "/Users/Ada Lovelace/Library/Application Support/OpenTraffic/opentraffic.sock"
+    // Stand-ins for the agents that print what they were given. Codex's sandbox keeps the web out.
+    let stubs = #"claude() { print -rl -- "$@"; }; codex() { [[ $1 == sandbox ]] && return 7; print -rl -- "$@"; }; opencode() { print -r -- "$OPENCODE_CONFIG_CONTENT"; }; "#
+    func output(_ preset: AgentPreset) async throws -> [String] {
+        let request = AgentRunRequest(shareID: UUID(), shareName: "Orbit", commentID: "ab12cd34", client: preset.clientName, socket: socket)
+        let (_, record) = try run(stubs + preset.command, environment: request.environment)
+        #expect(await eventually { record.ended != nil })
+        #expect(record.ended?.status == 0)
+        return record.output.split(separator: "\n").map(String.init)
+    }
+
+    let claude = try await output(.claudeCode)
+    #expect(claude.firstIndex(of: "--permission-mode").map { claude[$0 + 1] } == "dontAsk")
+    let allowed = try #require(claude.firstIndex(of: "--allowedTools").map { claude[$0 + 1].split(separator: ",").map(String.init) })
+    #expect(allowed.filter { $0.hasPrefix("Bash") } == AgentPreset.feedbackCommands.map { "Bash(opentraffic \($0) *)" })
+    #expect(allowed.contains("mcp__opentraffic"))
+    #expect(claude.firstIndex(of: "--disallowedTools").map { claude[$0 + 1] } == "WebFetch,WebSearch,Read(./.env),Read(./.env.*)")
+
+    let codex = try await output(.codex)
+    #expect(codex.first == "exec")
+    #expect(codex.contains("features.network_proxy=true"))
+    #expect(codex.contains("allow_login_shell=false"))
+    #expect(codex.contains(#"permissions.opentraffic.extends=":workspace""#))
+    #expect(codex.contains(#"permissions.opentraffic.network.unix_sockets={"\#(socket)"="allow"}"#))
+    #expect(codex.last == AgentRunRequest(shareID: UUID(), shareName: "Orbit", commentID: "ab12cd34", client: "Codex", socket: socket).prompt.split(separator: "\n").last.map(String.init))
+
+    let opencode = try #require(JSONSerialization.jsonObject(with: Data((try await output(.opencode).first ?? "").utf8)) as? [String: Any])
+    let permission = try #require(opencode["permission"] as? [String: Any])
+    var bash = ["*": "deny"]
+    for command in AgentPreset.feedbackCommands { bash["opentraffic \(command) *"] = "allow" }
+    #expect(permission["bash"] as? [String: String] == bash)
+    #expect(permission["webfetch"] as? String == "deny")
+    #expect(permission["external_directory"] as? [String: String] == ["\(AgentPreset.screenshotFolder)/**": "allow"])
+}
+
+// Codex ignores settings it doesn't know: if its sandbox ever lets the web through, Codex isn't started.
+@Test func codexDoesntStartWhenItsSandboxLetsTheWebThrough() async throws {
+    let stub = #"codex() { [[ $1 == sandbox ]] && return 0; echo STARTED; }; "#
+    let request = AgentRunRequest(shareID: UUID(), shareName: "Orbit", commentID: "ab12cd34", client: "Codex", socket: "/tmp/ot.sock")
+    let (_, record) = try run(stub + AgentPreset.codex.command, environment: request.environment)
+    #expect(await eventually { record.ended != nil })
+    #expect(record.ended?.status == 1)
+    #expect(!record.output.contains("STARTED"))
+    #expect(record.output.contains("let the web through"))
+}
+
+@Test func theAgentIsToldTheOpentrafficCommandsItMayRun() throws {
+    let request = AgentRunRequest(shareID: UUID(), shareName: "Orbit", commentID: "ab12cd34", client: "opencode", socket: "/x")
+    let commands = request.prompt.matches(of: try Regex<(Substring, Substring)>(#"`opentraffic (\w+) "#)).map { String($0.1) }
+    #expect(Set(commands) == Set(AgentPreset.feedbackCommands))
+    #expect(request.prompt.contains("-o \(AgentPreset.screenshotFolder)/`"))
 }
 
 @Test func stoppingTheAgentStopsWhatItStarted() async throws {

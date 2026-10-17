@@ -24,26 +24,62 @@ public enum AgentPreset: String, CaseIterable, Codable, Identifiable, Sendable {
         self == .custom ? "Agent" : title
     }
 
-    /// A non-interactive run that may edit files in the project and use OpenTraffic's MCP tools: no shell
-    /// commands and no web access, so an agent talked into something by a comment can't run programs or
-    /// send data out. `$OPENTRAFFIC_PROMPT` says what to do.
-    /// - Claude Code: edits and OpenTraffic's tools allowed; the shell, the web, and `.env` files denied.
-    /// - Codex: its sandbox, writing only in the project, with no network.
+    /// A non-interactive run that may edit files in the project and reach the comment through OpenTraffic,
+    /// and nothing else: no other shell commands and no web access, so an agent talked into something by a
+    /// comment can't run programs or send data out. `$OPENTRAFFIC_PROMPT` says what to do.
+    /// The way to OpenTraffic is the `opentraffic` command (OpenTraffic puts its own first on PATH), or its
+    /// MCP server where the user set that up for the agent. Either way OpenTraffic holds the run to its one
+    /// comment (`AgentRunScope`), whatever the agent's own settings allow.
+    /// - Claude Code: only what's listed runs (`dontAsk`): reading and editing files, OpenTraffic's MCP
+    ///   tools, and the feedback commands; `.env` files denied.
+    /// - Codex: its sandbox, writing only in the project. Its network goes through Codex's proxy, which lets
+    ///   nothing out but OpenTraffic's socket (`$OPENTRAFFIC_SOCKET`). Codex ignores settings it doesn't
+    ///   know, so a Codex that changed them could leave the web open: the same sandbox is tried on the web
+    ///   first, and Codex doesn't start if it gets through. No login shells: the user's profile would put
+    ///   back a PATH without OpenTraffic's own `opentraffic` first.
     /// - Cursor: without `--force`, only commands already on the user's Cursor allowlist run.
-    /// - opencode: its shell and web tools denied through its configuration variable.
+    /// - opencode: the shell only for the feedback commands, and no web, through its configuration variable.
     public var command: String {
+        let feedback = Self.feedbackCommands
         switch self {
-        case .claudeCode: #"claude -p "$OPENTRAFFIC_PROMPT" --permission-mode acceptEdits --allowedTools mcp__opentraffic --disallowedTools "Bash,WebFetch,WebSearch,Read(./.env),Read(./.env.*)""#
-        case .codex: #"codex exec -s workspace-write -c sandbox_workspace_write.network_access=false "$OPENTRAFFIC_PROMPT""#
-        case .cursor: #"cursor-agent -p "$OPENTRAFFIC_PROMPT""#
-        case .opencode: #"OPENCODE_CONFIG_CONTENT='{"permission":{"bash":"deny","webfetch":"deny"}}' opencode run "$OPENTRAFFIC_PROMPT""#
-        case .custom: #"~/bin/my-agent "$OPENTRAFFIC_SHARE" "$OPENTRAFFIC_COMMENT_ID""#
+        case .claudeCode:
+            let allowed = ["Read", "Edit", "Write", "Glob", "Grep", "mcp__opentraffic"] + feedback.map { "Bash(opentraffic \($0) *)" }
+            return #"claude -p "$OPENTRAFFIC_PROMPT" --permission-mode dontAsk --allowedTools ""# + allowed.joined(separator: ",") + #"" --disallowedTools "WebFetch,WebSearch,Read(./.env),Read(./.env.*)""#
+        case .codex:
+            return #"p=(-c allow_login_shell=false -c features.network_proxy=true -c 'default_permissions="opentraffic"' -c 'permissions.opentraffic.extends=":workspace"' -c permissions.opentraffic.network.enabled=true -c 'permissions.opentraffic.network.unix_sockets={"'"$OPENTRAFFIC_SOCKET"'"="allow"}'); "#
+                + #"if codex sandbox $p -- /usr/bin/curl -sfm 5 -o /dev/null https://example.com; then echo "Codex's sandbox let the web through, so OpenTraffic didn't start it."; exit 1; fi; "#
+                + #"codex exec $p --skip-git-repo-check "$OPENTRAFFIC_PROMPT""#
+        case .cursor: return #"cursor-agent -p "$OPENTRAFFIC_PROMPT""#
+        case .opencode:
+            let bash = (["\"*\":\"deny\""] + feedback.map { "\"opentraffic \($0) *\":\"allow\"" }).joined(separator: ",")
+            return #"OPENCODE_CONFIG_CONTENT='{"permission":{"bash":{"# + bash + #"},"webfetch":"deny","external_directory":{""# + Self.screenshotFolder + #"/**":"allow"}}}' opencode run "$OPENTRAFFIC_PROMPT""#
+        case .custom: return #"~/bin/my-agent "$OPENTRAFFIC_SHARE" "$OPENTRAFFIC_COMMENT_ID""#
         }
     }
+
+    /// The `opentraffic` commands an agent working on one comment needs: no sharing, protecting, or removing.
+    public static let feedbackCommands = ["comments", "claim", "release", "reply", "resolve", "screenshot"]
+
+    /// Where an agent using the `opentraffic` command saves a comment's picture: outside the project, so it
+    /// isn't committed, and the one folder outside it opencode may read.
+    public static let screenshotFolder = "/tmp/opentraffic"
+
+    /// What 1.0.14 and earlier set for the presets: they denied the shell, and with it the `opentraffic`
+    /// command, so the agent had no way to the comment unless the user had set up the MCP server for it.
+    static let earlierCommands: [String: AgentPreset] = [
+        #"claude -p "$OPENTRAFFIC_PROMPT" --permission-mode acceptEdits --allowedTools mcp__opentraffic --disallowedTools "Bash,WebFetch,WebSearch,Read(./.env),Read(./.env.*)""#: .claudeCode,
+        #"codex exec -s workspace-write -c sandbox_workspace_write.network_access=false "$OPENTRAFFIC_PROMPT""#: .codex,
+        #"OPENCODE_CONFIG_CONTENT='{"permission":{"bash":"deny","webfetch":"deny"}}' opencode run "$OPENTRAFFIC_PROMPT""#: .opencode,
+    ]
 
     /// The preset whose command this is, if it's one of them unchanged.
     public static func matching(_ command: String) -> AgentPreset? {
         allCases.first { $0 != .custom && $0.command == command.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+
+    /// `command`, or the current preset's when it's what an earlier version set for that preset.
+    public static func upgraded(_ command: String) -> String {
+        earlierCommands[command.trimmingCharacters(in: .whitespacesAndNewlines)]?.command ?? command
     }
 }
 
@@ -53,12 +89,15 @@ public struct AgentRunRequest: Equatable, Sendable {
     public let shareName: String
     public let commentID: String
     public let client: String
+    /// OpenTraffic's private socket, which the `opentraffic` command reaches it on.
+    public let socket: String
 
-    public init(shareID: UUID, shareName: String, commentID: String, client: String) {
+    public init(shareID: UUID, shareName: String, commentID: String, client: String, socket: String) {
         self.shareID = shareID
         self.shareName = shareName
         self.commentID = commentID
         self.client = client
+        self.socket = socket
     }
 
     /// What the agent is asked to do. Only ids and the share's name (the host's own words): never the
@@ -66,8 +105,8 @@ public struct AgentRunRequest: Equatable, Sendable {
     public var prompt: String {
         """
         Someone left comment \(commentID) on the OpenTraffic share "\(shareName)" (share id \(shareID.uuidString)), \
-        a public link to the dev server of the project in this folder. Handle it with OpenTraffic's MCP tools \
-        (or the `opentraffic` command):
+        a public link to the dev server of the project in this folder. Handle it with OpenTraffic's MCP tools, or \
+        without them with the `opentraffic` command (\(cliSteps)):
         1. claim_comment it. If another app already claimed it or it's resolved, stop.
         2. Read it with get_feedback (status: all) and look at it with get_screenshot. Its `context` gives the \
         element's selector and, on dev servers that expose it, the component and source file: start there. \
@@ -83,7 +122,21 @@ public struct AgentRunRequest: Equatable, Sendable {
         """
     }
 
-    /// Variables the command can use, on top of the user's environment.
+    /// The steps as `opentraffic` commands, each one of `AgentPreset.feedbackCommands`.
+    private var cliSteps: String {
+        let share = shareID.uuidString
+        return [
+            "`opentraffic claim \(share) \(commentID) [progress]`",
+            "`opentraffic comments \(share) --all --json`",
+            "`opentraffic screenshot \(share) \(commentID) -o \(AgentPreset.screenshotFolder)/` (it prints the file it saved)",
+            "`opentraffic reply \(share) \(commentID) \"text\"`",
+            "`opentraffic resolve \(share) \(commentID)`",
+            "`opentraffic release \(share) \(commentID)`",
+        ].joined(separator: ", ")
+    }
+
+    /// Variables the command can use, on top of the user's environment. `OPENTRAFFIC_SOCKET` is where the
+    /// `opentraffic` command reaches OpenTraffic, for sandboxes that have to let it through (Codex's).
     public var environment: [String: String] {
         [
             "OPENTRAFFIC_SHARE": shareName,
@@ -91,6 +144,7 @@ public struct AgentRunRequest: Equatable, Sendable {
             "OPENTRAFFIC_COMMENT_ID": commentID,
             "OPENTRAFFIC_CLIENT": client,
             "OPENTRAFFIC_PROMPT": prompt,
+            "OPENTRAFFIC_SOCKET": socket,
         ]
     }
 }

@@ -366,7 +366,8 @@ final class AppStore {
         self.notifyOnFailure = defaults.object(forKey: "notifyOnFailure") as? Bool ?? true
         self.notifyCollaboration = defaults.object(forKey: "notifyCollaboration") as? Bool ?? true
         self.collaborationHostName = defaults.string(forKey: "collaborationHostName") ?? ""
-        self.agentCommand = defaults.string(forKey: "agentCommand") ?? ""
+        // A preset as an earlier version set it becomes the preset as it is now.
+        self.agentCommand = AgentPreset.upgraded(defaults.string(forKey: "agentCommand") ?? "")
         self.agentRunsAutomatically = defaults.object(forKey: "agentRunsAutomatically") as? Bool ?? false
         self.apiEnabled = defaults.object(forKey: "apiEnabled") as? Bool ?? false
         self.apiPort = (defaults.object(forKey: "apiPort") as? Int).flatMap { (1024...65_535).contains($0) ? $0 : nil } ?? 47777

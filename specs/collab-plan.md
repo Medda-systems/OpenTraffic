@@ -330,8 +330,11 @@ A visitor's overlay only pictures a fix after they click **Take a look**.
 **Starting an agent (app).** Settings → Integrations → *Agent for comments* holds a command (presets for Claude Code,
 Codex, Cursor, opencode, or custom) and *Run it by itself* (off by default). OpenTraffic runs `/bin/zsh -c <command>`
 in the share's `agentDirectory` (else the local server's working directory, found from its pid, then remembered),
-with the user's login-shell PATH and `OPENTRAFFIC_PROMPT`, `OPENTRAFFIC_SHARE`, `OPENTRAFFIC_SHARE_ID`,
-`OPENTRAFFIC_COMMENT_ID`, `OPENTRAFFIC_CLIENT` — ids only, never visitor text. Triggers: **Send to …** in the Feedback
+with the user's login-shell PATH behind the app's own `Contents/Resources` (so `opentraffic` is this copy's), and
+`OPENTRAFFIC_PROMPT`, `OPENTRAFFIC_SHARE`, `OPENTRAFFIC_SHARE_ID`, `OPENTRAFFIC_COMMENT_ID`, `OPENTRAFFIC_CLIENT`,
+`OPENTRAFFIC_SOCKET` — ids only, never visitor text. The agent reaches the comment with the `opentraffic` command
+(the prompt lists the commands) or the MCP tools where the user set them up; a run that exits 0 without claiming,
+replying to, releasing, or resolving its comment is shown as failed (it never reached OpenTraffic). Triggers: **Send to …** in the Feedback
 tab, or by itself 5 s after a visitor's comment when it's still open and unclaimed, no client is in
 `wait_for_feedback` for the share (or was in the last 90 s), and no client holds another of its comments. One run per
 share at a time (the rest queue), 20-minute limit, **Stop** ends the command and what it started. A run that exits
@@ -378,10 +381,18 @@ none visible in normal use (`Sources/OpenTrafficCore/AgentSafety.swift`):
    active, the pid owning the connection's port (`lsof`). A caller descending from a running agent command's
    process (`ProcessAncestry`), or remembered from an earlier request of one, is held to `AgentRunScope`: MCP
    lists and accepts only get_feedback (filtered to its comment), get_screenshot, claim/release/reply/resolve
-   on its comment; REST likewise; everything else is 403. After its run, such a process may do nothing.
-2. **Presets** without shell or web: Claude Code `--disallowedTools "Bash,WebFetch,WebSearch,Read(./.env),
-   Read(./.env.*)"`; Codex `-s workspace-write -c sandbox_workspace_write.network_access=false`; Cursor without
-   `--force` (its allowlist); opencode `OPENCODE_CONFIG_CONTENT` denying bash and webfetch.
+   on its comment; REST likewise; everything else is 403. After its run, such a process may do nothing. Neither may
+   a process macOS holds this app responsible for (`responsibility_get_pid_responsible_for_pid`, which survives
+   reparenting) that isn't in a run's tree: a run let go of it (double fork, `setsid`) to get out of its scope.
+   Only when the app is responsible for itself (opened as an app, not from a terminal).
+2. **Presets** without web, the shell only for `opentraffic`'s comment commands (`AgentPreset.feedbackCommands`):
+   Claude Code `--permission-mode dontAsk` with `Read,Edit,Write,Glob,Grep,mcp__opentraffic,Bash(opentraffic
+   <command> *)` and `.env` reads denied; Codex in a permissions profile extending `:workspace` whose network goes
+   through Codex's proxy with nothing allowed but OpenTraffic's socket (`features.network_proxy`,
+   `permissions.<p>.network.unix_sockets`), no login shell (it would reset PATH), and the same sandbox tried on the
+   web first — Codex ignores settings it doesn't know, so it isn't started if the web gets through; Cursor without
+   `--force` (its allowlist); opencode `OPENCODE_CONFIG_CONTENT` denying bash but the comment commands, webfetch,
+   and reads outside the project but `/tmp/opentraffic` (screenshots).
 3. **ReplyRedactor** on API replies and claim progress: `.env*` values (≥ 8 characters, not examples) of the
    project folder and branch root, and key/token/private-key/URL-password patterns → `[hidden]`; the host gets a
    notice.

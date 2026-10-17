@@ -53,7 +53,7 @@ Every command takes `--json`. Exit status: `0` worked, `1` failed or refused, `2
 | `opentraffic claim <share> <comment> [progress]` | Say you're working on it: other agents leave it alone, and the session sees it. Again (optionally with progress text) to keep it; it lapses after 15 minutes. |
 | `opentraffic release <share> <comment>` | Stop working on a comment you claimed, without resolving it. |
 | `opentraffic delete-comment <share> <comment> --yes` | Delete. |
-| `opentraffic screenshot <share> <comment> [--after] [-o FILE]` | Save the picture of the commented element (WebP, PNG, or JPEG); `--after`, the picture of it once fixed. |
+| `opentraffic screenshot <share> <comment> [--after] [-o FILE\|FOLDER/]` | Save the picture of the commented element (WebP, PNG, or JPEG); `--after`, the picture of it once fixed. `-o FOLDER/` makes the folder if need be and names the file for you. |
 | `opentraffic errors <share>` | Browser errors visitors hit. |
 | `opentraffic logs <share> [-n LINES] [-f]` | The share's log. |
 | `opentraffic watch [share]` | Stream events: `share.started`, `share.stopped`, `session.joined`, `session.left`, `comment.created`, `comment.updated`, `comment.deleted`, `error.reported`. |

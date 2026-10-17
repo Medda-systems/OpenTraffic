@@ -210,7 +210,8 @@ final class Client: Sendable {
         if let app = location.appURL { arguments += ["-a", app.path] } else { arguments += ["-b", location.bundleID] }
         arguments += ["--args", "--background"]
         guard Shell.run("/usr/bin/open", arguments) != nil else {
-            throw CLIError.unavailable("Couldn't start OpenTraffic. Is it installed in Applications?")
+            // A sandbox without network access (Codex's) blocks the connection and starting the app alike.
+            throw CLIError.unavailable("Couldn't reach or start OpenTraffic. Is it installed in Applications? In a sandbox without network access, like Codex's, use OpenTraffic's MCP server instead.")
         }
     }
 

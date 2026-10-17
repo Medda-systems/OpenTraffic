@@ -25,6 +25,9 @@ public struct AgentRunScope: Equatable, Sendable {
         "get_feedback", "get_screenshot", "claim_comment", "release_comment", "reply_to_comment", "resolve_comment",
     ]
 
+    /// For a process OpenTraffic's runs left behind: no share, no comment, so every request is refused.
+    public static let nothing = AgentRunScope(shareID: UUID(uuid: UUID_NULL), commentID: "")
+
     static let refusal = "This agent was started by OpenTraffic for one comment, and may only read, claim, reply to, and resolve that comment."
 
     static func refused(_ extra: String? = nil) -> OpenTrafficAPIError {
@@ -56,6 +59,29 @@ public enum ProcessAncestry {
         }
         return false
     }
+
+    /// The app macOS holds responsible for `pid`: the one that started its chain of processes. Unlike the
+    /// parent, it stays when a process lets go of what it started (a child whose parent exits goes to
+    /// launchd). Nil if macOS can't tell.
+    public static func responsibleProcess(of pid: pid_t) -> pid_t? {
+        guard let responsible = responsibility, pid > 0 else { return nil }
+        let result = responsible(pid)
+        return result > 0 ? result : nil
+    }
+
+    /// Whether `pid` was started, however indirectly, by this app (`app`), when this app was opened as an
+    /// app (from the Finder, Dock or `open`), so that it's responsible for itself. Started from a terminal,
+    /// the terminal is responsible for the app and everything typed in it alike, so nothing can be told.
+    public static func startedByApp(_ pid: pid_t, app: pid_t = getpid()) -> Bool {
+        guard pid != app, responsibleProcess(of: app) == app else { return false }
+        return responsibleProcess(of: pid) == app
+    }
+
+    /// `responsibility_get_pid_responsible_for_pid`, which macOS has but doesn't declare in its headers.
+    private static let responsibility: (@convention(c) (pid_t) -> pid_t)? = {
+        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_get_pid_responsible_for_pid") else { return nil }
+        return unsafeBitCast(symbol, to: (@convention(c) (pid_t) -> pid_t).self)
+    }()
 
     /// The process on the other end of a loopback TCP connection that came from `port`, if it can be told.
     public static func ownerOfLocalTCPPort(_ port: Int) -> pid_t? {

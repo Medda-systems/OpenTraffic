@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Agents work without MCP:** the agent OpenTraffic starts for a comment reaches it with the `opentraffic` command when OpenTraffic's MCP server isn't set up for it, so Claude Code, Codex, and opencode work with nothing to set up. Their shell runs only OpenTraffic's comment commands, and OpenTraffic puts its own `opentraffic` first on their PATH, whether or not you linked the command. Codex's sandbox reaches OpenTraffic and nothing else; if a Codex version ever let the web through, OpenTraffic doesn't start it. Presets you hadn't changed are updated.
+- **An agent can't slip out of its comment:** a process an agent starts and then lets go of (so it no longer runs under the agent) may do nothing at all; before, it could do anything the `opentraffic` command can.
+- A run that ends without touching its comment shows as failed, saying it couldn't reach OpenTraffic, instead of finished.
+- `opentraffic screenshot -o FOLDER/` saves into a folder, made if need be, under the usual name. In a sandbox without network, the `opentraffic` command says so instead of asking whether OpenTraffic is installed.
+
 ## 1.0.14 (16 October 2026)
 
 - **Following is smooth:** when you follow someone, your page glides along with their scrolling and keeps up with them, instead of trailing behind in steps.

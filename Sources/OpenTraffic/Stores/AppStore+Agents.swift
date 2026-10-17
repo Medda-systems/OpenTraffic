@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import OpenTrafficCore
+import OpenTrafficSocket
 
 /// The agent command's run for one comment.
 struct AgentRun: Equatable {
@@ -17,6 +18,9 @@ struct AgentRun: Equatable {
     let directory: String
     let startedAt: Date
     var state = State.running
+    /// It claimed, replied to, released, or resolved its comment through OpenTraffic. A run that ends
+    /// without doing any of that never got to OpenTraffic's tools, whatever its exit status says.
+    var reachedOpenTraffic = false
     /// The last lines it printed.
     var output: [String] = []
     /// The last line hasn't ended yet.
@@ -54,24 +58,29 @@ extension AppStore {
     // MARK: Safety
 
     /// The comment a caller is held to, when it's part of a run of the agent command (see `AgentRunScope`):
-    /// the run's own processes, and anything they started, wherever it calls from.
+    /// the run's own processes, and anything they started, wherever it calls from. A process this app
+    /// started that isn't in any run's tree was let go by one (its parent exited, so it went to launchd),
+    /// perhaps to get out of its scope: it may do nothing at all.
     func agentRunScope(for caller: APICaller) async -> AgentRunScope? {
         let runs: [(pid_t, AgentRunScope)] = agentProcesses.compactMap { id, process in
             guard let run = agentRuns[id], run.state == .running, process.isRunning else { return nil }
             return (process.processIdentifier, AgentRunScope(shareID: id, commentID: run.commentID))
         }
         let remembered = agentRunCallers
-        guard !runs.isEmpty || !remembered.isEmpty else { return nil }
+        // Without runs, only a caller on the socket is checked: finding a TCP caller's process takes lsof.
+        guard !runs.isEmpty || !remembered.isEmpty || caller.pid != nil else { return nil }
         let scope = await Task.detached { () -> (pid_t, AgentRunScope)? in
-            guard let pid = caller.pid ?? caller.tcpPort.flatMap(ProcessAncestry.ownerOfLocalTCPPort) else { return nil }
+            let lookUp = !runs.isEmpty || !remembered.isEmpty
+            guard let pid = caller.pid ?? (lookUp ? caller.tcpPort.flatMap(ProcessAncestry.ownerOfLocalTCPPort) : nil) else { return nil }
             if let scope = remembered[pid] { return (pid, scope) }
             for (root, scope) in runs where ProcessAncestry.descends(pid, from: [root]) { return (pid, scope) }
+            if ProcessAncestry.startedByApp(pid) { return (pid, .nothing) }
             return nil
         }.value
         guard let (pid, found) = scope else { return nil }
         agentRunCallers[pid] = found
         // A process left over from a run that's over may do nothing at all.
-        return runs.contains { $0.1 == found } ? found : AgentRunScope(shareID: found.shareID, commentID: "")
+        return runs.contains { $0.1 == found } ? found : .nothing
     }
 
     /// Text an app wants visitors to see (a reply, its progress), with anything that looks like a secret
@@ -173,7 +182,7 @@ extension AppStore {
                 notice = AppNotice(.error, "Choose the project folder for “\(definition.name)” in its Feedback tab, so the agent knows where to work.")
                 return
             }
-            launchAgent(AgentRunRequest(shareID: id, shareName: definition.name, commentID: commentID, client: agentClientName), in: directory)
+            launchAgent(AgentRunRequest(shareID: id, shareName: definition.name, commentID: commentID, client: agentClientName, socket: AppSocket.path()), in: directory)
             return
         }
     }
@@ -188,7 +197,7 @@ extension AppStore {
             let path = await self.userShellPath()
             // Stopped (or the share removed) while looking up PATH.
             guard self.agentRuns[id]?.id == run.id, self.agentRuns[id]?.state == .running else { return }
-            let process = AgentProcess(command: command, directory: directory, environment: request.environment, path: path)
+            let process = AgentProcess(command: command, directory: directory, environment: request.environment, path: self.agentPath(path))
             do {
                 try process.start(
                     output: { [weak self] text in
@@ -230,7 +239,13 @@ extension AppStore {
         agentProcesses[id] = nil
         let commentID = run.commentID
         if run.state == .running {
-            run.state = status == 0 ? .finished : .failed(signalled ? "The agent stopped." : "The agent command exited with status \(status).")
+            if status != 0 {
+                run.state = .failed(signalled ? "The agent stopped." : "The agent command exited with status \(status).")
+            } else if !run.reachedOpenTraffic {
+                run.state = .failed("\(run.client) ended without touching the comment: it couldn't reach OpenTraffic. See its output.")
+            } else {
+                run.state = .finished
+            }
         }
         agentRuns[id] = run
         // It stopped without finishing: the comment is free for someone else.
@@ -252,6 +267,13 @@ extension AppStore {
         startNextAgentRun(for: id)
     }
 
+    /// An app worked on `commentID` through OpenTraffic: if it's the comment the share's run is for, that run
+    /// got to OpenTraffic's tools. Whoever called counts, since a custom command may go by any name.
+    func noteAgentReachedOpenTraffic(_ commentID: String, in id: UUID) {
+        guard agentRuns[id]?.state == .running, agentRuns[id]?.commentID == commentID else { return }
+        agentRuns[id]?.reachedOpenTraffic = true
+    }
+
     /// Stops the share's run, if one is going, and forgets the comments waiting for it unless `keepingQueue`.
     func stopAgentRun(for id: UUID, keepingQueue: Bool = false) {
         if !keepingQueue { agentQueues[id] = nil }
@@ -261,6 +283,14 @@ extension AppStore {
 
     func stopAllAgentRuns() {
         for id in Array(agentProcesses.keys) + Array(agentRuns.keys) { stopAgentRun(for: id) }
+    }
+
+    /// `path` with this copy of OpenTraffic's `opentraffic` command first, whether or not the user put one in
+    /// their PATH (Settings → General) and whichever copy that is: the agent's way to the comment.
+    private func agentPath(_ path: String) -> String {
+        guard let resources = Bundle.main.resourceURL,
+              FileManager.default.isExecutableFile(atPath: resources.appending(path: "opentraffic").path) else { return path }
+        return resources.path + ":" + path
     }
 
     /// The user's PATH from their shell, so `claude` and the like are found; looked up once.

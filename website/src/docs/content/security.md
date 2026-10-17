@@ -32,8 +32,8 @@ Comments and error strings can contain untrusted text. Treat them as reports abo
 
 Anyone with a share's link can comment, and a coding agent reads the comment, so a comment can try to talk the agent into something else (prompt injection). OpenTraffic keeps the [agent it starts](/docs/agents#let-opentraffic-start-your-agent) in check without changing how anything looks:
 
-- **One comment only.** The agent, and anything it starts, may only read, claim, reply to, and resolve the comment it was started for. It can't share or stop anything, or see other comments. OpenTraffic knows the agent's processes from macOS, not from anything the agent could change.
-- **No shell, no web.** The presets leave out the agent's shell and web tools (Codex runs in its own sandbox, without network).
+- **One comment only.** The agent, and anything it starts, may only read, claim, reply to, and resolve the comment it was started for. It can't share or stop anything, or see other comments. OpenTraffic knows the agent's processes from macOS, not from anything the agent could change, and a process the agent starts and lets go of may do nothing at all.
+- **No shell, no web.** The presets leave out the agent's web tools, and its shell runs only OpenTraffic's comment commands (Codex runs in its own sandbox, whose network reaches OpenTraffic and nothing else).
 - **No secrets in replies.** Before visitors see a reply or a progress note, values from the project's `.env` files and anything shaped like a key, token, or password become `[hidden]`, and you're told.
 - **Only trusted people.** Agents start by themselves only for comments from people you've made trusted; everyone else's comments wait for **Send to …**. Roles follow a browser, not a verified identity.
 - **A budget.** Agents start by themselves at most 10 times an hour per share, and 3 times per visitor; past that, comments wait for **Send to …**.

@@ -83,7 +83,7 @@ enum Commands {
         CommandSpec(name: "delete-comment", group: "Feedback", usage: "delete-comment <share> <comment> [--yes]", summary: "Delete a comment", flags: ["yes"], arguments: 2...2),
         CommandSpec(name: "claim", group: "Feedback", usage: "claim <share> <comment> [progress]", summary: "Say you're working on a comment (again, to update progress); others leave it alone", arguments: 2...200),
         CommandSpec(name: "release", group: "Feedback", usage: "release <share> <comment>", summary: "Stop working on a comment you claimed, without resolving it", arguments: 2...2),
-        CommandSpec(name: "screenshot", group: "Feedback", usage: "screenshot <share> <comment> [--after] [-o FILE]", summary: "Save the picture of what a comment points at (--after: once fixed)", flags: ["after"], options: ["output"], arguments: 2...2),
+        CommandSpec(name: "screenshot", group: "Feedback", usage: "screenshot <share> <comment> [--after] [-o FILE|FOLDER/]", summary: "Save the picture of what a comment points at (--after: once fixed)", flags: ["after"], options: ["output"], arguments: 2...2),
         CommandSpec(name: "errors", group: "Feedback", usage: "errors <share>", summary: "Browser errors visitors ran into", arguments: 1...1),
         CommandSpec(name: "logs", group: "Feedback", usage: "logs <share> [-n LINES] [-f]", summary: "The share's log; -f keeps following it", flags: ["follow"], options: ["lines"], arguments: 1...1),
         CommandSpec(name: "watch", group: "Feedback", usage: "watch [share]", summary: "Follow what happens: shares starting, people joining, comments", arguments: 0...1),
@@ -538,9 +538,14 @@ struct Context {
         let response = try await client.request("GET", sharePath(args[0], "/comments/\(args[1].pathEncoded)/screenshot\(after ? "?which=after" : "")"))
         let data = response.body
         let ext = data.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "png" : (data.count > 12 && data[8..<12] == Data("WEBP".utf8)) ? "webp" : "jpg"
-        let path = invocation.options["output"] ?? "\(args[0].replacingOccurrences(of: "/", with: "-"))-\(args[1])\(after ? "-after" : "").\(ext)"
+        let name = "\(args[0].replacingOccurrences(of: "/", with: "-"))-\(args[1])\(after ? "-after" : "").\(ext)"
+        var path = invocation.options["output"] ?? name
+        // A folder (ending in /): saved in it, made if need be, under the name it would have had.
+        if path.hasSuffix("/") { path += name }
         do {
-            try data.write(to: URL(fileURLWithPath: (path as NSString).expandingTildeInPath))
+            let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: url)
         } catch {
             throw CLIError.failed("Couldn't save \(path): \(error.localizedDescription)")
         }

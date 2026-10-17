@@ -76,7 +76,7 @@ opentraffic stop --all
 | `claim <share> <comment> [progress]` | Say you're working on it, so other agents leave it alone and the session sees it; again to update the progress and keep the claim (it lapses after 15 minutes). |
 | `release <share> <comment>` | Stop working on a comment you claimed, without resolving it. |
 | `delete-comment <share> <comment> [--yes]` | Delete. |
-| `screenshot <share> <comment> [--after] [-o FILE]` | Save the picture of what the comment points at; `--after`, the picture of it once fixed. |
+| `screenshot <share> <comment> [--after] [-o FILE\|FOLDER/]` | Save the picture of what the comment points at; `--after`, the picture of it once fixed. A folder (ending in `/`) is made if need be, and the picture gets its usual name in it. |
 | `errors <share>` | Browser errors visitors ran into. |
 | `logs <share> [-n LINES] [-f]` | The share's log; `-f` keeps following it. |
 | `watch [share]` | Follow events as they happen: shares starting and stopping, people joining, comments, errors. |
