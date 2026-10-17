@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.17 (17 October 2026)
 
 - **The page catches up by itself:** when a fix lands, or the share's project files change, every page in the session updates without a reload, even on a plain static server. Only what changed is replaced, so a comment being written, text typed into the page, the open comment, and the scroll position stay as they were; someone typing into the page gets a pause first. Changed stylesheets swap in without a flash. Dev servers with hot reload are left to it, and a page its scripts build is reloaded once nobody is busy, with the open comment brought back.
 - **The picture of a fix shows the fix:** it's taken once the page has caught up, instead of from the page as it was.
