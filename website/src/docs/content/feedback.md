@@ -1,6 +1,6 @@
 ## Pin a comment
 
-In a collaborative page, choose **Comment**, select an element, and describe the problem. A comment includes the element’s label, page title and path, a picture of the selected element with text fields blanked, and the visitor’s browser and viewport information. Optional browser error collection adds errors associated with the session.
+In a collaborative page, choose **Comment**, select an element, and describe the problem. A comment includes the element’s label, page title and path, a picture of the selected element (framed on it, with a little of the page around it, or on the area dragged out) with text fields blanked, and the visitor’s browser and viewport information. Click a picture to see it large, right on the page or in the Feedback tab. Optional browser error collection adds errors associated with the session.
 
 **Suggest an edit.** In the comment box, **Edit text** rewrites the element's text and **Edit style** changes its colours, size, weight, padding, or corner radius: click a swatch for a palette (with the colours the page already uses, any colour, and an eyedropper in Chrome and Edge), drag the sliders, or pick a weight. Each row has its own undo. You see the result on the page while you work; posting sends the exact change (old → new) with the comment and puts the page back. Anyone opening the comment can **Preview on the page**, in their own browser only. An agent applies the change as given.
 
@@ -16,7 +16,7 @@ Open **Feedback** in OpenTraffic (**⌘4**) to review threads. Reply from the ap
 
 When you, an agent, or anyone else resolves a comment, the person who wrote it is told: **“Claude Code fixed your comment”**, with **Take a look**, which opens the page at the element. Their comment then asks **Looks good** or **Reopen**. If they weren't on the page, they're told the next time they open the link. The Feedback tab shows who resolved each comment and whether its author confirmed the fix, and OpenTraffic can notify you when they do (or reopen it).
 
-The comment also gets a picture of the fix next to the original, as **Before** and **After**. Your own page takes it when you've opened the share as host and you're on that page (or come back to it). Otherwise the commenter's page takes it when they click **Take a look**. A visitor's page never takes one without them doing something, and text fields are blanked as in the original picture.
+The comment also gets a picture of the fix, framed like the original. The comment then shows **After**, and **Hold to see before** shows the original for as long as you hold it (Space does the same in the large view), on the page and in the Feedback tab. Your own page takes the picture when you've opened the share as host and you're on that page (or come back to it). Otherwise the commenter's page takes it when they click **Take a look**. A visitor's page never takes one without them doing something, and text fields are blanked as in the original picture.
 
 **Copy as Markdown** and **Copy as GitHub issue** prepare text for another tool. They do not publish an issue automatically.
 

@@ -21,6 +21,9 @@ struct AgentRun: Equatable {
     /// It claimed, replied to, released, or resolved its comment through OpenTraffic. A run that ends
     /// without doing any of that never got to OpenTraffic's tools, whatever its exit status says.
     var reachedOpenTraffic = false
+    /// It replied to, released, or resolved its comment: it said what became of it. A run that only claimed
+    /// it stopped partway (the claim is released when it ends).
+    var answered = false
     /// The last lines it printed.
     var output: [String] = []
     /// The last line hasn't ended yet.
@@ -243,6 +246,8 @@ extension AppStore {
                 run.state = .failed(signalled ? "The agent stopped." : "The agent command exited with status \(status).")
             } else if !run.reachedOpenTraffic {
                 run.state = .failed("\(run.client) ended without touching the comment: it couldn't reach OpenTraffic. See its output.")
+            } else if !run.answered {
+                run.state = .failed("\(run.client) stopped before answering the comment. See its output.")
             } else {
                 run.state = .finished
             }
@@ -268,10 +273,12 @@ extension AppStore {
     }
 
     /// An app worked on `commentID` through OpenTraffic: if it's the comment the share's run is for, that run
-    /// got to OpenTraffic's tools. Whoever called counts, since a custom command may go by any name.
-    func noteAgentReachedOpenTraffic(_ commentID: String, in id: UUID) {
+    /// got to OpenTraffic's tools, and with `answering` (a reply, release, or resolve) said what became of it.
+    /// Whoever called counts, since a custom command may go by any name.
+    func noteAgentReachedOpenTraffic(_ commentID: String, in id: UUID, answering: Bool = false) {
         guard agentRuns[id]?.state == .running, agentRuns[id]?.commentID == commentID else { return }
         agentRuns[id]?.reachedOpenTraffic = true
+        if answering { agentRuns[id]?.answered = true }
     }
 
     /// Stops the share's run, if one is going, and forgets the comments waiting for it unless `keepingQueue`.

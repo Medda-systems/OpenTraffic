@@ -132,13 +132,8 @@ private struct CommentRow: View {
                         .help(context.selector.map { "Where it comes from in the code\n\($0)" } ?? "Where it comes from in the code")
                 }
                 CommentStatus(store: store, tunnelID: tunnelID, comment: comment)
-                if let afterScreenshot {
-                    HStack(alignment: .top, spacing: Spacing.s) {
-                        if let screenshot { picture(screenshot, caption: "Before", width: 220) }
-                        picture(afterScreenshot, caption: "After", width: 220)
-                    }
-                } else if let screenshot {
-                    picture(screenshot, caption: nil, width: 360)
+                if screenshot != nil || afterScreenshot != nil {
+                    CommentPicture(before: screenshot, after: afterScreenshot)
                 }
                 if let environment = comment.environment {
                     Text("\(environment.browser) · \(environment.os) · \(environment.viewport)")
@@ -201,27 +196,6 @@ private struct CommentRow: View {
             Button("Delete", role: .destructive) { Task { await store.deleteComment(comment.id, for: tunnelID) } }
         } message: {
             Text("It disappears for everyone in the session.")
-        }
-    }
-
-    private func picture(_ loaded: LoadedScreenshot, caption: String?, width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if let caption {
-                Text(caption).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            }
-            Button {
-                NSWorkspace.shared.open(loaded.url)
-            } label: {
-                Image(nsImage: loaded.image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: width, maxHeight: 220, alignment: .leading)
-                    .clipShape(RoundedRectangle(cornerRadius: Radius.small))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.small).stroke(.quaternary))
-            }
-            .buttonStyle(.plain)
-            .help("Open the full picture")
-            .accessibilityLabel(caption.map { "\($0): picture of the pinned element" } ?? "Screenshot of the pinned element")
         }
     }
 
@@ -359,6 +333,71 @@ private struct AgentOutput: View {
             .onAppear { proxy.scrollTo("end", anchor: .bottom) }
         }
         .frame(width: 520, height: 320)
+    }
+}
+
+/// A comment's picture: the fix once there's a picture of it, with "Hold to see before" for the comment's
+/// own, as in the page overlay. Clicking it shows it larger right here, and again, smaller.
+private struct CommentPicture: View {
+    let before: LoadedScreenshot?
+    let after: LoadedScreenshot?
+    @State private var holding = false
+    @State private var large = false
+
+    var body: some View {
+        let pair = before != nil && after != nil
+        let showing = holding && pair ? before : after ?? before
+        if let showing {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                if pair {
+                    HStack(spacing: Spacing.s) {
+                        Text(holding ? "Before" : "After")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: Spacing.s)
+                        HoldToSeeBefore(holding: $holding)
+                    }
+                }
+                Button {
+                    withAnimation(.snappy(duration: 0.25)) { large.toggle() }
+                } label: {
+                    Image(nsImage: showing.image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        // Larger: up to twice the picture's own size, so a small element's picture stays sharp.
+                        .frame(maxWidth: large ? max(360, showing.image.size.width * 2) : 360, maxHeight: large ? 600 : 220, alignment: .leading)
+                        .clipShape(RoundedRectangle(cornerRadius: Radius.small))
+                        .overlay(RoundedRectangle(cornerRadius: Radius.small).stroke(.quaternary))
+                }
+                .buttonStyle(.plain)
+                .help(large ? "Show it smaller" : "Show it larger")
+                .accessibilityLabel(holding && pair ? "Picture of the element before the fix"
+                    : pair ? "Picture of the element after the fix" : "Picture of the commented element")
+                .accessibilityHint(large ? "Shows it smaller" : "Shows it larger")
+            }
+            .frame(maxWidth: large ? .infinity : 360, alignment: .leading)
+        }
+    }
+}
+
+/// Shows the picture from before the fix for as long as it's held.
+private struct HoldToSeeBefore: View {
+    @Binding var holding: Bool
+
+    var body: some View {
+        Text("Hold to see before")
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .foregroundStyle(holding ? Color.white : Color.primary)
+            .background(holding ? Color.accentColor : Color.secondary.opacity(0.15), in: Capsule())
+            .contentShape(Capsule())
+            .onLongPressGesture(minimumDuration: .infinity, maximumDistance: .infinity, pressing: { holding = $0 }, perform: {})
+            .help("Shows the page as it was before the fix while you hold it")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("Before the fix")
+            .accessibilityValue(holding ? "Showing before" : "Showing after")
+            .accessibilityAction { holding.toggle() }
     }
 }
 

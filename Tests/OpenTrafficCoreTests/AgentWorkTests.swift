@@ -413,7 +413,8 @@ private func run(_ command: String, in directory: URL = FileManager.default.temp
     let claude = try await output(.claudeCode)
     #expect(claude.firstIndex(of: "--permission-mode").map { claude[$0 + 1] } == "dontAsk")
     let allowed = try #require(claude.firstIndex(of: "--allowedTools").map { claude[$0 + 1].split(separator: ",").map(String.init) })
-    #expect(allowed.filter { $0.hasPrefix("Bash") } == AgentPreset.feedbackCommands.map { "Bash(opentraffic \($0) *)" })
+    #expect(allowed.filter { $0.hasPrefix("Bash") } == AgentPreset.feedbackCommands.map { "Bash(opentraffic \($0) *)" }
+        + ["Bash(mkdir -p /tmp/opentraffic)", "Bash(mkdir -p /tmp/opentraffic/)"])
     #expect(allowed.contains("mcp__opentraffic"))
     #expect(claude.firstIndex(of: "--disallowedTools").map { claude[$0 + 1] } == "WebFetch,WebSearch,Read(./.env),Read(./.env.*)")
 
@@ -429,6 +430,7 @@ private func run(_ command: String, in directory: URL = FileManager.default.temp
     let permission = try #require(opencode["permission"] as? [String: Any])
     var bash = ["*": "deny"]
     for command in AgentPreset.feedbackCommands { bash["opentraffic \(command) *"] = "allow" }
+    for command in ["mkdir -p /tmp/opentraffic", "mkdir -p /tmp/opentraffic/"] { bash[command] = "allow" }
     #expect(permission["bash"] as? [String: String] == bash)
     #expect(permission["webfetch"] as? String == "deny")
     #expect(permission["external_directory"] as? [String: String] == ["\(AgentPreset.screenshotFolder)/**": "allow"])
@@ -450,6 +452,10 @@ private func run(_ command: String, in directory: URL = FileManager.default.temp
     let commands = request.prompt.matches(of: try Regex<(Substring, Substring)>(#"`opentraffic (\w+) "#)).map { String($0.1) }
     #expect(Set(commands) == Set(AgentPreset.feedbackCommands))
     #expect(request.prompt.contains("-o \(AgentPreset.screenshotFolder)/`"))
+    // Agents join commands, and a joined command is refused whole when any part isn't allowed.
+    #expect(request.prompt.contains("Run each `opentraffic` command on its own"))
+    #expect(request.prompt.contains("run it again by itself"))
+    #expect(request.prompt.contains("The screenshot command makes its folder"))
 }
 
 @Test func stoppingTheAgentStopsWhatItStarted() async throws {

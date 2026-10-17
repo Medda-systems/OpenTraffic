@@ -44,6 +44,7 @@ public enum AgentPreset: String, CaseIterable, Codable, Identifiable, Sendable {
         switch self {
         case .claudeCode:
             let allowed = ["Read", "Edit", "Write", "Glob", "Grep", "mcp__opentraffic"] + feedback.map { "Bash(opentraffic \($0) *)" }
+                + Self.screenshotFolderCommands.map { "Bash(\($0))" }
             return #"claude -p "$OPENTRAFFIC_PROMPT" --permission-mode dontAsk --allowedTools ""# + allowed.joined(separator: ",") + #"" --disallowedTools "WebFetch,WebSearch,Read(./.env),Read(./.env.*)""#
         case .codex:
             return #"p=(-c allow_login_shell=false -c features.network_proxy=true -c 'default_permissions="opentraffic"' -c 'permissions.opentraffic.extends=":workspace"' -c permissions.opentraffic.network.enabled=true -c 'permissions.opentraffic.network.unix_sockets={"'"$OPENTRAFFIC_SOCKET"'"="allow"}'); "#
@@ -51,7 +52,8 @@ public enum AgentPreset: String, CaseIterable, Codable, Identifiable, Sendable {
                 + #"codex exec $p --skip-git-repo-check "$OPENTRAFFIC_PROMPT""#
         case .cursor: return #"cursor-agent -p "$OPENTRAFFIC_PROMPT""#
         case .opencode:
-            let bash = (["\"*\":\"deny\""] + feedback.map { "\"opentraffic \($0) *\":\"allow\"" }).joined(separator: ",")
+            let bash = (["\"*\":\"deny\""] + feedback.map { "\"opentraffic \($0) *\":\"allow\"" }
+                + Self.screenshotFolderCommands.map { "\"\($0)\":\"allow\"" }).joined(separator: ",")
             return #"OPENCODE_CONFIG_CONTENT='{"permission":{"bash":{"# + bash + #"},"webfetch":"deny","external_directory":{""# + Self.screenshotFolder + #"/**":"allow"}}}' opencode run "$OPENTRAFFIC_PROMPT""#
         case .custom: return #"~/bin/my-agent "$OPENTRAFFIC_SHARE" "$OPENTRAFFIC_COMMENT_ID""#
         }
@@ -64,9 +66,16 @@ public enum AgentPreset: String, CaseIterable, Codable, Identifiable, Sendable {
     /// isn't committed, and the one folder outside it opencode may read.
     public static let screenshotFolder = "/tmp/opentraffic"
 
-    /// What 1.0.14 and earlier set for the presets: they denied the shell, and with it the `opentraffic`
-    /// command, so the agent had no way to the comment unless the user had set up the MCP server for it.
+    /// Making that folder, exactly: agents do it first (the screenshot command makes it anyway), and a
+    /// command they join it to would be refused as a whole without it.
+    static let screenshotFolderCommands = ["mkdir -p \(screenshotFolder)", "mkdir -p \(screenshotFolder)/"]
+
+    /// What earlier versions set for the presets. 1.0.14 and earlier denied the shell, and with it the
+    /// `opentraffic` command, so the agent had no way to the comment unless the user had set up the MCP server
+    /// for it; 1.0.15 refused `mkdir` for the screenshot folder, and with it any command joined to it.
     static let earlierCommands: [String: AgentPreset] = [
+        #"claude -p "$OPENTRAFFIC_PROMPT" --permission-mode dontAsk --allowedTools "Read,Edit,Write,Glob,Grep,mcp__opentraffic,Bash(opentraffic comments *),Bash(opentraffic claim *),Bash(opentraffic release *),Bash(opentraffic reply *),Bash(opentraffic resolve *),Bash(opentraffic screenshot *)" --disallowedTools "WebFetch,WebSearch,Read(./.env),Read(./.env.*)""#: .claudeCode,
+        #"OPENCODE_CONFIG_CONTENT='{"permission":{"bash":{"*":"deny","opentraffic comments *":"allow","opentraffic claim *":"allow","opentraffic release *":"allow","opentraffic reply *":"allow","opentraffic resolve *":"allow","opentraffic screenshot *":"allow"},"webfetch":"deny","external_directory":{"/tmp/opentraffic/**":"allow"}}}' opencode run "$OPENTRAFFIC_PROMPT""#: .opencode,
         #"claude -p "$OPENTRAFFIC_PROMPT" --permission-mode acceptEdits --allowedTools mcp__opentraffic --disallowedTools "Bash,WebFetch,WebSearch,Read(./.env),Read(./.env.*)""#: .claudeCode,
         #"codex exec -s workspace-write -c sandbox_workspace_write.network_access=false "$OPENTRAFFIC_PROMPT""#: .codex,
         #"OPENCODE_CONFIG_CONTENT='{"permission":{"bash":"deny","webfetch":"deny"}}' opencode run "$OPENTRAFFIC_PROMPT""#: .opencode,
@@ -106,7 +115,9 @@ public struct AgentRunRequest: Equatable, Sendable {
         """
         Someone left comment \(commentID) on the OpenTraffic share "\(shareName)" (share id \(shareID.uuidString)), \
         a public link to the dev server of the project in this folder. Handle it with OpenTraffic's MCP tools, or \
-        without them with the `opentraffic` command (\(cliSteps)):
+        without them with the `opentraffic` command (\(cliSteps)). Run each `opentraffic` command on its own, not \
+        joined to other commands with `&&`, `;`, or `|`: a joined command is refused whole if any part of it isn't \
+        allowed. If a command is refused, run it again by itself. The screenshot command makes its folder.
         1. claim_comment it. If another app already claimed it or it's resolved, stop.
         2. Read it with get_feedback (status: all) and look at it with get_screenshot. Its `context` gives the \
         element's selector and, on dev servers that expose it, the component and source file: start there. \
@@ -128,7 +139,7 @@ public struct AgentRunRequest: Equatable, Sendable {
         return [
             "`opentraffic claim \(share) \(commentID) [progress]`",
             "`opentraffic comments \(share) --all --json`",
-            "`opentraffic screenshot \(share) \(commentID) -o \(AgentPreset.screenshotFolder)/` (it prints the file it saved)",
+            "`opentraffic screenshot \(share) \(commentID) -o \(AgentPreset.screenshotFolder)/` (it prints the file it saved; look at that file)",
             "`opentraffic reply \(share) \(commentID) \"text\"`",
             "`opentraffic resolve \(share) \(commentID)`",
             "`opentraffic release \(share) \(commentID)`",

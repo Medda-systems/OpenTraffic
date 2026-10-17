@@ -425,7 +425,7 @@ extension AppStore {
     func apiResolve(_ reference: String, commentID: String, resolved: Bool, client: String?) async throws -> APIComment {
         let definition = try apiDefinition(reference)
         _ = try apiComment(definition, commentID)
-        if client != nil { noteAgentReachedOpenTraffic(commentID, in: definition.id) }
+        if client != nil { noteAgentReachedOpenTraffic(commentID, in: definition.id, answering: true) }
         await resolveComment(commentID, resolved: resolved, for: definition.id, by: client, agent: client != nil)
         return apiComment(try apiComment(definition, commentID), in: definition.id)
     }
@@ -456,7 +456,7 @@ extension AppStore {
     func apiRelease(_ reference: String, commentID: String, client: String) throws -> APIComment {
         let definition = try apiDefinition(reference)
         let comment = try apiComment(definition, commentID)
-        noteAgentReachedOpenTraffic(commentID, in: definition.id)
+        noteAgentReachedOpenTraffic(commentID, in: definition.id, answering: true)
         if let holder = agentClaims.claim(share: definition.id, comment: commentID), holder.agent != client {
             throw OpenTrafficAPIError.conflict("\(holder.agent) is working on comment \(commentID), not \(client).")
         }
@@ -472,7 +472,7 @@ extension AppStore {
     func apiReply(_ reference: String, commentID: String, text: String, client: String) async throws -> APIComment {
         let definition = try apiDefinition(reference)
         _ = try apiComment(definition, commentID)
-        noteAgentReachedOpenTraffic(commentID, in: definition.id)
+        noteAgentReachedOpenTraffic(commentID, in: definition.id, answering: true)
         guard let text = text.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank, text.count <= CollabRoom.maximumCommentLength else {
             throw OpenTrafficAPIError.badRequest("text must be 1–\(CollabRoom.maximumCommentLength) characters.")
         }

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Agents don't trip over the screenshot folder:** the agent OpenTraffic starts for a comment often ran `mkdir -p /tmp/opentraffic` together with its `opentraffic` commands, and the whole line was refused, so opencode stopped after claiming the comment and Claude Code gave up. Making that folder is allowed now, and the agent is told to run each command on its own and to try a refused one again by itself. Presets you hadn't changed are updated.
+- **A run that stops partway says so:** an agent that claims a comment but ends without replying, resolving, or releasing it shows as **stopped before answering the comment**, instead of finished.
+- **Pictures are about the commented element:** a comment's picture is framed on the element (or the area dragged out) with a little of the page around it, instead of a large part of the page; the picture of the fix is framed the same way.
+- **See it large, in place:** click a comment's picture to see it large, over the page or in the Feedback tab, instead of in a new tab or window. Esc, or a click beside it, closes it.
+- **Hold to see before:** once a fix has its picture, a comment shows one picture, **After**, and **Hold to see before** shows the original for as long as you hold it, on the page and in the Feedback tab.
+
 ## 1.0.15 (17 October 2026)
 
 - **Agents work without MCP:** the agent OpenTraffic starts for a comment reaches it with the `opentraffic` command when OpenTraffic's MCP server isn't set up for it, so Claude Code, Codex, and opencode work with nothing to set up. Their shell runs only OpenTraffic's comment commands, and OpenTraffic puts its own `opentraffic` first on their PATH, whether or not you linked the command. Codex's sandbox reaches OpenTraffic and nothing else; if a Codex version ever let the web through, OpenTraffic doesn't start it. Presets you hadn't changed are updated.

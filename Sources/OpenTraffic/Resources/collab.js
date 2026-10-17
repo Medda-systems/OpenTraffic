@@ -750,14 +750,14 @@
 .cursor svg { display: block; width: 16px; height: 20px; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.35)); }
 .tag { position: absolute; left: 12px; top: 17px; max-width: 160px; padding: 2px 6px; border-radius: 6px;
   font: 600 11px/1.35 var(--tb-font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pill, .pop, .stage { --solid: #fbfbfd; --bg: rgba(255,255,255,.94); --fg: #1d1d1f; --muted: #6e6e73; --line: rgba(0,0,0,.1); --accent: #0a84ff; }
+.pill, .pop, .stage, .zoom { --solid: #fbfbfd; --bg: rgba(255,255,255,.94); --fg: #1d1d1f; --muted: #6e6e73; --line: rgba(0,0,0,.1); --accent: #0a84ff; }
 .pill { position: fixed; right: 16px; bottom: 16px; max-width: calc(100vw - 32px); display: flex; align-items: center; gap: 8px;
   padding: 4px 6px 4px 4px; border-radius: 999px; background: var(--bg); color: var(--fg);
   box-shadow: 0 6px 20px rgba(0,0,0,.12), 0 0 0 .5px var(--line);
   -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
   font: 500 12px/1.2 var(--tb-font); pointer-events: auto; user-select: none; -webkit-user-select: none; }
 @media (prefers-color-scheme: dark) {
-  .pill, .pop, .stage { --solid: #2c2c2e; --bg: rgba(44,44,46,.92); --fg: #f5f5f7; --muted: #a1a1a6; --line: rgba(255,255,255,.14); }
+  .pill, .pop, .stage, .zoom { --solid: #2c2c2e; --bg: rgba(44,44,46,.92); --fg: #f5f5f7; --muted: #a1a1a6; --line: rgba(255,255,255,.14); }
   .pill { box-shadow: 0 6px 20px rgba(0,0,0,.45), 0 0 0 .5px var(--line); }
 }
 button { all: unset; box-sizing: border-box; cursor: pointer; border-radius: 6px; }
@@ -839,9 +839,21 @@ textarea { all: unset; box-sizing: border-box; display: block; width: 100%; min-
 /* Cancel/Post and the reply buttons stay in view when a tall box scrolls. */
 .composer > .actions, .bubble > .actions { position: sticky; bottom: -10px; z-index: 1; margin: 8px -10px -10px; padding: 8px 10px 10px;
   background: var(--solid); border-radius: 0 0 12px 12px; box-shadow: 0 -1px 0 var(--line); }
-.shot { display: block; margin-top: 8px; border-radius: 8px; overflow: hidden; background: var(--line); cursor: zoom-in; }
-.shot:focus-visible { outline: 2px solid #0a84ff; outline-offset: 1px; }
-.shot img { display: block; width: 100%; height: 120px; object-fit: cover; object-position: center top; }
+.shot { display: block; width: 100%; margin-top: 8px; border-radius: 8px; overflow: hidden; background: var(--line); cursor: zoom-in; }
+.shot img { display: block; width: 100%; height: auto; max-height: 180px; object-fit: contain; }
+.shotrow { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 8px; }
+.shotrow .cap { margin-top: 0; }
+.shotrow + .shot { margin-top: 4px; }
+.hold { touch-action: none; user-select: none; -webkit-user-select: none; }
+.hold[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.zoom { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  padding: 24px; background: rgba(0,0,0,.62); pointer-events: auto; cursor: zoom-out; font: 400 13px/1.4 var(--tb-font); color: var(--fg); }
+.zoom img { display: block; max-width: 100%; max-height: calc(100vh - 112px); object-fit: contain; border-radius: 10px;
+  background: var(--solid); box-shadow: 0 20px 60px rgba(0,0,0,.45); cursor: default; }
+.zoombar { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 14px; border-radius: 999px; background: var(--bg);
+  box-shadow: 0 6px 20px rgba(0,0,0,.3), 0 0 0 .5px var(--line); cursor: default; }
+.zoombar .cap { margin-top: 0; min-width: 40px; }
+.zoombar .x { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: var(--line); }
 .envline { margin-top: 6px; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .thread { margin-top: 8px; border-top: .5px solid var(--line); max-height: 220px; overflow: auto; }
 .reply { padding-top: 7px; }
@@ -1475,23 +1487,17 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
   const bPreviewBtn = button("act small", "Preview on the page");
   bPreviewBtn.setAttribute("aria-pressed", "false");
   bEdits.append(bEditRows, bPreviewBtn);
-  const bShot = h("a", "shot");
-  bShot.target = "_blank";
-  bShot.rel = "noopener noreferrer";
-  bShot.title = "Open the screenshot in a new tab";
+  // One picture: the fix once there's a picture of it, else the comment's own. "Hold to see before"
+  // swaps to the comment's picture while it's pressed; clicking the picture shows it large, on the page.
+  const bShot = button("shot", null, "Show the picture larger");
+  bShot.title = "Show it larger";
   const bShotImg = h("img");
-  bShotImg.alt = "Screenshot of the commented element";
   bShotImg.decoding = "async"; // attached only while a comment with a screenshot is open
   const bFix = h("div", "fixline"); // who's working on it, or who fixed it
-  const bShotCap = h("div", "cap", "Before");
-  const bAfterCap = h("div", "cap", "After");
-  const bAfter = h("a", "shot");
-  bAfter.target = "_blank";
-  bAfter.rel = "noopener noreferrer";
-  bAfter.title = "Open the picture of the fix in a new tab";
-  const bAfterImg = h("img");
-  bAfterImg.alt = "The commented element after the fix";
-  bAfterImg.decoding = "async";
+  const bShotRow = h("div", "shotrow");
+  const bShotCap = h("div", "cap", "After");
+  const bHold = holdButton();
+  bShotRow.append(bShotCap, bHold);
   const bEnv = h("div", "envline");
   const bThread = h("div", "thread");
   bThread.setAttribute("role", "list");
@@ -1508,9 +1514,26 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
   const replyBtn = button("act primary", "Reply", "Send reply");
   const bActions = h("div", "actions");
   bActions.append(replyNote, resolveBtn, deleteBtn, confirmBtn, replyBtn);
-  bubble.append(bMeta, bLabel, bSource, bText, bEdits, bFix, bShotCap, bShot, bAfterCap, bAfter, bEnv, bThread, replyArea, bActions);
+  bubble.append(bMeta, bLabel, bSource, bText, bEdits, bFix, bShotRow, bShot, bEnv, bThread, replyArea, bActions);
   bubble.hidden = replyNote.hidden = bShot.hidden = bEnv.hidden = bThread.hidden = bSource.hidden = bEdits.hidden = true;
-  bFix.hidden = bShotCap.hidden = bAfterCap.hidden = bAfter.hidden = confirmBtn.hidden = true;
+  bFix.hidden = bShotRow.hidden = confirmBtn.hidden = true;
+
+  // The picture, large over the page: Esc, the close button, or a click beside it closes it.
+  const zoom = h("div", "zoom");
+  zoom.setAttribute("role", "dialog");
+  zoom.setAttribute("aria-modal", "true");
+  zoom.setAttribute("aria-label", "Picture of the commented element");
+  const zoomImg = h("img");
+  const zoomBar = h("div", "zoombar");
+  const zoomCap = h("div", "cap");
+  const zoomHold = holdButton();
+  const zoomClose = button("x", null, "Close");
+  zoomClose.append(icon(14, "M6 6l12 12M18 6L6 18"));
+  zoomBar.append(zoomCap, zoomHold, zoomClose);
+  zoom.append(zoomImg, zoomBar);
+  zoom.hidden = true;
+  // Pictures of the open comment: `before` (the comment's own) and `after` (the fix), either may be "".
+  const shots = { before: "", after: "", holding: false };
 
   // "Fixed: take a look", for the person whose comment it was.
   const toast = h("div", "pop toast");
@@ -1570,7 +1593,7 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
 
   if (styleEl) root.append(styleEl);
   root.append(pinLayer, layer, toast, viewer, pill, colorProbe);
-  uiRoot.append(composer, bubble);
+  uiRoot.append(composer, bubble, zoom);
 
   // Appended to <html>, not <body>, which SPAs may replace; re-attached if removed.
   function mount() {
@@ -2159,7 +2182,7 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
     if (!c || !c.resolved || c.after || c.path !== lastPath || !joined) return;
     const v = toViewport(c);
     if (!v.el) return; // the element is gone; nothing to picture
-    const shot = await screenshot(v.el, c);
+    const shot = await screenshot(v.el, c, c.area);
     const now = comments.get(id);
     if (shot && now && now.resolved && !now.after) send({ type: "after", id, screenshot: shot });
   }
@@ -2222,6 +2245,7 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
   let confirmTimer = 0;
   function closeBubble() {
     if (!bubbleId) return;
+    closeZoom();
     if (preview && preview.comment === bubbleId) previewOff();
     const was = bubbleId;
     bubbleId = null;
@@ -2329,16 +2353,6 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
       bPreviewBtn.hidden = c.resolved;
     }
     const shot = c.screenshot && !failedShots.has(c.screenshot) ? ATTACHMENT_PATH + c.screenshot : "";
-    bShot.hidden = !shot;
-    if (shot) {
-      bShot.href = shot;
-      if (bShotImg.getAttribute("src") !== shot) bShotImg.src = shot;
-      if (!bShotImg.isConnected) bShot.append(bShotImg);
-    } else {
-      bShot.removeAttribute("href");
-      bShotImg.removeAttribute("src");
-      bShotImg.remove();
-    }
     // Who's on it, or who fixed it: a mark spanning two rows, what's happening, and the detail.
     let title = "";
     let detail = "";
@@ -2363,17 +2377,12 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
     bFix.classList.toggle("working", !!c.claim);
     if (c.claim) css(bFix, { "--agent": agentColor(c.claim.agent) });
     const after = c.after && !failedShots.has(c.after) ? ATTACHMENT_PATH + c.after : "";
-    bAfter.hidden = bAfterCap.hidden = !after;
-    bShotCap.hidden = !(after && shot);
-    if (after) {
-      bAfter.href = after;
-      if (bAfterImg.getAttribute("src") !== after) bAfterImg.src = after;
-      if (!bAfterImg.isConnected) bAfter.append(bAfterImg);
-    } else {
-      bAfter.removeAttribute("href");
-      bAfterImg.removeAttribute("src");
-      bAfterImg.remove();
+    if (shots.before !== shot || shots.after !== after) {
+      shots.before = shot;
+      shots.after = after;
+      shots.holding = false;
     }
+    showShots();
     bEnv.hidden = !c.env;
     if (c.env) {
       bEnv.textContent = [c.env.browser, c.env.os, c.env.viewport].join(" \u00b7 ");
@@ -2394,15 +2403,124 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
     deleteBtn.setAttribute("aria-label", (confirmDelete ? "Really delete" : "Delete") + n + (confirmDelete ? "?" : ""));
   }
 
-  for (const [img, link] of [[bShotImg, bShot], [bAfterImg, bAfter]]) {
-    img.addEventListener("error", () => {
-      const id = img.getAttribute("src");
-      if (id && id.startsWith(ATTACHMENT_PATH)) failedShots.add(id.slice(ATTACHMENT_PATH.length));
-      link.hidden = true;
-      renderBubble();
-      schedulePlace();
-    });
+  bShotImg.addEventListener("error", () => {
+    const id = bShotImg.getAttribute("src");
+    if (id && id.startsWith(ATTACHMENT_PATH)) failedShots.add(id.slice(ATTACHMENT_PATH.length));
+    renderBubble();
+    schedulePlace();
+  });
+
+  // ---- the open comment's pictures
+
+  // Shows the fix (or, while held, the comment's own picture) in the bubble and the large view.
+  function showShots() {
+    const pair = !!(shots.before && shots.after);
+    const src = shots.after && !(shots.holding && pair) ? shots.after : shots.before;
+    const which = src && src === shots.after ? "After" : "Before";
+    bShot.hidden = !src;
+    if (src) {
+      if (bShotImg.getAttribute("src") !== src) bShotImg.src = src;
+      if (!bShotImg.isConnected) bShot.append(bShotImg);
+      // The other picture, ready for the moment it's held.
+      if (pair) h("img").src = src === shots.after ? shots.before : shots.after;
+    } else {
+      bShotImg.removeAttribute("src");
+      bShotImg.remove();
+    }
+    bShotRow.hidden = zoomCap.hidden = zoomHold.hidden = !pair;
+    bShotCap.textContent = zoomCap.textContent = which;
+    bShotImg.alt = zoomImg.alt = which === "After" ? "The commented element after the fix" : "Picture of the commented element";
+    for (const b of [bHold, zoomHold]) b.setAttribute("aria-pressed", String(shots.holding && pair));
+    if (!zoom.hidden) {
+      if (src) zoomImg.src = src;
+      else closeZoom();
+    }
   }
+
+  function setHolding(on) {
+    if (shots.holding === on) return;
+    shots.holding = on;
+    showShots();
+  }
+
+  // A button that shows the picture from before the fix for as long as it's pressed (pointer, Space, or Enter).
+  function holdButton() {
+    const b = button("act small hold", "Hold to see before");
+    b.setAttribute("aria-pressed", "false");
+    b.title = "Shows the page as it was before the fix while you hold it";
+    b.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      try { b.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+      setHolding(true);
+    });
+    for (const t of ["pointerup", "pointercancel", "lostpointercapture", "blur"]) b.addEventListener(t, () => setHolding(false));
+    b.addEventListener("keydown", (e) => {
+      if (e.key !== " " && e.key !== "Enter") return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (!e.repeat) setHolding(true);
+    });
+    b.addEventListener("keyup", (e) => {
+      if (e.key !== " " && e.key !== "Enter") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setHolding(false);
+    });
+    b.addEventListener("click", (e) => e.preventDefault());
+    return b;
+  }
+
+  function openZoom() {
+    const src = bShotImg.getAttribute("src");
+    if (!src) return;
+    zoomImg.src = src;
+    zoom.hidden = false;
+    sizeZoom();
+    zoomClose.focus();
+  }
+
+  // As large as the window allows, up to 3x the picture's pixels (pictures of small elements are small).
+  function sizeZoom() {
+    const nw = zoomImg.naturalWidth;
+    const nh = zoomImg.naturalHeight;
+    if (zoom.hidden || !nw || !nh) return;
+    const s = Math.min((window.innerWidth - 48) / nw, (window.innerHeight - 112) / nh, 3);
+    css(zoomImg, { width: Math.round(nw * s) + "px", height: Math.round(nh * s) + "px" });
+  }
+  zoomImg.addEventListener("load", sizeZoom);
+  window.addEventListener("resize", sizeZoom, { passive: true });
+
+  function closeZoom() {
+    if (zoom.hidden) return;
+    zoom.hidden = true;
+    zoomImg.removeAttribute("src");
+    setHolding(false);
+    if (!bubble.hidden && !bShot.hidden) bShot.focus();
+  }
+
+  bShot.addEventListener("click", openZoom);
+  zoomClose.addEventListener("click", closeZoom);
+  zoom.addEventListener("click", (e) => { if (e.target === zoom) closeZoom(); });
+  zoom.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeZoom();
+    } else if (e.key === " ") {
+      // Holding Space anywhere in the large view shows the picture from before.
+      e.preventDefault();
+      if (!e.repeat) setHolding(true);
+    } else if (e.key === "Tab") {
+      // Focus stays in the large view.
+      e.preventDefault();
+      (uiRoot.activeElement === zoomClose && !zoomHold.hidden ? zoomHold : zoomClose).focus();
+    }
+  });
+  zoom.addEventListener("keyup", (e) => {
+    if (e.key !== " ") return;
+    e.preventDefault();
+    setHolding(false);
+  });
 
   // Shows a comment's suggested edits on its element (only in this browser), or stops showing them.
   bPreviewBtn.addEventListener("click", () => {
@@ -2757,7 +2875,7 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
     noteEl.hidden = true;
     setPosting(token);
     let shot = null;
-    try { shot = await screenshot(el, shotPos || pos); } catch { shot = null; }
+    try { shot = await screenshot(el, area ? pos : shotPos || pos, area); } catch { shot = null; }
     if (posting !== token || !draft) return; // cancelled
     setPosting(0);
     if (!joined) return note(offlineText(), 2000);
@@ -2835,6 +2953,10 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
   const SHOT_MIN_H = 200;
   const SHOT_MAX_W = 1600;
   const SHOT_MAX_H = 1200;
+  const SHOT_FOCUS_MIN_W = 240; // a small element still shows some of the page around it
+  const SHOT_FOCUS_MIN_H = 120;
+  const SHOT_PAD_MIN = 16; // margin around the element: a fifth of its size, within these
+  const SHOT_PAD_MAX = 48;
   const SHOT_NODES = 6000;
   const SHOT_SKIP = new Set(["script", "style", "link", "meta", "noscript", "template", "base", "title", "source", "track"]);
   const SHOT_BLANK = new Set(["iframe", "frame", "video", "audio", "object", "embed", "portal", "fencedframe"]);
@@ -3037,15 +3159,37 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
     return out;
   }
 
-  // The element a screenshot shows: the target or its nearest ancestor of at least 320x200.
-  function shotRoot(target) {
+  // The element a screenshot is drawn from: the target or its nearest ancestor of at least 320x200
+  // that holds all of `focus` (the part the picture shows).
+  function shotRoot(target, focus) {
     for (let e = target; e && e.nodeType === 1; e = e.parentElement || (e.parentNode && e.parentNode.host) || null) {
       if (e === host) return null;
       if (e === document.body || e === document.documentElement) break;
       const r = e.getBoundingClientRect();
-      if (r.width >= SHOT_MIN_W && r.height >= SHOT_MIN_H) return e;
+      const holds = r.left <= focus.left + 1 && r.top <= focus.top + 1 && r.right >= focus.right - 1 && r.bottom >= focus.bottom - 1;
+      if (r.width >= SHOT_MIN_W && r.height >= SHOT_MIN_H && holds) return e;
     }
     return document.body;
+  }
+
+  // The part of the page a screenshot shows, in viewport coordinates: the commented element (or the
+  // area dragged out) with a margin of the page around it, so the picture is about what the comment
+  // is about. Before and after pictures of a comment frame the same way.
+  function shotFocus(target, pin, area) {
+    let f;
+    if (area) {
+      const v = toViewport(pin);
+      f = { left: v.x, top: v.y, width: area.width, height: area.height };
+    } else {
+      const r = target.getBoundingClientRect();
+      f = { left: r.left, top: r.top, width: r.width, height: r.height };
+    }
+    const pad = Math.min(SHOT_PAD_MAX, Math.max(SHOT_PAD_MIN, Math.max(f.width, f.height) * 0.2));
+    const w = Math.max(SHOT_FOCUS_MIN_W, f.width + 2 * pad);
+    const hgt = Math.max(SHOT_FOCUS_MIN_H, f.height + 2 * pad);
+    const cx = f.left + f.width / 2;
+    const cy = f.top + f.height / 2;
+    return { left: cx - w / 2, top: cy - hgt / 2, right: cx + w / 2, bottom: cy + hgt / 2, width: w, height: hgt };
   }
 
   // First opaque-ish background behind `el` (JPEG has no transparency).
@@ -3088,16 +3232,20 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
     return null;
   }
 
-  async function renderShot(target, pin, deadline) {
-    const el = shotRoot(target);
+  async function renderShot(target, pin, deadline, area) {
+    const focus = shotFocus(target, pin, area);
+    const el = shotRoot(target, focus);
     if (!el) return null;
     const r = el.getBoundingClientRect();
-    const cw = Math.min(r.width, SHOT_MAX_W);
-    const ch = Math.min(r.height, SHOT_MAX_H);
+    const cw = Math.min(r.width, focus.width, SHOT_MAX_W);
+    const ch = Math.min(r.height, focus.height, SHOT_MAX_H);
     if (cw < 1 || ch < 1) return null;
-    const v = toViewport(pin);
-    const ox = Math.max(0, Math.min(r.width - cw, v.x - r.left - cw / 2));
-    const oy = Math.max(0, Math.min(r.height - ch, v.y - r.top - ch / 2));
+    // Too big for one picture: around the pin instead of the middle.
+    const v = focus.width > SHOT_MAX_W || focus.height > SHOT_MAX_H ? toViewport(pin) : null;
+    const cx = focus.width > SHOT_MAX_W && v ? v.x : focus.left + focus.width / 2;
+    const cy = focus.height > SHOT_MAX_H && v ? v.y : focus.top + focus.height / 2;
+    const ox = Math.max(0, Math.min(r.width - cw, cx - r.left - cw / 2));
+    const oy = Math.max(0, Math.min(r.height - ch, cy - r.top - ch / 2));
     const scale = Math.min(2, window.devicePixelRatio || 1);
     const ctx = {
       nodes: 0, until: Math.min(deadline - 300, performance.now() + 1000), pseudo: [], imageBytes: 0, scale,
@@ -3136,7 +3284,7 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
 
   // Renders and uploads a screenshot for a comment; its attachment id, or null on any failure
   // or after SHOT_TIMEOUT.
-  async function screenshot(target, pin) {
+  async function screenshot(target, pin, area) {
     if (!me || !validUploadToken(uploadToken) || !pageFetch || !target || target.nodeType !== 1 || typeof XMLSerializer !== "function") return null;
     const peerId = me.id;
     const token = uploadToken;
@@ -3151,7 +3299,7 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
     });
     const work = (async () => {
       await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))); // let "Posting..." paint
-      const blob = await renderShot(target, pin, deadline);
+      const blob = await renderShot(target, pin, deadline, area);
       if (!blob || performance.now() > deadline) return null;
       const res = await pageFetch.call(window, UPLOAD_PATH, {
         method: "POST", body: blob, credentials: "same-origin", cache: "no-store",
@@ -4025,6 +4173,11 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
 
   window.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    if (!zoom.hidden) {
+      closeZoom();
+      e.stopPropagation();
+      return;
+    }
     const a = root.activeElement;
     if (a === nameInput || a === replyArea || (a === textArea && draft)) return; // handled there
     if (isOurs(e.target) && e.target !== host) return; // a device view's comment box: it handles its own keys
