@@ -230,6 +230,7 @@ private func mcp(_ router: APIRouter, _ scope: AgentRunScope, _ method: String, 
 
 // MARK: Processes a run lets go of
 
+extension ProcessSpawningTests {
 /// A process whose parent exits goes to launchd, out of the run's tree, but macOS still holds the same app
 /// responsible for it: that's how OpenTraffic tells a run's leftovers from anyone else's processes.
 @Test func aProcessLetGoOfKeepsTheAppResponsibleForIt() async throws {
@@ -254,6 +255,7 @@ private func mcp(_ router: APIRouter, _ scope: AgentRunScope, _ method: String, 
     }
     #expect(!ProcessAncestry.startedByApp(pid, app: 1))
     #expect(!ProcessAncestry.startedByApp(app, app: app))
+}
 }
 
 @Test func theScopeForLeftoversAllowsNothing() {
