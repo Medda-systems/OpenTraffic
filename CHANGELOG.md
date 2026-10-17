@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.16 (17 October 2026)
 
 - **Agents don't trip over the screenshot folder:** the agent OpenTraffic starts for a comment often ran `mkdir -p /tmp/opentraffic` together with its `opentraffic` commands, and the whole line was refused, so opencode stopped after claiming the comment and Claude Code gave up. Making that folder is allowed now, and the agent is told to run each command on its own and to try a refused one again by itself. Presets you hadn't changed are updated.
 - **A run that stops partway says so:** an agent that claims a comment but ends without replying, resolving, or releasing it shows as **stopped before answering the comment**, instead of finished.
