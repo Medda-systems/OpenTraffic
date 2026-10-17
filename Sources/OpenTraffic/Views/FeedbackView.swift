@@ -305,7 +305,7 @@ private struct AgentBar: View {
         let waiting = store.agentQueues[tunnel.id]?.count ?? 0
         let more = waiting > 0 ? " (\(waiting) more waiting)" : ""
         switch run?.state {
-        case .running?: return "\(run!.client) is working on a comment\(more)…"
+        case .running?: return "\(run!.client)\(run!.model.map { " (\($0))" } ?? "") is working on a comment\(more)…"
         case .finished?: return "\(run!.client) finished \(run!.startedAt.formatted(.relative(presentation: .named)))"
         case .failed(let reason)?: return reason
         case .stopped?: return "Stopped"

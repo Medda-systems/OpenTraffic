@@ -229,6 +229,13 @@ final class AppStore {
     var agentRunsAutomatically: Bool {
         didSet { defaults.set(agentRunsAutomatically, forKey: "agentRunsAutomatically") }
     }
+    /// The model picked for each agent (by `AgentPreset` raw value); none: the agent's own default.
+    var agentModels: [String: String] {
+        didSet { defaults.set(agentModels, forKey: "agentModels") }
+    }
+    /// The models each agent offers, found when Settings asks (see `AgentModels`).
+    var agentModelLists: [AgentPreset: AgentModelList] = [:]
+    var detectingAgentModels: Set<AgentPreset> = []
     /// Everything apps using the local API can follow (long polling, MCP, webhooks).
     @ObservationIgnored let apiEvents = APIEventLog()
     @ObservationIgnored var pendingJoinNames: [UUID: [String]] = [:]
@@ -371,6 +378,7 @@ final class AppStore {
         // A preset as an earlier version set it becomes the preset as it is now.
         self.agentCommand = AgentPreset.upgraded(defaults.string(forKey: "agentCommand") ?? "")
         self.agentRunsAutomatically = defaults.object(forKey: "agentRunsAutomatically") as? Bool ?? false
+        self.agentModels = defaults.dictionary(forKey: "agentModels") as? [String: String] ?? [:]
         self.apiEnabled = defaults.object(forKey: "apiEnabled") as? Bool ?? false
         self.apiPort = (defaults.object(forKey: "apiPort") as? Int).flatMap { (1024...65_535).contains($0) ? $0 : nil } ?? 47777
         self.apiAllowsPublishingWithoutAsking = defaults.object(forKey: "apiAllowsPublishingWithoutAsking") as? Bool ?? false

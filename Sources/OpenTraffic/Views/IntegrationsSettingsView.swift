@@ -51,6 +51,9 @@ struct IntegrationsSettingsView: View {
                     }
                 }
                 .onChange(of: agentPreset) { _, preset in choose(preset) }
+                if let agentPreset, agentPreset != .custom {
+                    AgentModelPicker(store: store, preset: agentPreset)
+                }
                 if agentPreset != nil {
                     TextField("Command", text: $store.agentCommand, axis: .vertical)
                         .font(.callout.monospaced())
@@ -187,6 +190,85 @@ struct IntegrationsSettingsView: View {
             return
         }
         if port != store.apiPort { store.apiPort = port }
+    }
+}
+
+/// The model the agent runs with: its own default, one of the models it offers (found by asking it), or
+/// one typed in.
+private struct AgentModelPicker: View {
+    @Bindable var store: AppStore
+    let preset: AgentPreset
+    @State private var typing = false
+    @State private var typed = ""
+    private static let other = "\u{0}other"
+
+    var body: some View {
+        let list = store.agentModelLists[preset]
+        let current = store.agentModel(for: preset)
+        let known = list?.models.contains { $0.id == current } ?? false
+        LabeledContent("Model") {
+            HStack(spacing: Spacing.s) {
+                if typing {
+                    TextField("Model", text: $typed, prompt: Text("Model name"))
+                        .labelsHidden()
+                        .onSubmit(finishTyping)
+                    Button("Done", action: finishTyping)
+                } else {
+                    Picker("Model", selection: Binding(
+                        get: { current ?? "" },
+                        set: { value in
+                            if value == Self.other {
+                                typed = current ?? ""
+                                typing = true
+                            } else {
+                                store.setAgentModel(value, for: preset)
+                            }
+                        }
+                    )) {
+                        Text(defaultTitle(list)).tag("")
+                        if let current, !known { Text(current).tag(current) }
+                        ForEach(Array((list?.groups ?? []).enumerated()), id: \.offset) { _, group in
+                            if let name = group.name {
+                                Section(name) {
+                                    ForEach(group.models) { Text($0.name).tag($0.id) }
+                                }
+                            } else {
+                                ForEach(group.models) { Text($0.name).tag($0.id) }
+                            }
+                        }
+                        Divider()
+                        Text("Other…").tag(Self.other)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                if store.detectingAgentModels.contains(preset) {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button {
+                        store.detectAgentModels(preset, again: true)
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Ask \(preset.title) for its models again")
+                    .accessibilityLabel("Find \(preset.title)'s models again")
+                }
+            }
+        }
+        .task(id: preset) {
+            typing = false
+            store.detectAgentModels(preset)
+        }
+    }
+
+    private func defaultTitle(_ list: AgentModelList?) -> String {
+        "\(preset.title)'s default" + (list?.defaultModel.map { " (\($0))" } ?? "")
+    }
+
+    private func finishTyping() {
+        store.setAgentModel(typed, for: preset)
+        typing = false
     }
 }
 

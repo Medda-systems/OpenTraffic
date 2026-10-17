@@ -15,6 +15,8 @@ struct AgentRun: Equatable {
     let id = UUID()
     let commentID: String
     let client: String
+    /// The model it was told to use, or nil for its own default.
+    var model: String? = nil
     let directory: String
     let startedAt: Date
     var state = State.running
@@ -107,6 +109,28 @@ extension AppStore {
         agentCommand.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank != nil
     }
 
+    /// The model picked for `preset`, or nil for the agent's own default.
+    func agentModel(for preset: AgentPreset) -> String? {
+        agentModels[preset.rawValue]?.nilIfBlank
+    }
+
+    func setAgentModel(_ model: String?, for preset: AgentPreset) {
+        agentModels[preset.rawValue] = model?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
+    }
+
+    /// Asks the agent which models it offers (once, unless `again`), for Settings.
+    func detectAgentModels(_ preset: AgentPreset, again: Bool = false) {
+        guard preset != .custom, !detectingAgentModels.contains(preset), again || agentModelLists[preset] == nil else { return }
+        detectingAgentModels.insert(preset)
+        Task { [weak self] in
+            guard let self else { return }
+            let path = await self.userShellPath()
+            let list = await Task.detached(priority: .userInitiated) { AgentModels.detect(preset, path: path) }.value
+            self.agentModelLists[preset] = list
+            self.detectingAgentModels.remove(preset)
+        }
+    }
+
     /// The name agents started by OpenTraffic go by in the session.
     var agentClientName: String {
         AgentPreset.matching(agentCommand)?.clientName ?? "Agent"
@@ -185,7 +209,8 @@ extension AppStore {
                 notice = AppNotice(.error, "Choose the project folder for “\(definition.name)” in its Feedback tab, so the agent knows where to work.")
                 return
             }
-            launchAgent(AgentRunRequest(shareID: id, shareName: definition.name, commentID: commentID, client: agentClientName, socket: AppSocket.path()), in: directory)
+            let model = AgentPreset.matching(agentCommand).flatMap(agentModel(for:))
+            launchAgent(AgentRunRequest(shareID: id, shareName: definition.name, commentID: commentID, client: agentClientName, socket: AppSocket.path(), model: model), in: directory)
             return
         }
     }
@@ -193,7 +218,7 @@ extension AppStore {
     private func launchAgent(_ request: AgentRunRequest, in directory: URL) {
         let id = request.shareID
         let command = agentCommand
-        let run = AgentRun(commentID: request.commentID, client: request.client, directory: directory.path, startedAt: Date())
+        let run = AgentRun(commentID: request.commentID, client: request.client, model: request.model, directory: directory.path, startedAt: Date())
         agentRuns[id] = run
         Task { [weak self] in
             guard let self else { return }

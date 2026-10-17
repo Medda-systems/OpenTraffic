@@ -451,6 +451,26 @@ private func run(_ command: String, in directory: URL = FileManager.default.temp
     #expect(permission["external_directory"] as? [String: String] == ["\(AgentPreset.screenshotFolder)/**": "allow"])
 }
 
+// The model picked in Settings reaches each agent as --model; without one, the agent's own default.
+@Test func presetsPassThePickedModelAndOnlyThen() async throws {
+    let stubs = #"claude() { print -rl -- "$@"; }; codex() { [[ $1 == sandbox ]] && return 7; print -rl -- "$@"; }; opencode() { print -rl -- "$@"; }; cursor-agent() { print -rl -- "$@"; }; "#
+    for preset in [AgentPreset.claudeCode, .codex, .opencode, .cursor] {
+        for model in ["gpt-6 luna", nil] as [String?] {
+            let request = AgentRunRequest(shareID: UUID(), shareName: "Orbit", commentID: "ab12cd34", client: preset.clientName, socket: "/tmp/ot.sock", model: model)
+            let (_, record) = try run(stubs + preset.command, environment: request.environment)
+            #expect(await eventually { record.ended != nil })
+            let arguments = record.output.split(separator: "\n").map(String.init)
+            if let model {
+                #expect(arguments.filter { $0.hasPrefix("--model") } == ["--model=\(model)"], "\(preset)")
+            } else {
+                #expect(!arguments.contains { $0.hasPrefix("--model") }, "\(preset)")
+            }
+        }
+    }
+    // A model the user has in their own environment doesn't leak into a run without one.
+    #expect(AgentRunRequest(shareID: UUID(), shareName: "Orbit", commentID: "ab12cd34", client: "Codex", socket: "/x").environment["OPENTRAFFIC_MODEL"] == "")
+}
+
 // Codex ignores settings it doesn't know: if its sandbox ever lets the web through, Codex isn't started.
 @Test func codexDoesntStartWhenItsSandboxLetsTheWebThrough() async throws {
     let stub = #"codex() { [[ $1 == sandbox ]] && return 0; echo STARTED; }; "#

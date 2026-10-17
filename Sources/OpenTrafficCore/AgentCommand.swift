@@ -39,22 +39,24 @@ public enum AgentPreset: String, CaseIterable, Codable, Identifiable, Sendable {
     ///   back a PATH without OpenTraffic's own `opentraffic` first.
     /// - Cursor: without `--force`, only commands already on the user's Cursor allowlist run.
     /// - opencode: the shell only for the feedback commands, and no web, through its configuration variable.
+    /// `$OPENTRAFFIC_MODEL`, when the user picked a model for the agent, is passed on as `--model`; without
+    /// one the agent uses its own default.
     public var command: String {
         let feedback = Self.feedbackCommands
         switch self {
         case .claudeCode:
             let allowed = ["Read", "Edit", "Write", "Glob", "Grep", "mcp__opentraffic"] + feedback.map { "Bash(opentraffic \($0) *)" }
                 + Self.screenshotFolderCommands.map { "Bash(\($0))" }
-            return #"claude -p "$OPENTRAFFIC_PROMPT" --permission-mode dontAsk --allowedTools ""# + allowed.joined(separator: ",") + #"" --disallowedTools "WebFetch,WebSearch,Read(./.env),Read(./.env.*)""#
+            return #"claude -p "$OPENTRAFFIC_PROMPT" ${OPENTRAFFIC_MODEL:+--model=$OPENTRAFFIC_MODEL} --permission-mode dontAsk --allowedTools ""# + allowed.joined(separator: ",") + #"" --disallowedTools "WebFetch,WebSearch,Read(./.env),Read(./.env.*)""#
         case .codex:
             return #"p=(-c allow_login_shell=false -c features.network_proxy=true -c 'default_permissions="opentraffic"' -c 'permissions.opentraffic.extends=":workspace"' -c permissions.opentraffic.network.enabled=true -c 'permissions.opentraffic.network.unix_sockets={"'"$OPENTRAFFIC_SOCKET"'"="allow"}'); "#
                 + #"if codex sandbox $p -- /usr/bin/curl -sfm 5 -o /dev/null https://example.com; then echo "Codex's sandbox let the web through, so OpenTraffic didn't start it."; exit 1; fi; "#
-                + #"codex exec $p --skip-git-repo-check "$OPENTRAFFIC_PROMPT""#
-        case .cursor: return #"cursor-agent -p "$OPENTRAFFIC_PROMPT""#
+                + #"codex exec $p ${OPENTRAFFIC_MODEL:+--model=$OPENTRAFFIC_MODEL} --skip-git-repo-check "$OPENTRAFFIC_PROMPT""#
+        case .cursor: return #"cursor-agent -p "$OPENTRAFFIC_PROMPT" ${OPENTRAFFIC_MODEL:+--model=$OPENTRAFFIC_MODEL}"#
         case .opencode:
             let bash = (["\"*\":\"deny\""] + feedback.map { "\"opentraffic \($0) *\":\"allow\"" }
                 + Self.screenshotFolderCommands.map { "\"\($0)\":\"allow\"" }).joined(separator: ",")
-            return #"OPENCODE_CONFIG_CONTENT='{"permission":{"bash":{"# + bash + #"},"webfetch":"deny","external_directory":{""# + Self.screenshotFolder + #"/**":"allow"}}}' opencode run "$OPENTRAFFIC_PROMPT""#
+            return #"OPENCODE_CONFIG_CONTENT='{"permission":{"bash":{"# + bash + #"},"webfetch":"deny","external_directory":{""# + Self.screenshotFolder + #"/**":"allow"}}}' opencode run ${OPENTRAFFIC_MODEL:+--model=$OPENTRAFFIC_MODEL} "$OPENTRAFFIC_PROMPT""#
         case .custom: return #"~/bin/my-agent "$OPENTRAFFIC_SHARE" "$OPENTRAFFIC_COMMENT_ID""#
         }
     }
@@ -72,8 +74,13 @@ public enum AgentPreset: String, CaseIterable, Codable, Identifiable, Sendable {
 
     /// What earlier versions set for the presets. 1.0.14 and earlier denied the shell, and with it the
     /// `opentraffic` command, so the agent had no way to the comment unless the user had set up the MCP server
-    /// for it; 1.0.15 refused `mkdir` for the screenshot folder, and with it any command joined to it.
+    /// for it; 1.0.15 refused `mkdir` for the screenshot folder, and with it any command joined to it;
+    /// 1.0.17 and earlier didn't pass on the model picked in Settings.
     static let earlierCommands: [String: AgentPreset] = [
+        #"claude -p "$OPENTRAFFIC_PROMPT" --permission-mode dontAsk --allowedTools "Read,Edit,Write,Glob,Grep,mcp__opentraffic,Bash(opentraffic comments *),Bash(opentraffic claim *),Bash(opentraffic release *),Bash(opentraffic reply *),Bash(opentraffic resolve *),Bash(opentraffic screenshot *),Bash(mkdir -p /tmp/opentraffic),Bash(mkdir -p /tmp/opentraffic/)" --disallowedTools "WebFetch,WebSearch,Read(./.env),Read(./.env.*)""#: .claudeCode,
+        #"p=(-c allow_login_shell=false -c features.network_proxy=true -c 'default_permissions="opentraffic"' -c 'permissions.opentraffic.extends=":workspace"' -c permissions.opentraffic.network.enabled=true -c 'permissions.opentraffic.network.unix_sockets={"'"$OPENTRAFFIC_SOCKET"'"="allow"}'); if codex sandbox $p -- /usr/bin/curl -sfm 5 -o /dev/null https://example.com; then echo "Codex's sandbox let the web through, so OpenTraffic didn't start it."; exit 1; fi; codex exec $p --skip-git-repo-check "$OPENTRAFFIC_PROMPT""#: .codex,
+        #"OPENCODE_CONFIG_CONTENT='{"permission":{"bash":{"*":"deny","opentraffic comments *":"allow","opentraffic claim *":"allow","opentraffic release *":"allow","opentraffic reply *":"allow","opentraffic resolve *":"allow","opentraffic screenshot *":"allow","mkdir -p /tmp/opentraffic":"allow","mkdir -p /tmp/opentraffic/":"allow"},"webfetch":"deny","external_directory":{"/tmp/opentraffic/**":"allow"}}}' opencode run "$OPENTRAFFIC_PROMPT""#: .opencode,
+        #"cursor-agent -p "$OPENTRAFFIC_PROMPT""#: .cursor,
         #"claude -p "$OPENTRAFFIC_PROMPT" --permission-mode dontAsk --allowedTools "Read,Edit,Write,Glob,Grep,mcp__opentraffic,Bash(opentraffic comments *),Bash(opentraffic claim *),Bash(opentraffic release *),Bash(opentraffic reply *),Bash(opentraffic resolve *),Bash(opentraffic screenshot *)" --disallowedTools "WebFetch,WebSearch,Read(./.env),Read(./.env.*)""#: .claudeCode,
         #"OPENCODE_CONFIG_CONTENT='{"permission":{"bash":{"*":"deny","opentraffic comments *":"allow","opentraffic claim *":"allow","opentraffic release *":"allow","opentraffic reply *":"allow","opentraffic resolve *":"allow","opentraffic screenshot *":"allow"},"webfetch":"deny","external_directory":{"/tmp/opentraffic/**":"allow"}}}' opencode run "$OPENTRAFFIC_PROMPT""#: .opencode,
         #"claude -p "$OPENTRAFFIC_PROMPT" --permission-mode acceptEdits --allowedTools mcp__opentraffic --disallowedTools "Bash,WebFetch,WebSearch,Read(./.env),Read(./.env.*)""#: .claudeCode,
@@ -100,13 +107,16 @@ public struct AgentRunRequest: Equatable, Sendable {
     public let client: String
     /// OpenTraffic's private socket, which the `opentraffic` command reaches it on.
     public let socket: String
+    /// The model picked for the agent in Settings, or nil for the agent's own default.
+    public let model: String?
 
-    public init(shareID: UUID, shareName: String, commentID: String, client: String, socket: String) {
+    public init(shareID: UUID, shareName: String, commentID: String, client: String, socket: String, model: String? = nil) {
         self.shareID = shareID
         self.shareName = shareName
         self.commentID = commentID
         self.client = client
         self.socket = socket
+        self.model = model?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
     }
 
     /// What the agent is asked to do. Only ids and the share's name (the host's own words): never the
@@ -157,6 +167,8 @@ public struct AgentRunRequest: Equatable, Sendable {
             "OPENTRAFFIC_CLIENT": client,
             "OPENTRAFFIC_PROMPT": prompt,
             "OPENTRAFFIC_SOCKET": socket,
+            // Empty: the presets leave out --model, and the agent uses its own default.
+            "OPENTRAFFIC_MODEL": model ?? "",
         ]
     }
 }
