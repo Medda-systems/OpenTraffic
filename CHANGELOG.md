@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.18 (17 October 2026)
 
 - **Pick the agent's model:** Settings → Integrations → Agent for comments has a **Model** menu, one choice per agent: its own default (shown with what that is), the models it offers, or any name under **Other…**. OpenTraffic asks the agent: Codex's model catalog, opencode's models from the providers you've set up (grouped by provider), and Claude Code's aliases (Fable, Opus, Sonnet, Haiku); Cursor can't list them, so you type one. The Feedback tab shows the model while the agent works. Presets you hadn't changed are updated to pass it on.
 
