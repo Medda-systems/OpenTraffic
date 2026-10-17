@@ -231,6 +231,11 @@ public final class CollabProxy: @unchecked Sendable {
         }.get()
     }
 
+    /// The site changed (the project's files): every page in the session catches up without a reload.
+    public func refreshPages() async {
+        try? await loop.submit { self.deliver(self.room.refreshMessages()) }.get()
+    }
+
     /// Shows the comments coding agents are working on, and the agents, to everyone in the session.
     /// What people may do: roles by their browser's overlay id, and everyone else's.
     public func setRoles(_ roles: [String: CollabRole], default defaultRole: CollabRole) async {

@@ -148,7 +148,10 @@ extension AppStore {
         }
         collabProxies[id] = proxy
         updateReservedPorts()
-        if collaboration { Task { await beginBranchSession(for: id) } }
+        if collaboration {
+            watchProject(for: id)
+            Task { await beginBranchSession(for: id) }
+        }
         return proxyURL
     }
 
@@ -495,9 +498,30 @@ extension AppStore {
         if let share = apiShareRef(id) {
             for peer in peers + departed { apiEvents.append(.sessionLeft, share: share, peer: APIPerson(peer)) }
         }
+        projectWatchers.removeValue(forKey: id)?.stop()
         guard let proxy = collabProxies.removeValue(forKey: id) else { return }
         Task { await proxy.stop() }
         updateReservedPorts()
+    }
+
+    /// Watches the share's project folder while its session runs: when files change (an agent's fix, or
+    /// your own edits), the pages people have open catch up without a reload.
+    func watchProject(for id: UUID) {
+        guard collabProxies[id]?.configuration.injectsOverlay == true,
+              let definition = definitions.first(where: { $0.id == id }),
+              let directory = agentDirectory(for: definition) else {
+            projectWatchers.removeValue(forKey: id)?.stop()
+            return
+        }
+        if projectWatchers[id]?.directory == directory.resolvingSymlinksInPath() { return }
+        projectWatchers.removeValue(forKey: id)?.stop()
+        let watcher = ProjectWatcher(directory: directory) { [weak self] in
+            Task { @MainActor in
+                guard let self, let proxy = self.collabProxies[id] else { return }
+                await proxy.refreshPages()
+            }
+        }
+        if watcher.start() { projectWatchers[id] = watcher }
     }
 
     /// Pages can't reach OpenTraffic's own ports through any share's localhost bridge.

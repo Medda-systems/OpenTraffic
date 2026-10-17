@@ -335,6 +335,7 @@ extension AppStore {
         guard let index = definitions.firstIndex(where: { $0.id == id }), definitions[index].agentDirectory != path?.nilIfBlank else { return }
         definitions[index].agentDirectory = path?.nilIfBlank
         saveDefinitions()
+        if collabProxies[id] != nil { watchProject(for: id) }
     }
 
     /// Lets the user pick the share's project folder.

@@ -443,12 +443,14 @@ public struct CollabRoom {
 
     /// Resolves or reopens a comment (from anyone in the session, or from OpenTraffic). `by` names who
     /// resolved it; `agent` marks an app using the API, `byAuthor` the commenter. When someone else
-    /// resolved it, the host's page is asked for a picture of the fix.
+    /// resolved it, a fix has landed: every page catches up with it, and the host's page is asked for a
+    /// picture of the fix (which it takes once it has caught up).
     public mutating func resolveComment(_ commentID: String, resolved: Bool, by name: String? = nil, agent: Bool = false, byAuthor: Bool = false, now: Date = Date()) -> [Outgoing] {
         guard let index = comments.firstIndex(where: { $0.id == commentID }), comments[index].resolved != resolved else { return [] }
         comments[index].setResolved(resolved, by: name.flatMap { Self.sanitizedName($0) }, agent: agent, byAuthor: byAuthor, at: now)
         var output = commentMessages(comments[index])
         if resolved, !byAuthor {
+            output += refreshMessages()
             awaitingAfter.insert(commentID)
             let path = comments[index].path
             for id in joinedIDs where connections[id]?.peer.isHost == true && connections[id]?.peer.path == path {
@@ -538,6 +540,12 @@ public struct CollabRoom {
             }
         }
         return output
+    }
+
+    /// Tells every page in the session that the site changed (a fix, or the project's files), so it
+    /// catches up without a reload.
+    public func refreshMessages() -> [Outgoing] {
+        broadcastToJoined(["type": "refresh"])
     }
 
     private func broadcastToJoined(_ message: [String: Any]) -> [Outgoing] {

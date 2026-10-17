@@ -48,6 +48,21 @@ private func roomWithComment() throws -> (CollabRoom, String) {
     #expect(forSam["mine"] == nil)
 }
 
+// A fix landed: every page catches up with it (without a reload), not only the commenter's.
+@Test func aFixTellsEveryPageToCatchUp() throws {
+    var (room, id) = try roomWithComment()
+    let output = room.resolveComment(id, resolved: true, by: "Claude Code", agent: true)
+    for peer in ["host", "ada", "sam"] {
+        #expect(messages(output, for: peer, in: room).contains { $0["type"] as? String == "refresh" }, "\(peer)")
+    }
+    // Reopening, or the commenter resolving it themselves, changes nothing on the page.
+    #expect(!messages(room.resolveComment(id, resolved: false), for: "ada", in: room).contains { $0["type"] as? String == "refresh" })
+    var (other, otherID) = try roomWithComment()
+    let byAuthor = other.resolveComment(otherID, resolved: true, by: "Ada", byAuthor: true)
+    #expect(!messages(byAuthor, for: "sam", in: other).contains { $0["type"] as? String == "refresh" })
+    #expect(messages(other.refreshMessages(), for: "sam", in: other).contains { $0["type"] as? String == "refresh" })
+}
+
 @Test func onlyTheCommenterConfirmsAndReopeningForgetsTheFix() throws {
     var (room, id) = try roomWithComment()
     _ = room.resolveComment(id, resolved: true, by: "Claude Code", agent: true)
@@ -456,6 +471,8 @@ private func run(_ command: String, in directory: URL = FileManager.default.temp
     #expect(request.prompt.contains("Run each `opentraffic` command on its own"))
     #expect(request.prompt.contains("run it again by itself"))
     #expect(request.prompt.contains("The screenshot command makes its folder"))
+    // Pages catch up with a fix by themselves.
+    #expect(request.prompt.contains("don't ask anyone to reload"))
 }
 
 @Test func stoppingTheAgentStopsWhatItStarted() async throws {

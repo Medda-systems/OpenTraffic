@@ -354,6 +354,8 @@ private final class CommentLog: @unchecked Sendable {
     #expect(update["type"] as? String == "comment")
     #expect((update["comment"] as? [String: Any])?["resolved"] as? Bool == true)
     #expect(log.last?.first?.resolved == true)
+    // A fix landed: the page is told to catch up.
+    #expect(try await receiveJSON(socket)["type"] as? String == "refresh")
 
     try await Task.sleep(for: .seconds(2.1)) // a fresh comment is allowed
     try await socket.send(.string(#"{"type":"comment","text":"New one","path":"/","x":0.1,"y":5}"#))

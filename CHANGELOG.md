@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **The page catches up by itself:** when a fix lands, or the share's project files change, every page in the session updates without a reload, even on a plain static server. Only what changed is replaced, so a comment being written, text typed into the page, the open comment, and the scroll position stay as they were; someone typing into the page gets a pause first. Changed stylesheets swap in without a flash. Dev servers with hot reload are left to it, and a page its scripts build is reloaded once nobody is busy, with the open comment brought back.
+- **The picture of a fix shows the fix:** it's taken once the page has caught up, instead of from the page as it was.
+- Agents no longer ask people to reload the page to see a fix.
+
 ## 1.0.16 (17 October 2026)
 
 - **Agents don't trip over the screenshot folder:** the agent OpenTraffic starts for a comment often ran `mkdir -p /tmp/opentraffic` together with its `opentraffic` commands, and the whole line was refused, so opencode stopped after claiming the comment and Claude Code gave up. Making that folder is allowed now, and the agent is told to run each command on its own and to try a refused one again by itself. Presets you hadn't changed are updated.

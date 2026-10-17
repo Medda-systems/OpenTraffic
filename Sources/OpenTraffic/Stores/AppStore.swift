@@ -212,6 +212,8 @@ final class AppStore {
     /// Processes that called OpenTraffic during a run of the agent command, and that run's comment: they
     /// stay held to it even once the run is over (when it's over, to nothing at all).
     @ObservationIgnored var agentRunCallers: [pid_t: AgentRunScope] = [:]
+    /// Each collaborative share's project folder, watched so its pages catch up with changes.
+    @ObservationIgnored var projectWatchers: [UUID: ProjectWatcher] = [:]
     /// Runs the agent command started by itself recently, against the budget.
     @ObservationIgnored var agentRunBudget = AgentRunBudget()
     /// Shares working on a branch: their repositories (by root), what was already changed when the

@@ -2178,8 +2178,12 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
   }
 
   async function captureAfter(id) {
-    const c = comments.get(id);
+    let c = comments.get(id);
     if (!c || !c.resolved || c.after || c.path !== lastPath || !joined) return;
+    // The picture is of the fix: the page catches up with it first.
+    await refreshPage().catch(() => {});
+    c = comments.get(id);
+    if (!c || !c.resolved || c.after) return;
     const v = toViewport(c);
     if (!v.el) return; // the element is gone; nothing to picture
     const shot = await screenshot(v.el, c, c.area);
@@ -3315,6 +3319,287 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  // ---------------------------------------------------------------- page refresh
+  //
+  // When a fix lands (the hub says "refresh": a comment was resolved, or the project's files changed),
+  // the page under the overlay catches up without a reload. Its HTML is fetched again and the live
+  // page is changed in place, node by node, so what didn't change stays as it is: focus, what's typed
+  // into its fields, scroll, and the overlay (outside <body>) with any comment being written. Changed
+  // stylesheets are swapped once the new one has loaded; scripts never run again. Pages with their own
+  // hot reload (Vite, webpack, Next.js, LiveReload) are left to it. A page its scripts have built
+  // (the live page no longer matches its HTML) can't be changed in place: it's reloaded once nobody is
+  // in the middle of something, and the open comment and any picture of a fix still to take come along.
+
+  const REFRESH_DEBOUNCE = 300;
+  const REFRESH_RETRY = 1500; // someone is busy: try again this much later
+  const TYPING_QUIET = 2500; // a field on the page was typed in this recently: wait
+  const SETTLE_QUIET = 500; // no changes to the page for this long: it has settled
+  const SETTLE_MAX = 4000;
+  let baseline = null; // { html, css: Map(href -> text) } as last loaded or applied, once fetched
+  let baselineLoad = null;
+  let refreshTimer = 0;
+  let refreshing = null; // the refresh going on, a promise
+  let lastPageInput = 0;
+  document.addEventListener("input", (e) => { if (!isOurs(e.target)) lastPageInput = Date.now(); }, true);
+
+  // The page has its own hot reload: it updates itself, and our refresh would only get in the way.
+  function hotReloads() {
+    return !!document.querySelector('script[src*="/@vite/client"], script[src*="webpack-dev-server"], script[src*="hot-update"], ' +
+      'script[src*="/_next/static/chunks/webpack"], script[src*="livereload"], script[src*="/@react-refresh"]') ||
+      typeof window.__webpack_hmr === "object" || !!window.__NEXT_HMR_CB || !!window.LiveReload;
+  }
+
+  // The page's HTML as the server sends it now, without OpenTraffic's own tags, or null.
+  async function fetchPage() {
+    if (!pageFetch) return null;
+    const url = location.href.split("#")[0];
+    try {
+      const res = await pageFetch.call(window, url, { credentials: "same-origin", cache: "no-store", headers: { Accept: "text/html" } });
+      if (!res || !res.ok || !/text\/html/i.test(res.headers.get("content-type") || "")) return null;
+      const text = await res.text();
+      return text.length > 5e6 ? null : text;
+    } catch {
+      return null;
+    }
+  }
+
+  function parsePage(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    for (const n of doc.querySelectorAll("[data-opentraffic]")) n.remove();
+    return doc;
+  }
+
+  const sameOriginSheets = (doc) => [...doc.querySelectorAll('link[rel~="stylesheet"][href]')]
+    .filter((l) => { try { return new URL(l.getAttribute("href"), location.href).origin === location.origin; } catch { return false; } });
+
+  // A stylesheet's address without the mark a swap added to it (which keeps the browser from using the old copy).
+  function sheetKey(link) {
+    const u = new URL(link.getAttribute("href"), location.href);
+    u.searchParams.delete("__opentraffic");
+    return u.href;
+  }
+
+  async function fetchCss(href) {
+    try {
+      const res = await pageFetch.call(window, new URL(href, location.href).href, { credentials: "same-origin", cache: "no-store" });
+      return res && res.ok ? await res.text() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // What a page's body is made of, ignoring scripts, whitespace, and our own tags: for telling whether
+  // scripts have changed the live page since it loaded.
+  function bodyShape(body) {
+    const copy = body.cloneNode(true);
+    for (const n of copy.querySelectorAll("script, noscript, template, [data-opentraffic]")) n.remove();
+    return copy.innerHTML.replace(/\s+/g, " ").trim();
+  }
+
+  // Remembers the page as loaded, the first time it's needed (one extra request, when idle).
+  function loadBaseline() {
+    if (!baselineLoad) {
+      baselineLoad = (async () => {
+        const html = await fetchPage();
+        if (html === null) return null;
+        const css = new Map();
+        for (const l of sameOriginSheets(document)) {
+          const text = await fetchCss(sheetKey(l));
+          if (text !== null) css.set(sheetKey(l), text);
+        }
+        baseline = { html, css };
+        return baseline;
+      })();
+    }
+    return baselineLoad;
+  }
+
+  // Someone is in the middle of something a refresh shouldn't touch.
+  function busy(needsReload) {
+    const a = document.activeElement;
+    const pageField = a && !isOurs(a) && (a.isContentEditable || /^(input|textarea|select)$/i.test(a.tagName));
+    if (pageField && Date.now() - lastPageInput < TYPING_QUIET) return true;
+    if (!needsReload) return false;
+    // A reload would lose these.
+    return !!(draft || posting || pageField || (replyArea.value && replyArea.value.trim()) || !zoom.hidden || stage);
+  }
+
+  function scheduleRefresh(delay = REFRESH_DEBOUNCE) {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => { refreshPage().catch(() => {}); }, delay);
+  }
+
+  // Brings the page up to date; resolves once it is (or nothing changed), true if it changed.
+  function refreshPage() {
+    if (!refreshing) refreshing = doRefresh().finally(() => { refreshing = null; });
+    return refreshing;
+  }
+
+  async function doRefresh() {
+    if (hotReloads()) return settle();
+    const base = await loadBaseline();
+    if (!base) return false;
+    const html = await fetchPage();
+    if (html === null) return false;
+    const css = new Map();
+    const next = parsePage(html);
+    let cssChanged = false;
+    for (const l of sameOriginSheets(next)) {
+      const key = sheetKey(l);
+      const text = await fetchCss(key);
+      if (text === null) continue;
+      css.set(key, text);
+      if (base.css.get(key) !== text) cssChanged = true;
+    }
+    // Whether the page differs from what the server sends now (the live page, so a stale baseline
+    // can't hide a change), and whether its scripts have changed it since it loaded.
+    const liveShape = bodyShape(document.body);
+    const htmlChanged = liveShape !== bodyShape(next.body) || next.title !== document.title ||
+      [...next.head.querySelectorAll("style")].map((st) => st.textContent).join("\n") !==
+        [...document.head.querySelectorAll("style:not([data-opentraffic])")].map((st) => st.textContent).join("\n");
+    if (!htmlChanged && !cssChanged) return false;
+    const built = htmlChanged && liveShape !== bodyShape(parsePage(base.html).body);
+    // A page its scripts built differs from its HTML anyway: only a change to the HTML itself counts.
+    if (built && html === base.html && !cssChanged) return false;
+    if (busy(built)) {
+      scheduleRefresh(REFRESH_RETRY);
+      return false;
+    }
+    if (built) {
+      reloadKeepingContext();
+      return true;
+    }
+    if (preview) { previewOff(); renderBubble(); }
+    const x = window.scrollX, y = window.scrollY;
+    if (htmlChanged) {
+      if (next.title !== document.title) document.title = next.title;
+      morphHead(next.head);
+      morphChildren(document.body, next.body);
+      syncAttributes(document.body, next.body);
+    }
+    if (cssChanged) await swapSheets(css, base.css);
+    window.scrollTo(x, y);
+    baseline = { html, css };
+    baselineLoad = Promise.resolve(baseline);
+    // The comment being written stays on its element, even if that element was replaced.
+    if (draft && draft.el && !draft.el.isConnected && draft.pos && draft.pos.anchor) {
+      try { draft.el = document.querySelector(draft.pos.anchor) || draft.el; } catch { /* invalid selector */ }
+    }
+    renderPins();
+    schedulePlace();
+    await settle();
+    return true;
+  }
+
+  // Waits until the page stops changing (hot reload done, images and layout settled), at most SETTLE_MAX.
+  function settle() {
+    return new Promise((resolve) => {
+      let quiet = 0;
+      const done = () => { clearTimeout(quiet); clearTimeout(cap); observer.disconnect(); resolve(true); };
+      const observer = new MutationObserver((records) => {
+        if (records.every((r) => isOurs(r.target))) return;
+        clearTimeout(quiet);
+        quiet = setTimeout(done, SETTLE_QUIET);
+      });
+      observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+      quiet = setTimeout(done, SETTLE_QUIET);
+      const cap = setTimeout(done, SETTLE_MAX);
+    });
+  }
+
+  // A full reload, for pages that can't be changed in place: the open comment, any picture of a fix
+  // still to take, and the scroll position come back afterwards.
+  function reloadKeepingContext() {
+    if (inFrame) return; // the device view follows its stage
+    if (bubbleId) session.reveal = bubbleId;
+    if (capturing.size) session.captureAfter = [...capturing][0];
+    session.scroll = [window.scrollX, window.scrollY];
+    saveSession();
+    location.reload();
+  }
+
+  // ---- changing the live page into the new one
+
+  const sameNode = (a, b) => a.nodeType === b.nodeType &&
+    (a.nodeType !== 1 || (a.tagName === b.tagName && (a.getAttribute("id") || "") === (b.getAttribute("id") || "")));
+
+  function syncAttributes(live, next) {
+    for (const { name, value } of [...next.attributes]) {
+      if (live.getAttribute(name) !== value) live.setAttribute(name, value);
+    }
+    for (const { name } of [...live.attributes]) {
+      if (!next.hasAttribute(name) && !name.startsWith("data-opentraffic")) live.removeAttribute(name);
+    }
+  }
+
+  function morphNode(live, next) {
+    if (live.nodeType === 3 || live.nodeType === 8) {
+      if (live.nodeValue !== next.nodeValue) live.nodeValue = next.nodeValue;
+      return;
+    }
+    if (live.nodeType !== 1) return;
+    if (live.tagName === "SCRIPT") return; // never touched: running scripts again could do anything
+    syncAttributes(live, next);
+    // A field someone has typed into keeps what they typed.
+    if (live.tagName === "TEXTAREA") return;
+    morphChildren(live, next);
+  }
+
+  function morphChildren(live, next) {
+    const theirs = [...next.childNodes];
+    let i = 0;
+    for (const n of theirs) {
+      if (n.nodeType === 1 && n.tagName === "SCRIPT") continue; // a script the page didn't have before isn't run
+      let l = live.childNodes[i];
+      while (l && isOurs(l)) l = live.childNodes[++i]; // our own nodes stay where they are
+      if (l && l.nodeType === 1 && l.tagName === "SCRIPT") {
+        // The live page's scripts stay too; line up after them.
+        while (l && l.nodeType === 1 && l.tagName === "SCRIPT") l = live.childNodes[++i];
+      }
+      if (l && sameNode(l, n)) morphNode(l, n);
+      else if (l) live.replaceChild(document.importNode(n, true), l);
+      else live.appendChild(document.importNode(n, true));
+      i++;
+    }
+    // What's left over is gone from the page, but scripts and our own nodes stay.
+    for (const l of [...live.childNodes].slice(i)) {
+      if (isOurs(l) || (l.nodeType === 1 && l.tagName === "SCRIPT")) continue;
+      l.remove();
+    }
+  }
+
+  // <style> text and <meta> in the head follow the new page; stylesheets are handled by swapSheets.
+  function morphHead(next) {
+    const styles = [...document.head.querySelectorAll("style:not([data-opentraffic])")];
+    const theirs = [...next.querySelectorAll("style")];
+    theirs.forEach((st, k) => {
+      if (styles[k]) { if (styles[k].textContent !== st.textContent) styles[k].textContent = st.textContent; }
+      else document.head.appendChild(document.importNode(st, true));
+    });
+    for (const st of styles.slice(theirs.length)) st.remove();
+  }
+
+  // Changed stylesheets: the new one goes in next to the old, which leaves once it has loaded (no flash).
+  async function swapSheets(css, old) {
+    const loads = [];
+    for (const l of sameOriginSheets(document)) {
+      const key = sheetKey(l);
+      if (!css.has(key) || css.get(key) === old.get(key)) continue;
+      const fresh = l.cloneNode();
+      const u = new URL(key);
+      u.searchParams.set("__opentraffic", String(Date.now()));
+      fresh.href = u.href;
+      loads.push(new Promise((resolve) => {
+        const done = () => { l.remove(); resolve(); };
+        fresh.addEventListener("load", done, { once: true });
+        fresh.addEventListener("error", () => { fresh.remove(); resolve(); }, { once: true });
+        setTimeout(resolve, 3000);
+      }));
+      l.after(fresh);
+    }
+    await Promise.all(loads);
   }
 
   // ---------------------------------------------------------------- browser errors
@@ -4469,6 +4754,21 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
     lastLead = {};
     setErrorsFeature(!!(m.features && typeof m.features === "object" && m.features.errors === true));
     setComments(m.comments);
+    // What the page was as loaded, to tell later changes from what its scripts did (not with hot reload).
+    if (!inFrame && !baselineLoad) setTimeout(() => { if (!hotReloads()) loadBaseline().catch(() => {}); }, 1200);
+    // Back from a reload that brought the page up to date.
+    if (Array.isArray(session.scroll)) {
+      const [sx, sy] = session.scroll;
+      delete session.scroll;
+      saveSession();
+      if (Number.isFinite(sx) && Number.isFinite(sy)) requestAnimationFrame(() => window.scrollTo(sx, sy));
+    }
+    if (validId(session.captureAfter)) {
+      const id = session.captureAfter;
+      delete session.captureAfter;
+      saveSession();
+      if (comments.get(id)) queueCapture(id, AFTER_SETTLE);
+    }
     if (validId(session.reveal)) {
       // We came here to look at a fix.
       const c = comments.get(session.reveal);
@@ -4534,6 +4834,7 @@ input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(10,
       case "point": return onPoint(m);
       case "ink": return onInk(m);
       case "capture": return onCapture(m);
+      case "refresh": return scheduleRefresh();
       default: return; // unknown types are ignored
     }
   }
