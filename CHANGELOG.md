@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.20 (18 October 2026)
+
+- **Share Electron apps:** an Electron app you're building shows up in the menu bar under **Ready to Share**, next to your web servers, and shares the same way: one click, live collaboration on. People open it in their browser, with nothing to install, and use it for real: its windows come through the share, and its main process runs as a second copy on your Mac that answers them. A finished app you built (an `.app` from electron-builder, Forge, or similar) can be shared too while it's open; apps you only installed aren't listed. From the terminal: `opentraffic share 5173` or `opentraffic share dist/mac-arm64/Orbit.app`. The docs have a new page, **Electron apps**.
+- **Sandboxed:** the copy can read the app's project and nothing else in your home folder, writes only a throwaway copy of the app's data (a finished app's starts empty), can't use the keychain, and reaches only the local services the app uses; any other one is asked for once. **Reset Data** starts it over.
+- **Desktop features in the browser:** open dialogs ask the viewer for a file, saved files download, links open in a new tab, notifications show as toasts, and the app's menus are in a small **desktop preview** bar.
+- **Fixes reach people live:** changes to the app's windows arrive through hot reload, changes to its main process restart the copy without reloading anyone's page, and a changed preload reloads open pages. An agent fixing a comment works as it does on a web page.
+
 ## 1.0.19 (18 October 2026)
 
 - **Comments from people you trust start the agent without waiting for you:** people you made **Trusted** by name in Live Collaboration are no longer held by the hourly limit on automatic runs. For everyone trusted through **New people can**, the limit is higher: 10 runs per visitor and 30 per share each hour (was 3 and 10).
