@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Debug builds only: tools for capturing the real app for the website, README, and demo video.
 ///
-/// - `OPENTRAFFIC_DEMO_PORTS=5173,3001` lists only those ports under Ready to Share and hides
+/// - `OPENTRAFFIC_DEMO_PORTS=5173,3001` lists only those ports under Localhost and hides
 ///   tunnels and agents running elsewhere, so a capture never shows anything personal.
 /// - `OPENTRAFFIC_CAPTURE=<folder>` shows the real views in off-screen windows (no menu bar icon,
 ///   no activation), drawn behind the desktop wallpaper where nobody sees them but `screencapture`

@@ -117,7 +117,7 @@ public struct APIHealthCheck: Codable, Equatable, Sendable {
     }
 }
 
-/// A web server OpenTraffic found running on this Mac (the menu bar's Ready to Share list).
+/// A web server OpenTraffic found running on this Mac (the menu bar's Localhost list).
 public struct APILocalService: Codable, Equatable, Sendable {
     public let port: Int
     public let url: String

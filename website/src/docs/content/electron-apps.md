@@ -1,6 +1,6 @@
 ## Share an Electron app
 
-An Electron app you're building shows up in the menu bar under **Ready to Share**, next to your web servers, as `Orbit · Electron · ~/code/orbit`. **Share** works as it does for a web page: one click, the link is on your clipboard, and live collaboration is on. People who open it use the app in their browser, with cursors, comments pinned to its elements, and style suggestions, and nothing to install.
+An Electron app you're building shows up in the menu bar under **Electron Apps**, below your web servers, as `Orbit · Electron · ~/code/orbit`. **Share** works as it does for a web page: one click, the link is on your clipboard, and live collaboration is on. People who open it use the app in their browser, with cursors, comments pinned to its elements, and style suggestions, and nothing to install.
 
 Two kinds of app can be shared:
 

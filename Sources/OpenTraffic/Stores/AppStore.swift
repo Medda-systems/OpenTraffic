@@ -523,7 +523,7 @@ final class AppStore {
     @ObservationIgnored private var localServiceTracker = LocalServiceUptimeTracker()
     @ObservationIgnored private var localServiceScanInFlight = false
     @ObservationIgnored private var lastLocalServiceScan = Date.distantPast
-    /// Views showing the Ready to Share list right now; while any are, the list refreshes every few seconds.
+    /// Views showing the shareable lists right now; while any are, the list refreshes every few seconds.
     @ObservationIgnored private var localServiceWatchers: Set<String> = []
     @ObservationIgnored private var localServicesTask: Task<Void, Never>?
     static let watchedLocalServiceInterval: TimeInterval = 4

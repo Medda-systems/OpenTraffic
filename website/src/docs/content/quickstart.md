@@ -7,7 +7,7 @@ Start your existing web app and check that its local URL opens in your browser. 
 ## Share the server
 
 1. Open OpenTraffic from Applications.
-2. Click its menu bar icon and find your app under **Ready to Share**.
+2. Click its menu bar icon and find your app under **Localhost**.
 3. Choose **Share ▾ → Temporary URL**, or use **New Tunnel → Temporary URL** and enter your local URL.
 4. Wait for the public URL and connection checks. New DNS names may need a short grace period.
 5. Copy the URL and open it in a separate browser window. Send it to your teammate once your app loads.

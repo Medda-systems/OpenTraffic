@@ -8,6 +8,7 @@ struct MenuBarPopoverView: View {
     @Environment(\.animationsActive) private var popoverVisible
     @Bindable var store: AppStore
     @State private var showingAllServices = false
+    @State private var showingAllApps = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -136,7 +137,7 @@ struct MenuBarPopoverView: View {
         let services = store.shareableLocalServices
         let apps = store.shareableElectronApps
         HStack {
-            sectionTitle("Ready to Share")
+            sectionTitle("Localhost")
             Spacer()
             if store.isScanningLocalServices {
                 ProgressView().controlSize(.mini)
@@ -147,19 +148,7 @@ struct MenuBarPopoverView: View {
             }
         }
         .padding(.top, store.definitions.isEmpty && store.discoveredTunnels.isEmpty ? 0 : Spacing.s)
-        ForEach(apps) { app in
-            ElectronAppRow(
-                app: app,
-                // An app in development is what you're working on: suggested over plain servers.
-                isSuggested: app.id == apps.first?.id,
-                canShare: store.cloudflaredPath != nil,
-                canShareWithOpenTunnel: store.openTunnelBlocker == nil,
-                defaultKind: store.effectiveDefaultShareKind == .opentunnel ? .opentunnel : .quick
-            ) { kind, data in
-                withAnimation(.snappy) { store.share(app, kind: kind, data: data) }
-            }
-        }
-        if services.isEmpty, apps.isEmpty {
+        if services.isEmpty {
             Text(store.isScanningLocalServices
                  ? "Looking for web servers on this Mac…"
                  : "No unshared web servers found. Start a dev server, or create a tunnel manually.")
@@ -168,7 +157,7 @@ struct MenuBarPopoverView: View {
                 .padding(.horizontal, Spacing.s)
                 .padding(.bottom, Spacing.xs)
         } else {
-            let visible = showingAllServices ? services : Array(services.prefix(Self.collapsedServiceCount))
+            let visible = showingAllServices ? services : Array(services.prefix(Self.collapsedCount))
             ForEach(Array(visible.enumerated()), id: \.element.id) { index, service in
                 // Services are sorted newest first; the newest is almost always the one you just started.
                 ShareableServiceRow(
@@ -185,25 +174,48 @@ struct MenuBarPopoverView: View {
                     withAnimation(.snappy) { store.shareWithCollaboration(localURL: service.url, name: service.displayName) }
                 }
             }
-            if services.count > Self.collapsedServiceCount {
-                Button {
-                    withAnimation(.snappy) { showingAllServices.toggle() }
-                } label: {
-                    Label(
-                        showingAllServices ? "Show Fewer" : "Show \(services.count - Self.collapsedServiceCount) More",
-                        systemImage: showingAllServices ? "chevron.up" : "chevron.down"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            showMoreButton(total: services.count, expanded: $showingAllServices)
+        }
+        if !apps.isEmpty {
+            sectionTitle("Electron Apps")
+                .padding(.top, Spacing.s)
+            let visible = showingAllApps ? apps : Array(apps.prefix(Self.collapsedCount))
+            ForEach(visible) { app in
+                ElectronAppRow(
+                    app: app,
+                    // An app in development is what you're working on: suggested over plain servers.
+                    isSuggested: app.id == apps.first?.id,
+                    canShare: store.cloudflaredPath != nil,
+                    canShareWithOpenTunnel: store.openTunnelBlocker == nil,
+                    defaultKind: store.effectiveDefaultShareKind == .opentunnel ? .opentunnel : .quick
+                ) { kind, data in
+                    withAnimation(.snappy) { store.share(app, kind: kind, data: data) }
                 }
-                .buttonStyle(.borderless)
-                .padding(.horizontal, Spacing.s)
-                .padding(.top, Spacing.xxs)
             }
+            showMoreButton(total: apps.count, expanded: $showingAllApps)
         }
     }
 
-    private static let collapsedServiceCount = 5
+    @ViewBuilder
+    private func showMoreButton(total: Int, expanded: Binding<Bool>) -> some View {
+        if total > Self.collapsedCount {
+            Button {
+                withAnimation(.snappy) { expanded.wrappedValue.toggle() }
+            } label: {
+                Label(
+                    expanded.wrappedValue ? "Show Fewer" : "Show \(total - Self.collapsedCount) More",
+                    systemImage: expanded.wrappedValue ? "chevron.up" : "chevron.down"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .padding(.horizontal, Spacing.s)
+            .padding(.top, Spacing.xxs)
+        }
+    }
+
+    private static let collapsedCount = 5
     private static let topAnchor = "popover-top"
 
     private func sectionTitle(_ title: String) -> some View {

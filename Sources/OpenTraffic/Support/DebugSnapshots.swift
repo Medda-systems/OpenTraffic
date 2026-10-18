@@ -11,7 +11,7 @@ enum DebugSnapshots {
         Task { @MainActor in
             // Let the first scan of local services finish so lists have content.
             try? await Task.sleep(for: .seconds(4))
-            // The menu bar popover, with whatever is running (Electron apps under Ready to Share).
+            // The menu bar popover, with whatever is running (Electron apps under their own heading).
             for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
                 render(
                     MenuBarPopoverView(store: store),

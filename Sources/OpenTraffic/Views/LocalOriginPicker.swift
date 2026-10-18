@@ -77,7 +77,7 @@ struct LocalOriginPicker: View {
                 Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                     .foregroundStyle(selected ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
                     .font(.body)
-                // The site's favicon, as in the menu bar's Ready to Share list.
+                // The site's favicon, as in the menu bar's Localhost list.
                 TunnelIcon(originURL: option.url, fallbackSymbol: "server.rack", size: 26)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(option.name).lineLimit(1)
