@@ -19,7 +19,7 @@ public enum ContentSecurityPolicyAdjuster {
                 sources.append("'nonce-\(nonce)'")
                 needsNonce = true
             } else {
-                sources += ["\(origin)/__opentraffic/bridge.js", "\(origin)/__opentraffic/collab.js"]
+                sources += ["\(origin)/__opentraffic/bridge.js", "\(origin)/__opentraffic/electron/preload.js", "\(origin)/__opentraffic/collab.js"]
             }
             if scriptName == "default-src", directives["script-src"] == nil {
                 directives["script-src"] = sources

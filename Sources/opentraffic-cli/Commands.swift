@@ -9,9 +9,13 @@ enum Commands {
                     arguments: 1...1),
         CommandSpec(
             name: "share", group: "Shares",
-            usage: "share <port|host:port|url> [--via quick|opentunnel|tailscale|ngrok|domain] [--name NAME] [--collab]",
+            usage: "share <port|host:port|url|App.app> [--via quick|opentunnel|tailscale|ngrok|domain] [--name NAME] [--collab]",
             summary: "Share a local server; prints the public URL once it's live",
             details: """
+            Electron apps: share an app you're developing by its dev server's port, or a finished
+            app you built by its path (dist/Orbit.app; it must be running). Either way its windows
+            open in the browser and its main process runs sandboxed on this Mac (quick, opentunnel).
+
             Ways to share (--via):
               quick        A temporary trycloudflare.com URL, new each start (the default). No account.
               opentunnel   A lasting address on opentunnel.xyz, encrypted end to end. No account.
@@ -291,7 +295,14 @@ struct Context {
             "funnel": invocation.flag("funnel") ? true : nil,
             "start": invocation.flag("save") || password ? false : nil,
         ]
-        if let port = Int(target) { body["port"] = port } else { body["url"] = target }
+        if let port = Int(target) {
+            body["port"] = port
+        } else if target.hasSuffix(".app") || target.hasSuffix(".app/") {
+            // A finished Electron app of yours, by its path.
+            body["url"] = URL(fileURLWithPath: (target as NSString).expandingTildeInPath).standardizedFileURL.path
+        } else {
+            body["url"] = target
+        }
         let (created, createdRaw) = try await client.call("POST", "/v1/shares", body: body, as: Share.self)
         guard password else { return try announce(created, raw: createdRaw) }
         let (protection, _) = try await client.call("PUT", sharePath(created.id, "/protection"), body: ["mode": "password", "username": invocation.options["user"]], as: Protection.self)

@@ -13,6 +13,6 @@ Approving a port makes that local service reachable through the share. It does n
 
 ## Compatibility boundaries
 
-The bridge handles supported browser HTTP and WebSocket calls; it does not turn an arbitrary desktop app into a collaborative web app. It does not carry WebRTC media, copy host cookies from another browser, or register OAuth callback URLs for you. A sign-in provider must accept the callback URL configured by your app.
+The bridge handles supported browser HTTP and WebSocket calls; it does not turn an arbitrary desktop app into a collaborative web app (Electron apps you build can be shared: see [Electron apps](/docs/electron-apps)). It does not carry WebRTC media, copy host cookies from another browser, or register OAuth callback URLs for you. A sign-in provider must accept the callback URL configured by your app.
 
 For a “private network” or blocked-host error, first inspect the failing URL in browser developer tools. If it still points at the visitor’s localhost, check collaboration and port approval. If it points at the public hostname and is rejected by the app, check the host header or app authentication.

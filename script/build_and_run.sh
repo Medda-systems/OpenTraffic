@@ -87,6 +87,9 @@ cp "$ROOT_DIR/Sources/OpenTraffic/Resources/opentraffic-menu.svg" "$APP_RESOURCE
 cp "$ROOT_DIR/Sources/OpenTraffic/Resources/opentraffic" "$APP_RESOURCES/opentraffic"
 cp "$ROOT_DIR/Sources/OpenTraffic/Resources/collab.js" "$APP_RESOURCES/collab.js"
 cp "$ROOT_DIR/Sources/OpenTraffic/Resources/bridge.js" "$APP_RESOURCES/bridge.js"
+# Electron app sharing: the sandboxed main-process host and the preload shim it serves to pages.
+cp "$ROOT_DIR/Sources/OpenTraffic/Resources/electron-host.js" "$APP_RESOURCES/electron-host.js"
+cp "$ROOT_DIR/Sources/OpenTraffic/Resources/electron-preload-shim.js" "$APP_RESOURCES/electron-preload-shim.js"
 chmod +x "$APP_RESOURCES/opentraffic"
 # Provider marks: Cloudflare, ngrok, and Tailscale from Simple Icons (CC0); OpenTunnel's is its maker
 # Anomaly's wordmark, from opentunnel.xyz. Trademarks belong to their owners.

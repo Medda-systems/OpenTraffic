@@ -64,7 +64,7 @@ extension AppStore {
 
     /// Quick Tunnels go through OpenTraffic's proxy for live collaboration or a password.
     func quickNeedsProxy(_ definition: TunnelDefinition) -> Bool {
-        if usesCollaboration(definition) { return true }
+        if usesCollaboration(definition) || definition.electronApp != nil { return true }
         if case .password = definition.protection { return true }
         return false
     }
@@ -88,25 +88,44 @@ extension AppStore {
     /// hosts the session; without it, it only forwards, sending the local Host header when the share
     /// asks for that (used by tunnels that can't rewrite it themselves).
     func startShareProxy(for definition: TunnelDefinition, generation: UInt64, collaboration: Bool) async throws -> String? {
-        guard let url = URL(string: definition.localURL), let host = url.host else {
+        guard let url = URL(string: definition.localURL), var upstreamHost = url.host else {
             throw OpenTrafficError.invalidLocalURL
         }
+        // An Electron app's pages need the overlay's injection (its preload goes in with it).
+        let collaboration = collaboration || definition.electronApp != nil
         guard !collaboration || Self.collaborationScript != nil else { throw OpenTrafficError.invalidLocalURL }
         let access = try shareAccess(for: definition)
         stopCollaboration(definition.id)
         let id = definition.id
+        var upstreamPort = url.port ?? 80
+        var electronHostPort: Int?
+        if definition.electronApp != nil {
+            do {
+                let origin = try await startElectronSession(for: definition)
+                (upstreamHost, upstreamPort, electronHostPort) = (origin.host, origin.port, origin.hostPort)
+            } catch {
+                stopElectronSession(id)
+                throw error
+            }
+            guard runtime(for: id).generation == generation else {
+                stopElectronSession(id)
+                return nil
+            }
+        }
         let proxy = CollabProxy(
             configuration: .init(
-                upstreamHost: host,
-                upstreamPort: url.port ?? 80,
+                upstreamHost: upstreamHost,
+                upstreamPort: upstreamPort,
                 overlayScript: Self.collaborationScript ?? Data(),
                 hostName: collaborationHostName.nilIfBlank,
                 bridgeScript: Self.bridgeScript,
                 attachmentsDirectory: collaboration ? feedbackPersistence.attachmentsDirectory(id) : nil,
                 injectsOverlay: collaboration,
-                rewritesHostHeader: definition.kind != .quick && definition.rewriteHostHeader,
+                // An Electron app's dev server expects to be on localhost (Vite turns other hosts away).
+                rewritesHostHeader: (definition.kind != .quick && definition.rewriteHostHeader) || electronHostPort != nil,
                 // Only Cloudflare says who each visitor is.
-                limitsConnectionsPerAddress: definition.kind.provider == .cloudflare
+                limitsConnectionsPerAddress: definition.kind.provider == .cloudflare,
+                electronHostPort: electronHostPort
             ),
             comments: collaboration ? comments(for: id) : []
         )
@@ -144,6 +163,7 @@ extension AppStore {
         _ = try await proxy.start()
         guard runtime(for: id).generation == generation, let proxyURL = proxy.localURL else {
             await proxy.stop()
+            if electronHostPort != nil { stopElectronSession(id) }
             return nil
         }
         collabProxies[id] = proxy
@@ -240,6 +260,7 @@ extension AppStore {
         saveDefinitions()
         collabBridgeCandidates[id]?.remove(port)
         collabProxies[id]?.setBridgedPorts(Set(definitions[index].bridgedPorts))
+        electronAllowedPortsChanged(for: id)
     }
 
     func removeBridgedPort(_ port: Int, for id: UUID) {
@@ -247,10 +268,12 @@ extension AppStore {
         definitions[index].bridgedPorts.removeAll { $0 == port }
         saveDefinitions()
         collabProxies[id]?.setBridgedPorts(Set(definitions[index].bridgedPorts))
+        electronAllowedPortsChanged(for: id)
     }
 
     func dismissBridgeCandidate(_ port: Int, for id: UUID) {
         collabBridgeCandidates[id]?.remove(port)
+        denyElectronPort(port, for: id)
     }
 
     /// Turns browser-error collection on or off; pages opened from now on follow it.
@@ -499,6 +522,7 @@ extension AppStore {
             for peer in peers + departed { apiEvents.append(.sessionLeft, share: share, peer: APIPerson(peer)) }
         }
         projectWatchers.removeValue(forKey: id)?.stop()
+        stopElectronSession(id)
         guard let proxy = collabProxies.removeValue(forKey: id) else { return }
         Task { await proxy.stop() }
         updateReservedPorts()

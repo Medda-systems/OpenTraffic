@@ -12,6 +12,7 @@ If OpenTraffic isn't running, the command starts it in the background: in the me
 opentraffic services                          # what's running on this Mac, and for how long
 opentraffic share 5173 --collab               # a temporary public URL with live collaboration
 opentraffic share 5173 --via opentunnel       # a lasting OpenTunnel address
+opentraffic share dist/mac-arm64/Orbit.app    # an Electron app you built (see Electron apps)
 opentraffic share 3000 --via domain --hostname app.example.com
 opentraffic                                   # your shares (same as `opentraffic list`)
 opentraffic status Orbit                      # URL, connection path, who's there, protection

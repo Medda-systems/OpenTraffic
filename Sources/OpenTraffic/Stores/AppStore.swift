@@ -216,6 +216,17 @@ final class AppStore {
     @ObservationIgnored var agentRunCallers: [pid_t: AgentRunScope] = [:]
     /// Each collaborative share's project folder, watched so its pages catch up with changes.
     @ObservationIgnored var projectWatchers: [UUID: ProjectWatcher] = [:]
+    /// Electron apps being developed on this Mac, ready to share, and the local ports each one uses
+    /// (its dev server's among them: shown as the app, not as a separate server).
+    var detectedElectronApps: [ElectronApp] = []
+    var electronAppPorts: [String: Set<Int>] = [:]
+    /// Shared Electron apps' sandboxed main processes, what changes restart them, and how many
+    /// times each stopped by itself lately.
+    @ObservationIgnored var electronSessions: [UUID: ElectronHostSession] = [:]
+    @ObservationIgnored var electronWatchers: [UUID: [ProjectWatcher]] = [:]
+    @ObservationIgnored var electronCrashes: [UUID: [Date]] = [:]
+    /// People viewing each shared Electron app right now.
+    var electronViewers: [UUID: Int] = [:]
     /// Runs the agent command started by itself recently, against the budget.
     @ObservationIgnored var agentRunBudget = AgentRunBudget()
     /// Shares working on a branch: their repositories (by root), what was already changed when the
@@ -532,6 +543,7 @@ final class AppStore {
         let services = localServiceTracker.update(with: scan)
         lastLocalServiceScan = Date()
         if services != detectedLocalServices { detectedLocalServices = services }
+        await scanElectronApps()
     }
 
     /// Marks a view as showing local services (or not anymore). Becoming visible refreshes right away.
@@ -625,7 +637,9 @@ final class AppStore {
             .filter { [.running, .starting, .stopping].contains(runtime(for: $0.id).state) }
             .map { effectiveOrigin(for: $0).url }
             + discoveredTunnels.map(\.localURL)
-        return ShareSuggestions.unshared(detectedLocalServices, activeOrigins: active)
+        // An Electron app's own servers are shared with the app.
+        let appPorts = electronAppPorts.values.reduce(into: Set<Int>()) { $0.formUnion($1) }
+        return ShareSuggestions.unshared(detectedLocalServices, activeOrigins: active).filter { !appPorts.contains($0.port) }
     }
 
     /// One-step sharing: reuse a saved Quick Tunnel for the port or create one, then start it.

@@ -1,0 +1,11 @@
+body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 0; background: #f6f5f2; color: #222; }
+header { display: flex; align-items: baseline; gap: 12px; padding: 18px 24px; background: #1d1f24; color: #fff; }
+header h1 { margin: 0; font-size: 20px; }
+main { padding: 24px; max-width: 640px; }
+form { display: flex; gap: 8px; }
+input { flex: 1; padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px; }
+button { padding: 8px 14px; border: 0; border-radius: 8px; background: #3b5bdb; color: #fff; cursor: pointer; }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.tools button { background: #495057; }
+ul { padding-left: 18px; }
+pre { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 10px; min-height: 60px; white-space: pre-wrap; }

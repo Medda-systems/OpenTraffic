@@ -1,0 +1,18 @@
+{
+  "name": "electron-orbit",
+  "productName": "Orbit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A tiny Electron notes app for testing OpenTraffic's Electron sharing.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node dev.mjs",
+    "start": "electron .",
+    "package": "node package.mjs"
+  },
+  "devDependencies": {
+    "@electron/asar": "^4.3.1",
+    "@electron/fuses": "^2.1.3",
+    "electron": "^38.0.0"
+  }
+}

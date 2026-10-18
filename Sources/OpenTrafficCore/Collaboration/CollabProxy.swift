@@ -32,6 +32,9 @@ public final class CollabProxy: @unchecked Sendable {
         /// Cap hub connections per visitor address. Only meaningful when the tunnel says who the
         /// visitor is (Cloudflare's CF-Connecting-IP); otherwise everyone looks like 127.0.0.1.
         public var limitsConnectionsPerAddress: Bool
+        /// The Electron host serving this share's app (electron-host.js): `/__opentraffic/electron/*`
+        /// goes there, and pages get its preload script first thing in <head>.
+        public var electronHostPort: Int?
 
         public init(
             upstreamHost: String,
@@ -42,7 +45,8 @@ public final class CollabProxy: @unchecked Sendable {
             attachmentsDirectory: URL? = nil,
             injectsOverlay: Bool = true,
             rewritesHostHeader: Bool = false,
-            limitsConnectionsPerAddress: Bool = true
+            limitsConnectionsPerAddress: Bool = true,
+            electronHostPort: Int? = nil
         ) {
             self.upstreamHost = upstreamHost
             self.upstreamPort = upstreamPort
@@ -53,6 +57,7 @@ public final class CollabProxy: @unchecked Sendable {
             self.injectsOverlay = injectsOverlay
             self.rewritesHostHeader = rewritesHostHeader
             self.limitsConnectionsPerAddress = limitsConnectionsPerAddress
+            self.electronHostPort = electronHostPort
         }
 
         /// Where requests from the host's own browser say they're going, as the local server expects.
@@ -69,6 +74,8 @@ public final class CollabProxy: @unchecked Sendable {
     public static let bridgePath = "/__opentraffic/bridge.js"
     static let bridgeWantPath = "/__opentraffic/bridge/want"
     static let bridgedPrefix = "/__opentraffic/port/"
+    static let electronPrefix = "/__opentraffic/electron/"
+    public static let electronPreloadPath = "/__opentraffic/electron/preload.js"
     static let uploadPath = "/__opentraffic/upload"
     static let attachmentsPrefix = "/__opentraffic/attachments/"
     static let maximumUploadBytes = 600 * 1024
@@ -82,6 +89,12 @@ public final class CollabProxy: @unchecked Sendable {
     static func bridgeTag(nonce: String?) -> String {
         let nonceAttribute = nonce.map { #" nonce="\#($0)""# } ?? ""
         return #"<script src="/__opentraffic/bridge.js" data-opentraffic\#(nonceAttribute)></script>"#
+    }
+
+    /// The Electron app's preload (with Electron's renderer modules), right after the bridge.
+    static func electronTag(nonce: String?) -> String {
+        let nonceAttribute = nonce.map { #" nonce="\#($0)""# } ?? ""
+        return #"<script src="/__opentraffic/electron/preload.js" data-opentraffic\#(nonceAttribute)></script>"#
     }
     /// Every share's host cookie starts with this; the port keeps two shares' cookies apart
     /// (browsers don't separate cookies by port).
@@ -382,8 +395,13 @@ public final class CollabProxy: @unchecked Sendable {
     /// The hub only accepts pages served by this share (public hostname or the local host link),
     /// so other sites can't open it from a visitor's browser.
     func acceptsSocket(_ head: HTTPRequestHead) -> Bool {
-        guard Self.path(of: head.uri) == Self.socketPath,
-              let origin = head.headers.first(name: "origin").flatMap(URL.init(string:)),
+        guard Self.path(of: head.uri) == Self.socketPath else { return false }
+        return acceptsOrigin(head)
+    }
+
+    /// Whether a request comes from a page this share served (its public hostname or the local host link).
+    func acceptsOrigin(_ head: HTTPRequestHead) -> Bool {
+        guard let origin = head.headers.first(name: "origin").flatMap(URL.init(string:)),
               let originHost = origin.host?.lowercased() else { return false }
         let authority = origin.port.map { "\(originHost):\($0)" } ?? originHost
         var allowed: Set<String> = []
@@ -427,7 +445,8 @@ public final class CollabProxy: @unchecked Sendable {
     // MARK: Bridge and uploads (event loop)
 
     func allowsBridgedPort(_ port: Int) -> Bool {
-        shared.withLock { $0.bridgedPorts.contains(port) && !$0.reservedPorts.contains(port) && port != $0.port }
+        port != configuration.electronHostPort &&
+            shared.withLock { $0.bridgedPorts.contains(port) && !$0.reservedPorts.contains(port) && port != $0.port }
     }
 
     func reportBridgeCandidate(_ port: Int) {
@@ -698,7 +717,14 @@ private final class ProxyHandler: ChannelInboundHandler, RemovableChannelHandler
                 return
             }
             var forwarded = upstreamHead(for: head)
-            if let target = CollabProxy.bridgedTarget(head.uri) {
+            if let electronPort = proxy.configuration.electronHostPort, path.hasPrefix(CollabProxy.electronPrefix) {
+                // The app's main process, sandboxed. Its WebSocket only takes this share's pages.
+                if isUpgrade, !proxy.acceptsOrigin(head) { return }
+                localRoute = false
+                bridgedPort = electronPort
+                targetPort = electronPort
+                forwarded.headers.replaceOrAdd(name: "host", value: "127.0.0.1:\(electronPort)")
+            } else if let target = CollabProxy.bridgedTarget(head.uri) {
                 guard proxy.allowsBridgedPort(target.port) else {
                     proxy.reportBridgeCandidate(target.port)
                     return // answered as a local route: not bridged (yet)
@@ -824,7 +850,7 @@ private final class ProxyHandler: ChannelInboundHandler, RemovableChannelHandler
                     try channel.pipeline.syncOperations.addHandler(UpstreamHandler(proxy: bound, httpHandlers: [validator, encoder, decoder]))
                 }
             }
-            .connect(host: proxy.configuration.upstreamHost, port: port)
+            .connect(host: upstreamHost(for: port), port: port)
             .assumeIsolated()
             .whenComplete { [self] result in
                 connecting = false
@@ -845,6 +871,15 @@ private final class ProxyHandler: ChannelInboundHandler, RemovableChannelHandler
                     respondUnavailable()
                 }
             }
+    }
+
+    /// The app on its own address; the Electron host on 127.0.0.1, where it listens; other local
+    /// ports of a loopback app by name, so they're found on IPv4 or IPv6.
+    private func upstreamHost(for port: Int) -> String {
+        let configuration = proxy.configuration
+        if port == configuration.upstreamPort { return configuration.upstreamHost }
+        if port == configuration.electronHostPort { return "127.0.0.1" }
+        return ["127.0.0.1", "::1", "localhost"].contains(configuration.upstreamHost) ? "localhost" : configuration.upstreamHost
     }
 
     fileprivate func upstreamRead(_ part: HTTPClientResponsePart) {
@@ -879,8 +914,9 @@ private final class ProxyHandler: ChannelInboundHandler, RemovableChannelHandler
                         head.headers.add(name: "content-security-policy", value: adjusted.header)
                     }
                 }
+                let electron = proxy.configuration.electronHostPort == nil ? "" : CollabProxy.electronTag(nonce: needsNonce ? nonce : nil)
                 let injector = HTMLInjector(
-                    headStart: CollabProxy.bridgeTag(nonce: needsNonce ? nonce : nil),
+                    headStart: CollabProxy.bridgeTag(nonce: needsNonce ? nonce : nil) + electron,
                     headEnd: CollabProxy.overlayTag(nonce: needsNonce ? nonce : nil)
                 )
                 self.injector = injector

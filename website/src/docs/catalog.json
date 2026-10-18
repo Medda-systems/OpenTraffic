@@ -72,6 +72,12 @@
     "description": "Share frontends that depend on local APIs, WebSockets, and additional ports."
   },
   {
+    "slug": "electron-apps",
+    "title": "Electron apps",
+    "group": "Using OpenTraffic",
+    "description": "Share an Electron app you're building, or one you built, with its main process sandboxed on your Mac."
+  },
+  {
     "slug": "feedback",
     "title": "Comments & feedback",
     "group": "Using OpenTraffic",

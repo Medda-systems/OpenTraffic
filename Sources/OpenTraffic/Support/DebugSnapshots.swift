@@ -11,6 +11,36 @@ enum DebugSnapshots {
         Task { @MainActor in
             // Let the first scan of local services finish so lists have content.
             try? await Task.sleep(for: .seconds(4))
+            // The menu bar popover, with whatever is running (Electron apps under Ready to Share).
+            for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                render(
+                    MenuBarPopoverView(store: store),
+                    size: NSSize(width: 380, height: 640),
+                    appearance: appearance,
+                    to: URL(fileURLWithPath: folder).appending(path: "popover-\(name).png")
+                )
+            }
+            for scheme in [ColorScheme.dark, .light] {
+                renderSwiftUI(
+                    MenuBarPopoverView(store: store).frame(width: 380, height: 640)
+                        .background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme),
+                    to: URL(fileURLWithPath: folder).appending(path: "popover-swiftui-\(scheme == .dark ? "dark" : "light").png")
+                )
+            }
+            if ProcessInfo.processInfo.environment["OPENTRAFFIC_SNAPSHOTS_ONLY"] == "popover" {
+                // Offscreen renders drop parts of a scrolling list: also show it for real, briefly, in a
+                // floating panel on every Space, and print its window number for `screencapture -l`.
+                let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 640), styleMask: [.nonactivatingPanel, .titled], backing: .buffered, defer: false)
+                panel.level = .floating
+                panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+                panel.contentView = NSHostingView(rootView: MenuBarPopoverView(store: store))
+                if let screen = NSScreen.main { panel.setFrameTopLeftPoint(NSPoint(x: screen.visibleFrame.maxX - 400, y: screen.visibleFrame.maxY - 10)) }
+                panel.orderFrontRegardless()
+                print("SNAPSHOT_WINDOW \(panel.windowNumber)")
+                fflush(stdout)
+                try? await Task.sleep(for: .seconds(6))
+                exit(0)
+            }
             for kind in NewTunnelKind.allCases {
                 for scheme in [ColorScheme.dark, .light] {
                     renderSwiftUI(

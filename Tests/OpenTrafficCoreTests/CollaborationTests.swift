@@ -368,7 +368,7 @@ private func injectBoth(_ chunks: [String]) -> String {
     #expect(strict.needsNonce)
 
     let cdnOnly = ContentSecurityPolicyAdjuster.adjust("default-src https://cdn.example.com", origin: "https://x.dev", nonce: "n1")
-    #expect(cdnOnly.header == "default-src https://cdn.example.com; script-src https://cdn.example.com https://x.dev/__opentraffic/bridge.js https://x.dev/__opentraffic/collab.js; connect-src https://cdn.example.com https://x.dev/__opentraffic/ wss://x.dev/__opentraffic/")
+    #expect(cdnOnly.header == "default-src https://cdn.example.com; script-src https://cdn.example.com https://x.dev/__opentraffic/bridge.js https://x.dev/__opentraffic/electron/preload.js https://x.dev/__opentraffic/collab.js; connect-src https://cdn.example.com https://x.dev/__opentraffic/ wss://x.dev/__opentraffic/")
     #expect(!cdnOnly.needsNonce)
 }
 

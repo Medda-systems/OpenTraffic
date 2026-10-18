@@ -49,6 +49,10 @@ extension AppStore {
     }
 
     func apiCreateShare(_ request: APIShareRequest, client: String) async throws -> APIShare {
+        // A finished Electron app of yours, by its path: `opentraffic share ~/code/orbit/dist/Orbit.app`.
+        if let path = request.url, path.hasPrefix("/"), path.hasSuffix(".app") || path.hasSuffix(".app/") {
+            return try await apiShareElectronApp(atPath: path, request: request, client: client)
+        }
         let localURL = try apiLocalURL(port: request.port, url: request.url)
         let start = request.start ?? true
         if let name = request.name?.nilIfBlank, let other = definitions.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }),
@@ -132,9 +136,44 @@ extension AppStore {
             }
             definition = definitions[index]
         }
+        // An Electron app's dev server: share the app itself (its main process runs sandboxed here).
+        if kind.supportsCollaboration, let app = await electronApp(serving: localURL),
+           let index = definitions.firstIndex(where: { $0.id == definition.id }), definitions[index].electronApp == nil {
+            definitions[index].electronApp = app.id
+            definitions[index].electronData = definitions[index].electronData ?? .copy
+            definitions[index].collaboration = true
+            definitions[index].agentDirectory = definitions[index].agentDirectory ?? app.appDirectory.path
+            saveDefinitions()
+            definition = definitions[index]
+        }
         guard start else { return apiShare(definition) }
         if !isActive(definition.id) { startSharing(definition) }
         return try await apiWaitUntilLive(definition.id)
+    }
+
+    private func apiShareElectronApp(atPath path: String, request: APIShareRequest, client: String) async throws -> APIShare {
+        let bundle = URL(fileURLWithPath: path).standardizedFileURL
+        await scanElectronApps()
+        guard let app = detectedElectronApps.first(where: { $0.bundle.map { ElectronDiscovery.realURL($0).path } == ElectronDiscovery.realURL(bundle).path }) else {
+            throw OpenTrafficAPIError.notFound("\(bundle.lastPathComponent) isn't a running Electron app of yours. Open it first; apps you only installed can't be shared.")
+        }
+        let kind: TunnelKind = request.provider?.lowercased() == "opentunnel" ? .opentunnel : .quick
+        if let blocker = await apiBlocker(for: kind, funnel: false) {
+            throw OpenTrafficAPIError(status: 409, code: "not_ready", message: blocker)
+        }
+        try confirmAPIPublishing("share \(app.name) publicly with \(kind.provider.title) and live collaboration", client: client)
+        share(app, kind: kind)
+        guard let definition = definitions.first(where: { $0.electronApp == app.id && $0.kind == kind }) else {
+            throw OpenTrafficAPIError.badRequest("Couldn't share \(app.name).")
+        }
+        return try await apiWaitUntilLive(definition.id)
+    }
+
+    /// The Electron app in development whose dev server `localURL` is, if any.
+    private func electronApp(serving localURL: String) async -> ElectronApp? {
+        guard let port = URL(string: localURL)?.port else { return nil }
+        await scanElectronApps() // one started a moment ago may not be listed yet
+        return detectedElectronApps.first { (electronAppPorts[$0.id] ?? Set($0.environmentPorts)).contains(port) && rendererURL(for: $0).flatMap { URL(string: $0)?.port } == port }
     }
 
     /// A hostname in the connected Cloudflare account, like the New Tunnel sheet's Your Domain.
@@ -431,10 +470,11 @@ extension AppStore {
                 guard let target = AutomationCommand.target(of: $0.localURL), target.isLoopback else { return false }
                 return target.display.hasSuffix(":\(service.port)")
             }
+            let app = detectedElectronApps.first { app in rendererURL(for: app).flatMap { URL(string: $0)?.port } == service.port }
             return APILocalService(
                 port: service.port,
                 url: service.url,
-                title: service.title,
+                title: app.map { "\($0.name) (Electron app)" } ?? service.title,
                 process: service.processName,
                 statusCode: service.statusCode,
                 upSince: service.upSince,

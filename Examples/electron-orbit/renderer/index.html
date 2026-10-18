@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Orbit</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header><h1>Orbit</h1><span id="greeting"></span></header>
+  <main>
+    <form id="add"><input id="text" placeholder="Write a note…" autocomplete="off"><button id="save">Save</button></form>
+    <ul id="notes"></ul>
+    <section class="tools">
+      <button id="open">Open file…</button>
+      <button id="export">Export…</button>
+      <button id="api">Local API</button>
+      <button id="link">Open website</button>
+      <button id="notify">Notify</button>
+    </section>
+    <pre id="log"></pre>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>

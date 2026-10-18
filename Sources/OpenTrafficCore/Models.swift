@@ -174,6 +174,11 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
     public var collabMembers: [String: CollabMember]
     /// Collaboration: what everyone else may do.
     public var collabDefaultRole: CollabRole
+    /// An Electron app's folder: the share serves its windows, with its main process running
+    /// sandboxed on this Mac (see ElectronHostSession).
+    public var electronApp: String?
+    /// Where that sandboxed copy's data starts from.
+    public var electronData: ElectronHostSession.DataSource?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -201,6 +206,8 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         case branchSession
         case collabMembers
         case collabDefaultRole
+        case electronApp
+        case electronData
     }
 
     public init(
@@ -228,7 +235,9 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         workOnBranch: Bool = false,
         branchSession: GitBranchSession? = nil,
         collabMembers: [String: CollabMember] = [:],
-        collabDefaultRole: CollabRole = .commenter
+        collabDefaultRole: CollabRole = .commenter,
+        electronApp: String? = nil,
+        electronData: ElectronHostSession.DataSource? = nil
     ) {
         self.id = id
         self.name = name
@@ -255,6 +264,8 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         self.branchSession = branchSession
         self.collabMembers = collabMembers
         self.collabDefaultRole = collabDefaultRole
+        self.electronApp = electronApp?.nilIfBlank
+        self.electronData = electronData
     }
 
     public init(from decoder: Decoder) throws {
@@ -284,6 +295,8 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         branchSession = try? container.decodeIfPresent(GitBranchSession.self, forKey: .branchSession)
         collabMembers = (try? container.decodeIfPresent([String: CollabMember].self, forKey: .collabMembers)) ?? [:]
         collabDefaultRole = (try? container.decodeIfPresent(CollabRole.self, forKey: .collabDefaultRole)) ?? .commenter
+        electronApp = try container.decodeIfPresent(String.self, forKey: .electronApp)?.nilIfBlank
+        electronData = try? container.decodeIfPresent(ElectronHostSession.DataSource.self, forKey: .electronData)
     }
 
     /// What the person with this browser may do.

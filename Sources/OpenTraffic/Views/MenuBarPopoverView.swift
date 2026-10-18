@@ -134,6 +134,7 @@ struct MenuBarPopoverView: View {
     @ViewBuilder
     private var readyToShareSection: some View {
         let services = store.shareableLocalServices
+        let apps = store.shareableElectronApps
         HStack {
             sectionTitle("Ready to Share")
             Spacer()
@@ -146,7 +147,19 @@ struct MenuBarPopoverView: View {
             }
         }
         .padding(.top, store.definitions.isEmpty && store.discoveredTunnels.isEmpty ? 0 : Spacing.s)
-        if services.isEmpty {
+        ForEach(apps) { app in
+            ElectronAppRow(
+                app: app,
+                // An app in development is what you're working on: suggested over plain servers.
+                isSuggested: app.id == apps.first?.id,
+                canShare: store.cloudflaredPath != nil,
+                canShareWithOpenTunnel: store.openTunnelBlocker == nil,
+                defaultKind: store.effectiveDefaultShareKind == .opentunnel ? .opentunnel : .quick
+            ) { kind, data in
+                withAnimation(.snappy) { store.share(app, kind: kind, data: data) }
+            }
+        }
+        if services.isEmpty, apps.isEmpty {
             Text(store.isScanningLocalServices
                  ? "Looking for web servers on this Mac…"
                  : "No unshared web servers found. Start a dev server, or create a tunnel manually.")
@@ -160,7 +173,7 @@ struct MenuBarPopoverView: View {
                 // Services are sorted newest first; the newest is almost always the one you just started.
                 ShareableServiceRow(
                     service: service,
-                    isSuggested: index == 0,
+                    isSuggested: index == 0 && apps.isEmpty,
                     canShare: store.cloudflaredPath != nil,
                     canShareOnTailnet: store.tailscaleBlocker == nil,
                     canShareWithNgrok: store.ngrokBlocker == nil,
@@ -347,6 +360,90 @@ private struct ShareableServiceRow: View {
             parts.append(ShareableServiceUptime.text(since: upSince))
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// An Electron app in development, shared like a web server: its windows open in viewers'
+/// browsers and its main process runs sandboxed here, with a copy of its data.
+private struct ElectronAppRow: View {
+    let app: ElectronApp
+    var isSuggested = false
+    let canShare: Bool
+    var canShareWithOpenTunnel = false
+    var defaultKind: TunnelKind = .quick
+    let share: (TunnelKind, ElectronHostSession.DataSource) -> Void
+
+    var body: some View {
+        HStack(spacing: Spacing.s) {
+            HStack(spacing: Spacing.s) {
+                Image(nsImage: AppStore.icon(for: app))
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 26, height: 26)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(app.name)
+                        .lineLimit(1)
+                    Text(details)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: Spacing.xs)
+            }
+            .contentShape(Rectangle())
+            .help("\(app.name), an Electron app in \((app.bundle ?? app.appDirectory).path)")
+            .contextMenu {
+                Group {
+                    Button("Show in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([app.bundle ?? app.appDirectory]) }
+                    Button("Copy Path", systemImage: "doc.on.doc") { Pasteboard.copy((app.bundle ?? app.appDirectory).path) }
+                }
+                .untintedMenuItems()
+            }
+            Menu {
+                Group {
+                    shareItem("Temporary Public URL", provider: .cloudflare) { share(.quick, .copy) }
+                        .disabled(!canShare)
+                    shareItem("Lasting Address with OpenTunnel", provider: .opentunnel) { share(.opentunnel, .copy) }
+                        .disabled(!canShareWithOpenTunnel)
+                    if !app.isPackaged {
+                        Divider()
+                        Button("Share with Empty Data", systemImage: "tray") { share(defaultKind, .empty) }
+                            .disabled(defaultKind == .quick ? !canShare : !canShareWithOpenTunnel)
+                    }
+                }
+                .untintedMenuItems()
+            } label: {
+                Text(Vocabulary.share)
+            } primaryAction: {
+                share(defaultKind, .copy)
+            }
+            .menuStyle(.button)
+            .buttonStyle(isSuggested ? AnyPrimitiveButtonStyle(.borderedProminent) : AnyPrimitiveButtonStyle(.bordered))
+            .controlSize(.small)
+            .fixedSize()
+            .disabled(!canShare && !canShareWithOpenTunnel)
+            .help("Share \(app.name) with live collaboration and copy the URL. Its main process runs sandboxed on this Mac, with \(app.isPackaged ? "empty data" : "a copy of its data").")
+        }
+        .padding(.vertical, Spacing.xs)
+        .padding(.horizontal, Spacing.s)
+        .hoverHighlight()
+        .accessibilityElement(children: .combine)
+    }
+
+    private var details: String {
+        var parts = [app.isPackaged ? "Electron · built app" : "Electron"]
+        let home = ElectronSandbox.realHomeDirectory
+        var path = (app.bundle ?? app.appDirectory).path
+        if path.hasPrefix("/private/tmp/") { path.removeFirst("/private".count) } // as it's usually typed
+        parts.append(path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path)
+        return parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private func shareItem(_ title: String, provider: TunnelProvider, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Label { Text(title) } icon: { Image(nsImage: BrandAssets.logo(provider, style: .menu)).renderingMode(.template) } }
     }
 }
 

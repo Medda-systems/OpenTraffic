@@ -54,7 +54,8 @@ struct CollaborationCard: View {
             }
             .toggleStyle(.switch)
             .accessibilityLabel("Show who's here")
-            .disabled(blocker != nil || applying)
+            // A shared Electron app always runs with it: its preload goes in with the overlay.
+            .disabled(blocker != nil || applying || tunnel.electronApp != nil)
 
             if let blocker {
                 InlineMessage(severity: .info, message: blocker)
@@ -83,6 +84,7 @@ struct CollaborationCard: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
+                if tunnel.electronApp != nil { electronSection }
                 bridgeSection
                 Toggle("Collect browser errors from visitors", isOn: Binding(
                     get: { tunnel.captureErrors },
@@ -133,8 +135,8 @@ struct CollaborationCard: View {
         let candidates = (store.collabBridgeCandidates[tunnel.id] ?? []).sorted()
         ForEach(candidates, id: \.self) { port in
             InlineMessage(
-                severity: .info,
-                message: "A page in this share asked to reach localhost:\(port). Visitors' browsers can't reach it unless you share it too. Only allow services this app really uses.",
+                severity: AppStore.databasePorts.contains(port) ? .warning : .info,
+                message: bridgeMessage(port),
                 title: "Share localhost:\(port) as part of this share?"
             ) {
                 Button("Allow") { store.allowBridgedPort(port, for: tunnel.id) }
@@ -164,6 +166,42 @@ struct CollaborationCard: View {
             }
             .font(.callout)
         }
+    }
+
+    private func bridgeMessage(_ port: Int) -> String {
+        var message = tunnel.electronApp != nil
+            ? "\(tunnel.name) asked to reach localhost:\(port). Its sandboxed copy and visitors' browsers can't reach it unless you allow it. Only allow services this app really uses."
+            : "A page in this share asked to reach localhost:\(port). Visitors' browsers can't reach it unless you share it too. Only allow services this app really uses."
+        if AppStore.databasePorts.contains(port) {
+            message += " This looks like a database: it's your real one, not a copy, so what visitors do changes its data."
+        }
+        return message
+    }
+
+    /// A shared Electron app: its main process runs sandboxed here, on a copy of its data.
+    @ViewBuilder
+    private var electronSection: some View {
+        let viewers = store.electronViewers[tunnel.id] ?? 0
+        HStack(spacing: Spacing.s) {
+            Image(systemName: "shippingbox")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Desktop app, sandboxed")
+                Text("Its main process runs on this Mac with \(tunnel.electronData == .empty ? "empty data" : "a copy of its data"), and can't read your files or reach other local services. \(store.isActive(tunnel.id) ? "\(viewers) \(viewers == 1 ? "window" : "windows") open." : "")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Button("Reset Data") { store.resetElectronData(tunnel.id) }
+                .help("Start the app over from its original data")
+                .disabled(!store.isActive(tunnel.id))
+            Button("Restart") { store.restartElectronApp(tunnel.id) }
+                .help("Restart the app's main process. Open pages stay open.")
+                .disabled(!store.isActive(tunnel.id))
+        }
+        .font(.callout)
     }
 
     private var blocker: String? {
