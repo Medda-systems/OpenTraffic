@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.19 (18 October 2026)
 
 - **Comments from people you trust start the agent without waiting for you:** people you made **Trusted** by name in Live Collaboration are no longer held by the hourly limit on automatic runs. For everyone trusted through **New people can**, the limit is higher: 10 runs per visitor and 30 per share each hour (was 3 and 10).
 - **A comment that waits says why:** in the Feedback tab, a comment that didn't start the agent by itself shows the reason next to **Send to …**: the person isn't trusted, it reads like instructions, or the hour's runs are used up. Before, the only sign was a notice that went away.
