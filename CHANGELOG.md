@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Comments from people you trust start the agent without waiting for you:** people you made **Trusted** by name in Live Collaboration are no longer held by the hourly limit on automatic runs. For everyone trusted through **New people can**, the limit is higher: 10 runs per visitor and 30 per share each hour (was 3 and 10).
+- **A comment that waits says why:** in the Feedback tab, a comment that didn't start the agent by itself shows the reason next to **Send to …**: the person isn't trusted, it reads like instructions, or the hour's runs are used up. Before, the only sign was a notice that went away.
+
 ## 1.0.18 (17 October 2026)
 
 - **Pick the agent's model:** Settings → Integrations → Agent for comments has a **Model** menu, one choice per agent: its own default (shown with what that is), the models it offers, or any name under **Other…**. OpenTraffic asks the agent: Codex's model catalog, opencode's models from the providers you've set up (grouped by provider), and Claude Code's aliases (Fable, Opus, Sonnet, Haiku); Cursor can't list them, so you type one. The Feedback tab shows the model while the agent works. Presets you hadn't changed are updated to pass it on.

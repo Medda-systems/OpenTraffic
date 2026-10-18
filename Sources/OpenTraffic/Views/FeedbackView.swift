@@ -241,6 +241,11 @@ private struct CommentStatus: View {
             Label { Text("Waiting for \(agent)") } icon: { AgentMark(name: agent, size: 12) }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        } else if !comment.resolved, let hold = store.agentHolds[tunnelID]?[comment.id] {
+            Label("Waiting for you: \(hold.reason(agent: store.agentClientName))", systemImage: "hand.raised")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .help("\(store.agentClientName) didn't start by itself for this comment. Use Send to \(store.agentClientName) to run it.")
         } else if comment.resolved, let by = comment.resolvedBy {
             Label {
                 Text(comment.resolvedByAuthor ? "Resolved by \(by), who wrote it" : "Resolved by \(by)")

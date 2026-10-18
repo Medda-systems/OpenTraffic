@@ -161,10 +161,11 @@ public struct ReplyRedactor: Sendable {
 
 /// How many runs of the agent command new comments may start by themselves, so nobody can burn through the
 /// host's subscription or API credits by posting comment after comment. Past it, comments wait for the
-/// host's Send to …; nothing else changes.
+/// host's Send to …; nothing else changes. People the host trusted by name aren't counted: the host
+/// already decided their comments may run the agent.
 public struct AgentRunBudget: Sendable {
-    public static let perShare = 10
-    public static let perVisitor = 3
+    public static let perShare = 30
+    public static let perVisitor = 10
     public static let window: TimeInterval = 60 * 60
 
     private var runs: [(share: UUID, visitor: String, at: Date)] = []
@@ -180,6 +181,47 @@ public struct AgentRunBudget: Sendable {
     public mutating func record(share: UUID, visitor: String, at date: Date = Date()) {
         runs.removeAll { date.timeIntervalSince($0.at) >= Self.window }
         runs.append((share, visitor, date))
+    }
+}
+
+// MARK: Comments that wait for the host
+
+/// Why a visitor's comment waits for the host's Send to … instead of starting the agent by itself.
+public enum AgentHold: String, Equatable, Sendable {
+    /// The host hasn't made them trusted.
+    case notTrusted
+    /// It reads more like instructions for an agent than feedback.
+    case readsLikeOrders
+    /// The agent already ran by itself as often as it may this hour.
+    case budgetSpent
+
+    /// Says why, after "Waiting for you: ".
+    public func reason(agent: String) -> String {
+        switch self {
+        case .notTrusted: "only people you trust start \(agent) by themselves"
+        case .readsLikeOrders: "it reads more like instructions than feedback"
+        case .budgetSpent: "\(agent) already ran by itself as often as it may this hour"
+        }
+    }
+}
+
+extension AgentDispatchPolicy {
+    /// Whether `comment` waits for the host, and why: nil when it may start the agent by itself. People
+    /// trusted by name skip the budget; people trusted only because everyone is (New people can) don't.
+    public static func hold(_ comment: CollabComment, on share: TunnelDefinition, siteHost: String?, budget: AgentRunBudget, now: Date = Date()) -> AgentHold? {
+        guard !comment.fromHost else { return nil }
+        guard share.collabRole(forClient: comment.authorClient) == .trusted else { return .notTrusted }
+        if looksSuspicious(comment, siteHost: siteHost) { return .readsLikeOrders }
+        if countsAgainstBudget(comment, on: share),
+           !budget.allows(share: share.id, visitor: comment.authorClient ?? comment.author, now: now) {
+            return .budgetSpent
+        }
+        return nil
+    }
+
+    /// Whether a run for `comment` uses up the budget: everyone's but the host's and those trusted by name.
+    public static func countsAgainstBudget(_ comment: CollabComment, on share: TunnelDefinition) -> Bool {
+        !comment.fromHost && comment.authorClient.flatMap { share.collabMembers[$0]?.role } != .trusted
     }
 }
 

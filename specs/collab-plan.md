@@ -396,7 +396,7 @@ none visible in normal use (`Sources/OpenTrafficCore/AgentSafety.swift`):
 3. **ReplyRedactor** on API replies and claim progress: `.env*` values (≥ 8 characters, not examples) of the
    project folder and branch root, and key/token/private-key/URL-password patterns → `[hidden]`; the host gets a
    notice.
-4. **AgentRunBudget**: automatic runs ≤ 10 per share and ≤ 3 per visitor (overlay client id) per hour.
+4. **AgentRunBudget**: automatic runs ≤ 30 per share and ≤ 10 per visitor (overlay client id) per hour, for people trusted through the default role; people trusted by name aren't counted. Held comments show why in the Feedback tab (`AgentHold`).
 5. **Spotlighting**: MCP results with visitor text carry it between `<visitor-content id="…">` markers with a
    random id per call; screenshots come with a note that their text is untrusted; the run prompt says so.
 6. **MergeGuard**: a branch merges by itself only when no changed path is sensitive (manifests, lockfiles,

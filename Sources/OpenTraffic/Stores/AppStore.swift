@@ -206,6 +206,8 @@ final class AppStore {
     /// The agent command's latest run per share, and the comments waiting for it.
     var agentRuns: [UUID: AgentRun] = [:]
     var agentQueues: [UUID: [String]] = [:]
+    /// Comments that didn't start the agent by themselves, and why, so the Feedback tab can say.
+    var agentHolds: [UUID: [String: AgentHold]] = [:]
     @ObservationIgnored var agentProcesses: [UUID: AgentProcess] = [:]
     /// The user's PATH from their shell, looked up once for the agent command.
     @ObservationIgnored var agentShellPath: Task<String, Never>?
@@ -791,6 +793,7 @@ final class AppStore {
         collabComments[id] = nil
         stopAgentRun(for: id)
         agentQueues[id] = nil
+        agentHolds[id] = nil
         agentRuns[id] = nil
         agentClaims.releaseAll(share: id)
         if let definition = definitions.first(where: { $0.id == id }) {

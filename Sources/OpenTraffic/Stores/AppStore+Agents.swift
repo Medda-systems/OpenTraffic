@@ -167,29 +167,23 @@ extension AppStore {
                       watched: self.apiEvents.isWatched(id),
                       otherClaims: !self.agentClaims.claims(share: id).isEmpty
                   ) else { return }
-            // Comments that read like orders, and more than the budget allows, wait for the host's Send to ….
-            let name = self.definitions.first { $0.id == id }?.name ?? "a share"
-            // Only people the host trusts start the agent by themselves.
-            if !comment.fromHost, self.definitions.first(where: { $0.id == id })?.collabRole(forClient: comment.authorClient) != .trusted {
-                self.notice = AppNotice(.info, "\(comment.author)'s comment on “\(name)” is waiting for you: only people you trust start \(self.agentClientName) by themselves. Trust them in Live Collaboration, or use Send to \(self.agentClientName).")
+            // Comments from people not trusted, that read like orders, or past the budget wait for the host's Send to ….
+            guard let share = self.definitions.first(where: { $0.id == id }) else { return }
+            let host = self.publicURL(for: share).flatMap { URL(string: $0)?.host }
+            if let hold = AgentDispatchPolicy.hold(comment, on: share, siteHost: host, budget: self.agentRunBudget) {
+                self.agentHolds[id, default: [:]][commentID] = hold
+                self.notice = AppNotice(.info, "\(comment.author)'s comment on “\(share.name)” is waiting for you: \(hold.reason(agent: self.agentClientName)).")
                 return
             }
-            let host = self.definitions.first { $0.id == id }.flatMap { self.publicURL(for: $0) }.flatMap { URL(string: $0)?.host }
-            if AgentDispatchPolicy.looksSuspicious(comment, siteHost: host) {
-                self.notice = AppNotice(.info, "\(comment.author)'s comment on “\(name)” is waiting for you: it reads more like instructions than feedback, so \(self.agentClientName) didn't start by itself.")
-                return
+            if AgentDispatchPolicy.countsAgainstBudget(comment, on: share) {
+                self.agentRunBudget.record(share: id, visitor: comment.authorClient ?? comment.author)
             }
-            let visitor = comment.authorClient ?? comment.author
-            guard self.agentRunBudget.allows(share: id, visitor: visitor) else {
-                self.notice = AppNotice(.info, "\(comment.author)'s comment on “\(name)” is waiting for you: \(self.agentClientName) already ran by itself as often as it may this hour.")
-                return
-            }
-            self.agentRunBudget.record(share: id, visitor: visitor)
             self.enqueueAgentRun(commentID, for: id)
         }
     }
 
     private func enqueueAgentRun(_ commentID: String, for id: UUID) {
+        agentHolds[id]?[commentID] = nil
         guard !isQueuedForAgent(commentID, in: id) else { return }
         agentQueues[id, default: []].append(commentID)
         if agentRuns[id]?.state != .running { startNextAgentRun(for: id) }
