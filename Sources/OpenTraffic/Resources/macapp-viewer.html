@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mac app · OpenTraffic</title>
+<!-- OpenTraffic Mac app viewer, served at / by the mirror server. Protocol: docs/macapp-mirror-protocol.md -->
+<link rel="stylesheet" href="/__opentraffic/macapp/viewer.css">
+<script src="/__opentraffic/macapp/viewer.js" defer></script>
+</head>
+<body data-appearance="light">
+<div class="otm-bar" id="otm-bar" data-opentraffic-ui title="A shared Mac app. It runs on the host's Mac; you see its window and can click and type in it.">
+  <span class="otm-dot" id="otm-dot" title="Connecting to the app…"></span>
+  <img class="otm-icon" id="otm-icon" alt="" hidden>
+  <span class="otm-name" id="otm-name">Mac app</span>
+  <span class="otm-tag">· Mac app · running on the host's Mac</span>
+</div>
+<div class="otm-banner" id="otm-banner" role="status" aria-live="polite" data-opentraffic-ui hidden></div>
+<main class="otm-desk" id="otm-desk">
+  <div class="otm-fit" id="otm-fit"><div class="otm-stage" id="otm-stage"></div></div>
+</main>
+<noscript>This shared Mac app needs JavaScript to show its window.</noscript>
+</body>
+</html>

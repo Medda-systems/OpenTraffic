@@ -90,6 +90,10 @@ cp "$ROOT_DIR/Sources/OpenTraffic/Resources/bridge.js" "$APP_RESOURCES/bridge.js
 # Electron app sharing: the sandboxed main-process host and the preload shim it serves to pages.
 cp "$ROOT_DIR/Sources/OpenTraffic/Resources/electron-host.js" "$APP_RESOURCES/electron-host.js"
 cp "$ROOT_DIR/Sources/OpenTraffic/Resources/electron-preload-shim.js" "$APP_RESOURCES/electron-preload-shim.js"
+# Mac app sharing: the viewer page the mirror server serves (plain HTML, JS and CSS, no build step).
+for viewer_file in macapp-viewer.html macapp-viewer.js macapp-viewer.css; do
+  cp "$ROOT_DIR/Sources/OpenTraffic/Resources/$viewer_file" "$APP_RESOURCES/$viewer_file"
+done
 chmod +x "$APP_RESOURCES/opentraffic"
 # Provider marks: Cloudflare, ngrok, and Tailscale from Simple Icons (CC0); OpenTunnel's is its maker
 # Anomaly's wordmark, from opentunnel.xyz. Trademarks belong to their owners.
