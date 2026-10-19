@@ -1,7 +1,8 @@
 /*
  * OpenTraffic Mac app viewer styles, served at /__opentraffic/macapp/viewer.css by the mirror server.
  * The page: a slim desktop bar, then the app's windows (pixels on a canvas, an invisible layer of
- * real elements on top), scaled down to fit the browser. Protocol: docs/macapp-mirror-protocol.md.
+ * real elements on top), scaled down to fit the browser; or, on small screens, the Simple view: the same
+ * elements as a page of real text and web controls. Protocol: docs/macapp-mirror-protocol.md.
  */
 :root {
   --otm-font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
@@ -15,6 +16,14 @@
   --otm-pressed: rgba(0, 0, 0, .16);
   --otm-check-off: #ffffff;
   --otm-accent: #0a84ff;
+  --otm-s-bg: #f2f2f7;
+  --otm-s-card: #ffffff;
+  --otm-s-fg: #1d1d1f;
+  --otm-s-muted: #6e6e73;
+  --otm-s-line: rgba(60, 60, 67, .18);
+  --otm-s-field-line: rgba(60, 60, 67, .3);
+  --otm-s-tint: rgba(10, 132, 255, .12);
+  --otm-s-tint-strong: rgba(10, 132, 255, .24);
   color-scheme: light;
 }
 body[data-appearance="dark"] {
@@ -24,6 +33,14 @@ body[data-appearance="dark"] {
   --otm-field-fg: #f5f5f7;
   --otm-pressed: rgba(255, 255, 255, .2);
   --otm-check-off: #3a3a3d;
+  --otm-s-bg: #000000;
+  --otm-s-card: #1c1c1e;
+  --otm-s-fg: #f5f5f7;
+  --otm-s-muted: #98989d;
+  --otm-s-line: rgba(84, 84, 88, .6);
+  --otm-s-field-line: rgba(84, 84, 88, .75);
+  --otm-s-tint: rgba(10, 132, 255, .2);
+  --otm-s-tint-strong: rgba(10, 132, 255, .36);
   color-scheme: dark;
 }
 
@@ -46,8 +63,19 @@ body {
 .otm-dot[data-state="live"] { background: #22c55e; }
 .otm-icon { flex: none; width: 16px; height: 16px; }
 .otm-icon[hidden] { display: none; }
-.otm-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.otm-name { flex-shrink: 0; max-width: 45vw; font-weight: 600; overflow: hidden; text-overflow: ellipsis; } /* the tag gives way first */
 .otm-tag { color: var(--otm-bar-muted); overflow: hidden; text-overflow: ellipsis; }
+
+/* Window view or Simple view, in the bar. */
+.otm-views { flex: none; display: inline-flex; gap: 2px; margin: 0 -6px 0 4px; padding: 2px; border-radius: 999px; background: rgba(255, 255, 255, .1); }
+.otm-view {
+  appearance: none; -webkit-appearance: none; display: grid; place-items: center; width: 26px; height: 20px; margin: 0; padding: 0;
+  border: 0; border-radius: 999px; background: transparent; color: var(--otm-bar-muted); cursor: pointer;
+}
+.otm-view svg { width: 14px; height: 14px; pointer-events: none; }
+.otm-view:hover { color: var(--otm-bar-fg); }
+.otm-view[aria-pressed="true"] { background: rgba(255, 255, 255, .24); color: var(--otm-bar-fg); }
+.otm-view:focus-visible { outline: 2px solid var(--otm-accent); outline-offset: 1px; }
 
 /* What the app says when it isn't running normally. */
 .otm-banner {
@@ -59,6 +87,7 @@ body {
 .otm-banner[data-state="crashed"] { background: #7f1d1d; }
 
 /* The desk and the windows on it. */
+.otm-desk[hidden], .otm-simple[hidden] { display: none; }
 .otm-desk { flex: 1; position: relative; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .otm-fit { position: relative; flex: none; }
 .otm-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
@@ -99,3 +128,118 @@ textarea.otm-field { padding: 3px 4px; white-space: pre-wrap; }
 .otm-flip-off::before { background: var(--otm-check-off); box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .35), 0 .5px 1px rgba(0, 0, 0, .15); }
 .otm-node[data-role="AXRadioButton"]::before { border-radius: 50%; }
 .otm-node[data-role="AXRadioButton"].otm-flip-on::before { background: #fff; box-shadow: inset 0 0 0 4.5px var(--otm-accent); }
+
+/* ---- The Simple view: the window's tree as a page you can read and tap. The page itself scrolls. */
+body[data-view="simple"] {
+  display: block; height: auto; min-height: 100%; overflow: visible;
+  background: var(--otm-s-bg); color: var(--otm-s-fg);
+}
+body[data-view="simple"] .otm-bar { width: max-content; margin: 10px auto 0; }
+.otm-simple {
+  box-sizing: border-box; max-width: 640px; margin: 0 auto; padding: 0 16px calc(32px + env(safe-area-inset-bottom));
+  font: 17px/1.35 var(--otm-font); -webkit-text-size-adjust: 100%;
+}
+
+/* The live thumbnail of the real window, always on top. */
+.otm-s-live {
+  position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 12px; margin: 0 -16px 12px; padding: 10px 16px;
+  background: var(--otm-s-bg); border-bottom: .5px solid var(--otm-s-line);
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .otm-s-live { background: color-mix(in srgb, var(--otm-s-bg) 82%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+}
+.otm-s-live > * { pointer-events: none; }
+.otm-thumb {
+  flex: none; display: block; width: 84px; height: 56px; border-radius: 5px; background: var(--otm-s-card);
+  box-shadow: 0 0 0 .5px rgba(0, 0, 0, .3), 0 2px 8px rgba(0, 0, 0, .16);
+}
+.otm-s-caption { min-width: 0; display: flex; flex-direction: column; font-size: 13px; line-height: 1.3; }
+.otm-s-caption b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.otm-s-caption span { color: var(--otm-s-muted); }
+
+/* Windows: the main one is the page; sheets, alerts, menus and popovers float over it from the bottom. */
+.otm-s-window + .otm-s-window { margin-top: 28px; }
+.otm-s-window:is([data-kind="sheet"], [data-kind="alert"], [data-kind="menu"], [data-kind="popover"]) {
+  position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 6; max-width: 624px; margin: 0 auto;
+  max-height: 70vh; overflow: auto; overscroll-behavior: contain; padding: 14px 16px; box-sizing: border-box; border-radius: 16px;
+  background: var(--otm-s-card); box-shadow: 0 0 0 .5px rgba(0, 0, 0, .2), 0 12px 48px rgba(0, 0, 0, .35);
+}
+
+.otm-s-node { box-sizing: border-box; min-width: 0; margin: 0; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.otm-s-section, .otm-s-list { display: block; }
+.otm-s-body { display: flex; flex-direction: column; gap: 12px; }
+.otm-s-head {
+  margin: 0 4px 6px; color: var(--otm-s-muted); font-size: 13px; font-weight: 500; letter-spacing: .01em; text-transform: uppercase;
+  pointer-events: none;
+}
+.otm-s-head:empty { display: none; }
+.otm-s-card > .otm-s-body { padding: 14px 16px; border-radius: 12px; background: var(--otm-s-card); }
+.otm-s-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.otm-s-line > .otm-s-field { flex: 1 1 160px; }
+.otm-s-line > .otm-s-button { flex: 1 1 0; }
+.otm-s-line > .otm-s-text { flex: 0 1 auto; }
+
+/* Text. */
+.otm-s-text { overflow-wrap: anywhere; white-space: pre-wrap; }
+.otm-s-title { font-size: 24px; font-weight: 700; line-height: 1.2; }
+
+/* Lists: rows in a card with separators. */
+.otm-s-list > .otm-s-body { gap: 0; overflow: hidden; border-radius: 12px; background: var(--otm-s-card); }
+.otm-s-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-height: 44px; padding: 10px 16px;
+  overflow-wrap: anywhere; cursor: pointer;
+}
+.otm-s-row + .otm-s-row, .otm-s-line + .otm-s-row, .otm-s-row + .otm-s-line { border-top: .5px solid var(--otm-s-line); }
+.otm-s-row[aria-selected="true"] { background: var(--otm-s-tint); }
+.otm-s-row:active { background: var(--otm-s-tint-strong); }
+.otm-s-row > .otm-s-row { padding: 0; min-height: 0; border: 0; }
+
+/* Buttons. */
+.otm-s-button {
+  appearance: none; -webkit-appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 10px 18px; border: 0; border-radius: 12px; background: var(--otm-s-tint); color: var(--otm-accent);
+  font: 600 17px/1.2 var(--otm-font); text-align: center; cursor: pointer;
+}
+.otm-s-button > * { pointer-events: none; }
+.otm-s-button:active, .otm-s-button.otm-pressed { background: var(--otm-s-tint-strong); }
+.otm-s-button:disabled { opacity: .4; cursor: default; }
+.otm-s-button:focus-visible, .otm-s-check:focus-visible, .otm-s-stepper:focus-visible, .otm-s-row:focus-visible { outline: 2px solid var(--otm-accent); outline-offset: 2px; }
+.otm-s-popvalue { color: var(--otm-s-fg); font-weight: 400; }
+.otm-s-popvalue:empty { display: none; }
+.otm-s-chev {
+  width: 8px; height: 8px; margin-left: 2px; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(45deg);
+}
+
+/* Text fields. */
+.otm-s-field {
+  appearance: none; -webkit-appearance: none; display: block; width: 100%; min-height: 44px; padding: 10px 12px;
+  border: .5px solid var(--otm-s-field-line); border-radius: 10px; background: var(--otm-s-card); color: var(--otm-s-fg);
+  font: 17px/1.3 var(--otm-font); outline: none;
+}
+textarea.otm-s-field { min-height: 96px; resize: vertical; }
+.otm-s-field::placeholder { color: var(--otm-s-muted); }
+.otm-s-field:focus { border-color: var(--otm-accent); box-shadow: 0 0 0 3px rgba(10, 132, 255, .25); }
+.otm-s-field:disabled { opacity: .5; }
+
+/* Checkboxes and radio buttons: the whole line is the control. */
+.otm-s-check { display: flex; align-items: center; gap: 12px; min-height: 44px; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.otm-s-check > * { pointer-events: none; }
+.otm-s-check input { flex: none; width: 22px; height: 22px; margin: 0; accent-color: var(--otm-accent); }
+.otm-s-check[aria-disabled="true"] { opacity: .45; cursor: default; }
+
+/* Steppers and sliders: a minus half and a plus half. */
+.otm-s-stepper {
+  display: inline-flex; align-items: stretch; height: 40px; overflow: hidden; border-radius: 10px;
+  background: var(--otm-s-card); box-shadow: inset 0 0 0 .5px var(--otm-s-field-line); color: var(--otm-s-fg);
+  font: 500 20px/1 var(--otm-font); cursor: pointer; user-select: none; -webkit-user-select: none;
+}
+.otm-s-stepper > * { pointer-events: none; display: grid; place-items: center; min-width: 48px; }
+.otm-s-stepper .otm-s-value { min-width: 40px; padding: 0 4px; font-size: 17px; font-variant-numeric: tabular-nums; }
+.otm-s-stepper .otm-s-value:empty, .otm-s-stepper.otm-s-novalue .otm-s-value { display: none; }
+.otm-s-stepper .otm-s-plus { border-left: .5px solid var(--otm-s-field-line); }
+.otm-s-stepper[aria-disabled="true"] { opacity: .45; cursor: default; }
+
+.otm-s-image { display: block; max-width: 100%; height: auto; border-radius: 6px; }
+.otm-s-progress { display: block; height: 6px; overflow: hidden; border-radius: 3px; background: var(--otm-s-line); }
+.otm-s-progress > span { display: block; height: 100%; border-radius: 3px; background: var(--otm-accent); }
+.otm-s-progress.otm-s-indeterminate > span { width: 30%; }

@@ -7,7 +7,8 @@
 // Checks: one layer element per node with the protocol's DOM ids, stable across trees; collab.js's
 // picker sees and labels the elements (not the canvas); clicks, typing (IME too), keys, pointer, wheel
 // map to the protocol's messages; optimistic feedback; tiles paint; cursor, status, reconnect and boot;
-// fit-to-viewport; no console errors. Exits 1 on a failure; skips (exit 0) without Google Chrome.
+// fit-to-viewport; the Simple view at 390 px (real text and controls in reading order, the same ids and
+// messages, comment anchors that resolve in either view, the bar's toggle); no console errors. Exits 1 on a failure; skips (exit 0) without Google Chrome.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -166,23 +167,24 @@ function domId(key) {
   return "ax-" + h.toString(36);
 }
 
-// collab.js's own picker label code, taken from the file, so the check follows it when it changes.
+// collab.js's own picker label and anchor code, taken from the file, so the checks follow it when it changes.
+const collabSrc = fs.readFileSync(path.join(root, "Sources", "OpenTraffic", "Resources", "collab.js"), "utf8");
+function takeFromCollab(start) {
+  const src = collabSrc;
+  const i = src.indexOf(start);
+  if (i < 0) throw new Error("collab.js no longer has `" + start + "`");
+  let depth = 0, seenBrace = false;
+  for (let j = i; j < src.length; j++) {
+    const c = src[j];
+    if ("({[".includes(c)) { depth++; if (c === "{") seenBrace = true; }
+    else if (")}]".includes(c)) depth--;
+    if (start.startsWith("function") ? seenBrace && depth === 0 && c === "}" : depth === 0 && c === ";") return src.slice(i, j + 1);
+  }
+  throw new Error("couldn't read `" + start + "` from collab.js");
+}
 function collabLabelSource() {
-  const src = fs.readFileSync(path.join(root, "Sources", "OpenTraffic", "Resources", "collab.js"), "utf8");
-  const take = (start) => {
-    const i = src.indexOf(start);
-    if (i < 0) throw new Error("collab.js no longer has `" + start + "`");
-    let depth = 0, seenBrace = false;
-    for (let j = i; j < src.length; j++) {
-      const c = src[j];
-      if ("({[".includes(c)) { depth++; if (c === "{") seenBrace = true; }
-      else if (")}]".includes(c)) depth--;
-      if (start.startsWith("function") ? seenBrace && depth === 0 && c === "}" : depth === 0 && c === ";") return src.slice(i, j + 1);
-    }
-    throw new Error("couldn't read `" + start + "` from collab.js");
-  };
   return ["const CONTROL_RE", "const MAX_LABEL", "function oneLine", "const INPUT_KINDS", "const EDITABLE_SEL", "function fieldKind", "function labelFor"]
-    .map(take).join("\n");
+    .map(takeFromCollab).join("\n");
 }
 
 // ---- the checks
@@ -384,11 +386,11 @@ await check("typing in a field sends text (IME-safe), named keys as key, edits o
   assert(look.value === "Ada Love", "field shows " + JSON.stringify(look.value));
   assert(look.color !== "rgba(0, 0, 0, 0)" && look.bg === "rgb(255, 255, 255)", "typed text isn't visible over a mask: " + JSON.stringify(look));
   assert(look.font.startsWith("13px") && look.font.includes("-apple-system"), "field font " + look.font);
-  await shot("2-typing");
   // A tree with the app's (older) value while typing doesn't overwrite what the viewer typed.
   await stubSend({ ...tree2, v: "tree-2c" });
   await sleep(150);
   assert(await evaluate(`${byKey(CUSTOMER)}.value`) === look.value, "a tree overwrote the field mid-typing");
+  await shot("2-typing"); // after the check: a 2x screenshot can outlast the typing pause it relies on
   // Select all, then type: the app gets the whole value.
   await evaluate(`${byKey(CUSTOMER)}.select(), true`);
   await cdp("Input.insertText", { text: "Grace" });
@@ -458,7 +460,224 @@ await check("a different boot clears the layer", async () => {
   assert(await evaluate(`document.querySelectorAll('.otm-window').length`) === 1, "old windows left behind");
 });
 
+// ---- the Simple view: below 700 px the tree as a page of real text and controls
+
+function collabAnchorSource() {
+  return collabLabelSource() + "\n" + ["const MAX_DEPTH", "const MAX_ANCHOR", "function uniqueIdSelector", "function nthOfType", "function anchorFor"]
+    .map((s) => takeFromCollab(s)).join("\n");
+}
+const ROW2 = G + "/List:/Row:Grace Hopper#2";
+const PIN = G + "/SecureTextField:PIN";
+const PINNED = [ADD, CUSTOMER, CHECK, STEPPER, ROW2, G + "/StaticText:New Order", G + "/List:"];
+const inSimple = (key) => `document.querySelector('#otm-simple [data-key="' + CSS.escape(${JSON.stringify(key)}) + '"]')`;
+// Anchors collab.js would store for a comment on each element, as { key: selector }.
+const anchorsOf = (rootSel) => evaluate(`(() => { ${collabAnchorSource()}
+  const out = {};
+  for (const key of ${JSON.stringify(PINNED)}) {
+    const el = document.querySelector(${JSON.stringify(rootSel)} + ' [data-key="' + CSS.escape(key) + '"]');
+    const a = el && anchorFor(el, null);
+    out[key] = a && a.el === el ? a.selector : null;
+  }
+  return out; })()`);
+// Where a selector resolves now: which view, and whether it's rendered.
+const resolve = (sel) => evaluate(`(() => { const all = document.querySelectorAll(${JSON.stringify(sel)}); const el = all[0];
+  return { count: all.length, view: el ? (el.closest('#otm-simple') ? 'simple' : el.closest('#otm-desk') ? 'window' : 'other') : null,
+    rendered: !!el && el.getClientRects().length > 0, key: el ? el.dataset.key : null }; })()`);
+async function simpleCenter(key, fx = 0.5) {
+  return evaluate(`(() => { const el = ${inSimple(key)}; if (!el) return null; el.scrollIntoView({ block: 'center' });
+    const r = el.getBoundingClientRect(); return { x: r.left + r.width * ${fx}, y: r.top + r.height / 2 }; })()`);
+}
+const tap = (p) => cdp("Input.synthesizeTapGesture", { x: p.x, y: p.y, gestureSourceType: "touch" });
+let windowAnchors = null;
+
+await check("the window view's comment anchors are the elements' ax- ids (collab.js's anchorFor)", async () => {
+  windowAnchors = await anchorsOf("#otm-desk");
+  for (const key of PINNED) assert(windowAnchors[key] === "#" + domId(key), key + " anchors as " + windowAnchors[key]);
+});
+
+await check("below 700 px the Simple view replaces the window: real text and controls, in reading order", async () => {
+  await cdp("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 3, mobile: true });
+  await cdp("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  await waitFor(`document.body.dataset.view === 'simple' && !!${inSimple(ADD)} && ${inSimple(ADD)}.getClientRects().length > 0`, "the Simple view");
+  const v = await evaluate(`({ desk: document.getElementById('otm-desk').hidden, simple: document.getElementById('otm-simple').hidden,
+    pressed: document.getElementById('otm-view-simple').getAttribute('aria-pressed'), width: document.documentElement.scrollWidth })`);
+  assert(v.desk && !v.simple && v.pressed === "true", "views: " + JSON.stringify(v));
+  assert(v.width <= 390, "the page is wider than the phone: " + v.width);
+  const order = await evaluate(`[...document.querySelectorAll('#otm-simple .otm-s-node')].filter((el) => el.getClientRects().length).map((el) => el.dataset.key)`);
+  const want = ["/Window:", G, G + "/StaticText:New Order", G + "/StaticText:Customer", CUSTOMER, G + "/StaticText:PIN", PIN,
+    G + "/StaticText:Quantity", G + "/StaticText:1", STEPPER, CHECK, G + "/List:", G + "/List:/Row:Ada Lovelace", G + "/List:/Row:Grace Hopper",
+    ROW2, G + "/StaticText:3 orders", G + "/Button:Cancel", ADD];
+  assert(JSON.stringify(order) === JSON.stringify(want), "reading order " + JSON.stringify(order));
+  const look = await evaluate(`(() => { const at = (k) => document.querySelector('#otm-simple [data-key="' + CSS.escape(k) + '"]');
+    const cs = (el) => getComputedStyle(el);
+    const add = at(${JSON.stringify(ADD)}), cust = at(${JSON.stringify(CUSTOMER)}), pin = at(${JSON.stringify(PIN)}), chk = at(${JSON.stringify(CHECK)});
+    const title = at(${JSON.stringify(G + "/StaticText:New Order")}), row = at(${JSON.stringify(ROW2)}), step = at(${JSON.stringify(STEPPER)});
+    return { add: add.localName + '|' + add.textContent + '|' + cs(add).color + '|' + add.getBoundingClientRect().height,
+      cust: cust.localName + '|' + cust.type + '|' + cust.placeholder + '|' + cs(cust).fontSize + '|' + cust.getBoundingClientRect().height,
+      pin: pin.localName + '|' + pin.type, chk: chk.localName + '|' + (chk.querySelector('input') || {}).type + '|' + chk.textContent + '|' + chk.getAttribute('aria-checked'),
+      title: title.localName + '|' + title.textContent + '|' + parseFloat(cs(title).fontSize), row: row.textContent + '|' + row.getAttribute('role') + '|' + row.parentElement.closest('.otm-s-node').getAttribute('role'),
+      step: step.getAttribute('role') + '|' + step.classList.contains('otm-s-novalue'),
+      lineOfCustomer: cust.parentElement.classList.contains('otm-s-line') && cust.parentElement === at(${JSON.stringify(G + "/StaticText:Customer")}).parentElement }; })()`);
+  assert(look.add.startsWith("button|Add Order|rgb(") && Number(look.add.split("|")[3]) >= 44, "Add Order: " + look.add);
+  assert(look.cust.startsWith("input|text|Customer|17px|") && Number(look.cust.split("|")[4]) >= 44, "Customer field: " + look.cust);
+  assert(look.pin === "input|password", "PIN: " + look.pin);
+  assert(look.chk === "label|checkbox|Express shipping|false", "checkbox: " + look.chk);
+  assert(look.title.startsWith("p|New Order|") && Number(look.title.split("|")[2]) >= 20, "title: " + look.title);
+  assert(look.row === "Grace Hopper|listitem|list", "row: " + look.row);
+  assert(look.step === "spinbutton|true", "stepper (its number shows as the text beside it): " + look.step);
+  assert(look.lineOfCustomer, "the Customer label and field aren't on one line");
+  const thumb = await evaluate(`(() => { const c = document.getElementById('otm-thumb'); const r = c.getBoundingClientRect();
+    const d = c.getContext('2d').getImageData(Math.floor(c.width / 2), Math.floor(c.height / 2), 1, 1).data;
+    return { w: c.width, top: r.top, alpha: d[3] }; })()`);
+  assert(thumb.w > 1 && thumb.alpha === 255 && thumb.top < 120, "live thumbnail: " + JSON.stringify(thumb));
+  await evaluate(`window.scrollTo(0, 0), true`);
+  await shot("6-simple-390");
+});
+
+await check("Simple view ids are the layer's ids, unique, and only on what shows", async () => {
+  const ids = await evaluate(`({ simple: [...document.querySelectorAll('#otm-simple .otm-s-node')].filter((el) => el.getClientRects().length).map((el) => [el.dataset.key, el.id]),
+    desk: document.querySelectorAll('#otm-desk [id^="ax-"]').length,
+    dupes: (() => { const seen = new Set(), d = []; for (const el of document.querySelectorAll('[id]')) { if (seen.has(el.id)) d.push(el.id); seen.add(el.id); } return d; })() })`);
+  for (const [key, id] of ids.simple) assert(id === domId(key), key + " has id " + id);
+  assert(ids.simple.some(([, id]) => id === "ax-3tt01y"), "no #ax-3tt01y in the Simple view");
+  assert(ids.desk === 0, ids.desk + " hidden layer elements still carry ids");
+  assert(ids.dupes.length === 0, "duplicate ids " + ids.dupes.join(","));
+});
+
+await check("tapping Add Order in the Simple view sends act press; checkbox, stepper and rows map like the window's", async () => {
+  await received(true);
+  await tap(await simpleCenter(ADD));
+  const acts = await waitReceived((m) => m.t === "act", "act press from a tap");
+  assert(acts.length === 1 && acts[0].window === 1 && acts[0].key === ADD && acts[0].action === "press", JSON.stringify(acts));
+  assert(!(await received()).some((m) => m.t === "pointer"), "the tap also sent pointer events");
+  await received(true);
+  await tap(await simpleCenter(CHECK));
+  await waitReceived((m) => m.t === "act" && m.key === CHECK && m.action === "press", "act press on the checkbox");
+  assert(await evaluate(`${inSimple(CHECK)}.querySelector('input').checked && ${inSimple(CHECK)}.getAttribute('aria-checked') === 'true'`), "checkbox didn't flip at once");
+  await stubSend({ ...tree1, v: "tree-1s" }); // the app didn't change it after all
+  await waitFor(`!${inSimple(CHECK)}.querySelector('input').checked`, "the app's truth on the checkbox");
+  await received(true);
+  await tap(await simpleCenter(STEPPER, 0.25));
+  await tap(await simpleCenter(STEPPER, 0.75));
+  await waitReceived((m) => m.t === "act" && m.action === "increment", "increment");
+  const steps = (await received()).filter((m) => m.t === "act").map((m) => m.key === STEPPER && m.action);
+  assert(JSON.stringify(steps) === '["decrement","increment"]', "stepper " + JSON.stringify(steps));
+  await received(true);
+  await tap(await simpleCenter(ROW2));
+  await waitReceived((m) => m.t === "pointer" && m.kind === "up", "a row tap");
+  const ps = (await received()).filter((m) => m.t === "pointer");
+  assert(ps.length === 2 && ps[0].kind === "down" && ps[0].x === 648 && ps[0].y === 165 && ps[0].window === 1, "row tap " + JSON.stringify(ps));
+});
+
+await check("typing in a Simple view field sends its whole value as setText, then Enter as key", async () => {
+  await received(true);
+  await tap(await simpleCenter(CUSTOMER));
+  await waitFor(`document.activeElement === ${inSimple(CUSTOMER)}`, "the field to take focus");
+  await cdp("Input.insertText", { text: "Ada" });
+  await cdp("Input.insertText", { text: " Love" });
+  await cdp("Input.insertText", { text: "lace" });
+  await press("Enter", "Enter", 13, "\r");
+  await waitReceived((m) => m.t === "key", "key Enter");
+  const got = await received(true);
+  const sets = got.filter((m) => m.t === "setText");
+  assert(sets.length >= 1 && sets.every((m) => m.key === CUSTOMER && m.window === 1), "setText " + JSON.stringify(sets));
+  assert(sets[sets.length - 1].value === "Ada Lovelace", "last setText " + JSON.stringify(sets));
+  const last = got.findIndex((m) => m === sets[sets.length - 1]), enter = got.findIndex((m) => m.t === "key");
+  assert(enter > last && got[enter].code === "Enter", "Enter didn't follow the value: " + JSON.stringify(got));
+  assert(!got.some((m) => m.t === "text" || (m.t === "pointer" && m.kind !== "move")), "typing sent text or pointer: " + JSON.stringify(got));
+  await stubSend({ ...tree1, v: "tree-1t" }); // the app's older value while typing doesn't overwrite it
+  await sleep(150);
+  assert(await evaluate(`${inSimple(CUSTOMER)}.value`) === "Ada Lovelace", "a tree overwrote the field mid-typing");
+  await shot("7-simple-typing");
+  await evaluate(`document.activeElement.blur(), true`);
+});
+
+await check("the Simple view follows new trees and keeps its elements", async () => {
+  await evaluate(`document.querySelectorAll('#otm-simple .otm-s-node').forEach((el) => (el.__mark = el.dataset.key)), true`);
+  await stubSend("tree2");
+  await waitFor(`!!${inSimple(G + "/List:/Row:Ada")} && !${inSimple(G + "/StaticText:3 orders")}`, "tree 2 in the Simple view");
+  const st = await evaluate(`[...document.querySelectorAll('#otm-simple .otm-s-node')].map((el) => ({ key: el.dataset.key, mark: el.__mark || null, value: el.value ?? null }))`);
+  const before = new Set(tree1.nodes.map((n) => n.key));
+  for (const n of tree2.nodes) {
+    const el = st.find((e) => e.key === n.key);
+    assert(el, "no Simple element for " + n.key);
+    if (before.has(n.key)) assert(el.mark === n.key, "element for " + n.key + " was recreated");
+  }
+  assert(st.find((e) => e.key === CUSTOMER).value === "Ada", "field didn't take the app's value");
+  const rows = await evaluate(`[...${inSimple(G + "/List:")}.querySelectorAll('[role=listitem]')].map((el) => el.textContent)`);
+  assert(JSON.stringify(rows) === '["Ada Lovelace","Grace Hopper","Grace Hopper","Ada"]', "rows " + JSON.stringify(rows));
+});
+
+await check("a sheet floats over the Simple view as a dialog, and its controls act on its window", async () => {
+  const sheet = { id: 2, title: "Confirm", w: 400, h: 160, x: 230, y: 28, kind: "sheet", parent: 1 };
+  await stubSend({ t: "windows", windows: [fixture.hello.windows[0], sheet] });
+  await stubSend({ t: "tree", window: 2, v: "sheet-1", nodes: [
+    { key: "/Window:", role: "AXWindow", label: "", value: null, x: 0, y: 0, w: 400, h: 160, depth: 0, enabled: true, focused: false, selected: false, actions: [] },
+    { key: "/Window:/StaticText:Place the order?", role: "AXStaticText", label: "Place the order?", value: null, x: 20, y: 20, w: 360, h: 20, depth: 1, enabled: true, focused: false, selected: false, actions: [] },
+    { key: "/Window:/Button:Not Now", role: "AXButton", label: "Not Now", value: null, x: 180, y: 120, w: 90, h: 24, depth: 1, enabled: true, focused: false, selected: false, actions: ["press"] },
+    { key: "/Window:/Button:Place", role: "AXButton", label: "Place", value: null, x: 290, y: 120, w: 90, h: 24, depth: 1, enabled: true, focused: false, selected: false, actions: ["press"] }] });
+  const sheetEl = `document.querySelector('#otm-simple .otm-s-window[data-window="2"]')`;
+  await waitFor(`!!${sheetEl} && !!${sheetEl}.querySelector('[data-key="/Window:/Button:Place"]')`, "the sheet in the Simple view");
+  const look = await evaluate(`(() => { const el = ${sheetEl}; const r = el.getBoundingClientRect(); const cs = getComputedStyle(el);
+    return { pos: cs.position, role: el.getAttribute('role'), head: el.querySelector('.otm-s-head').textContent, bottom: r.bottom, w: r.width,
+      text: [...el.querySelectorAll('.otm-s-node')].filter((n) => n.getClientRects().length).map((n) => n.textContent.trim()).filter(Boolean) }; })()`);
+  assert(look.pos === "fixed" && look.role === "dialog" && look.bottom <= 844 && look.w <= 390, "sheet: " + JSON.stringify(look));
+  assert(look.head === "Confirm" && JSON.stringify(look.text.slice(-3)) === '["Place the order?","Not Now","Place"]', "sheet content: " + JSON.stringify(look));
+  await received(true);
+  const p = await evaluate(`(() => { const r = ${sheetEl}.querySelector('[data-key="/Window:/Button:Place"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await tap(p);
+  const acts = await waitReceived((m) => m.t === "act", "act press in the sheet");
+  assert(acts[0].window === 2 && acts[0].key === "/Window:/Button:Place" && acts[0].action === "press", JSON.stringify(acts));
+  await evaluate(`document.body.dataset.appearance = 'dark', true`);
+  await shot("9-simple-sheet-dark");
+  await evaluate(`document.body.dataset.appearance = 'light', true`);
+  await stubSend({ t: "windows", windows: [fixture.hello.windows[0]] });
+  await waitFor(`!${sheetEl}`, "the sheet to go");
+});
+
+await check("a comment pinned in either view finds the same element in the other (collab.js's anchorFor and labelFor)", async () => {
+  const simpleAnchors = await anchorsOf("#otm-simple");
+  for (const key of PINNED) {
+    assert(simpleAnchors[key] === windowAnchors[key], key + ": Simple view anchors as " + simpleAnchors[key] + ", the window as " + windowAnchors[key]);
+    const r = await resolve(windowAnchors[key]);
+    assert(r.count === 1 && r.view === "simple" && r.rendered && r.key === key, "window anchor " + windowAnchors[key] + " in the Simple view: " + JSON.stringify(r));
+  }
+  const c = await simpleCenter(ADD);
+  const picked = await evaluate(`(() => { ${collabLabelSource()} const el = document.elementFromPoint(${c.x}, ${c.y});
+    return el.localName + '#' + el.id + '|' + labelFor(el) + '|' + labelFor(${inSimple(CHECK)}); })()`);
+  assert(picked === "button#ax-3tt01y|Add Order|Express shipping", "picker in the Simple view: " + picked);
+  // And back: the bar's toggle shows the window at this size; the Simple view's anchors land on the layer.
+  await evaluate(`document.getElementById('otm-view-window').click(), true`);
+  await waitFor(`document.body.dataset.view === 'window' && !document.getElementById('otm-desk').hidden`, "the window view");
+  for (const key of PINNED) {
+    const r = await resolve(simpleAnchors[key]);
+    assert(r.count === 1 && r.view === "window" && r.rendered && r.key === key, "Simple anchor " + simpleAnchors[key] + " in the window view: " + JSON.stringify(r));
+  }
+  assert(await evaluate(`document.querySelectorAll('#otm-simple [id^="ax-"]').length`) === 0, "hidden Simple elements still carry ids");
+});
+
+await check("the bar's toggle switches views at any size, and the choice sticks", async () => {
+  await cdp("Emulation.setTouchEmulationEnabled", { enabled: false });
+  await cdp("Emulation.clearDeviceMetricsOverride");
+  await sleep(100);
+  assert(await evaluate(`document.body.dataset.view`) === "window", "not the window view at 1440");
+  const b = await evaluate(`(() => { const r = document.getElementById('otm-view-simple').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await click(b.x, b.y);
+  await waitFor(`document.body.dataset.view === 'simple' && !!${inSimple(ADD)} && ${inSimple(ADD)}.id === 'ax-3tt01y'`, "Simple view at 1440");
+  assert(await evaluate(`localStorage.getItem('opentraffic.macapp.view')`) === "simple", "choice not kept");
+  const wide = await evaluate(`(() => { const r = document.getElementById('otm-simple').getBoundingClientRect(); return r.width; })()`);
+  assert(wide <= 640, "the Simple view isn't a readable column at 1440: " + wide);
+  await shot("8-simple-1440");
+  const w = await evaluate(`(() => { const r = document.getElementById('otm-view-window').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await click(w.x, w.y);
+  await waitFor(`document.body.dataset.view === 'window' && ${byKey(ADD)} === document.getElementById('ax-3tt01y')`, "back to the window");
+  const pressed = await evaluate(`document.getElementById('otm-view-window').getAttribute('aria-pressed') + document.getElementById('otm-view-simple').getAttribute('aria-pressed')`);
+  assert(pressed === "truefalse", "toggle state " + pressed);
+});
+
 await check("fits a small viewport and still maps clicks to window points", async () => {
+  // Below 700 px the Simple view shows unless the viewer chose the window in the bar (the check above did).
+  assert(await evaluate(`document.body.dataset.view`) === "window", "the viewer's choice of the window view didn't hold");
   await cdp("Emulation.setDeviceMetricsOverride", { width: 600, height: 480, deviceScaleFactor: 2, mobile: false });
   await waitFor(`/scale\\(0\\.\\d+\\)/.test(document.getElementById('otm-stage').style.transform)`, "the stage to scale down");
   const r = await evaluate(`(() => { const r = document.querySelector('.otm-window').getBoundingClientRect(); return { l: r.left, t: r.top, w: r.width, h: r.height, b: r.bottom, ri: r.right }; })()`);
