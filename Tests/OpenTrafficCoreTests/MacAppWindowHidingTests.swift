@@ -97,6 +97,8 @@ private func pressAboutItem(of pid: pid_t) -> Bool {
 @MainActor
 @Test(.enabled(if: mayCapture, "Accessibility and Screen Recording for the test runner"), .timeLimit(.minutes(1)))
 func aLaunchedAppStaysOffScreenUnfocusedAndCapturable() async throws {
+    await MacAppFixtureTurn.shared.acquire()
+    defer { MacAppFixtureTurn.shared.release() }
     let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier
     let sampler = WindowSampler()
     let hider = MacAppWindowHider()

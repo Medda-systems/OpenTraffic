@@ -99,7 +99,7 @@ its children).
 | `role` | The raw AX role string, passed through: `AXButton`, `AXCheckBox`, `AXTextField`, `AXSecureTextField`, `AXStaticText`, `AXRadioButton`, `AXIncrementor`, `AXRow`, ... |
 | `label` | The element's name (AXDescription, else AXTitle, else the value of static text); `""` when none |
 | `value` | The value as a string (checkboxes and radio buttons `"0"`/`"1"`, text fields their text, steppers the number), or `null` |
-| `x`, `y`, `w`, `h` | Frame in points relative to **this window's** top-left |
+| `x`, `y`, `w`, `h` | Frame in points relative to **this window's** top-left; all four `0` when the element is out of sight (no size, or wholly outside the window or a scroll area around it). An element scrolled out of view (like a list row) keeps its node and key but its contents are left out until it scrolls in |
 | `depth` | 0 for the window, 1 for its children, ... |
 | `enabled`, `focused`, `selected` | AXEnabled, AXFocused, AXSelected |
 | `actions` | The protocol actions the element supports, from: `press`, `increment`, `decrement`, `confirm`, `cancel`, `showMenu`, `scrollToVisible` |
