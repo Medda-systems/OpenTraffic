@@ -64,6 +64,8 @@ public struct APIShare: Codable, Equatable, Sendable {
     /// The branch it's working on right now, and the one it merges back into when it stops.
     public let branchName: String?
     public let baseBranch: String?
+    /// A Mac app share: the app and how its isolated copy is doing.
+    public let macApp: APIShareMacApp?
 
     public init(
         id: UUID, name: String, provider: String, kind: String, state: String, localURL: String, publicURL: String?,
@@ -71,7 +73,8 @@ public struct APIShare: Codable, Equatable, Sendable {
         hostname: String? = nil, lastError: String? = nil, protection: String? = nil, project: String? = nil,
         autoStart: Bool? = nil, captureErrors: Bool? = nil, rewriteHostHeader: Bool? = nil, funnel: Bool? = nil,
         stopsAt: Date? = nil, health: [APIHealthCheck]? = nil,
-        branch: Bool? = nil, branchName: String? = nil, baseBranch: String? = nil
+        branch: Bool? = nil, branchName: String? = nil, baseBranch: String? = nil,
+        macApp: APIShareMacApp? = nil
     ) {
         self.id = id
         self.name = name
@@ -97,6 +100,7 @@ public struct APIShare: Codable, Equatable, Sendable {
         self.branch = branch
         self.branchName = branchName
         self.baseBranch = baseBranch
+        self.macApp = macApp
     }
 }
 
@@ -313,8 +317,14 @@ public struct APIShareRequest: Codable, Equatable, Sendable {
     public var start: Bool?
     /// Work on a branch of its own while running (collaboration, in a git repository).
     public var branch: Bool?
+    /// A Mac app you're building, instead of `port` or `url`: its .app path, or its name as
+    /// `GET /v1/services` lists it. Shared with quick or opentunnel, always with live collaboration.
+    /// (`url` with an .app path shares a running Electron app of yours, or else the Mac app.)
+    public var macApp: String?
+    /// For a Mac app: "copy" (the default) starts its copy with a copy of the app's data, "empty" with none.
+    public var macAppData: String?
 
-    public init(port: Int? = nil, url: String? = nil, provider: String? = nil, name: String? = nil, collaboration: Bool? = nil, hostname: String? = nil, replaceDNS: Bool? = nil, funnel: Bool? = nil, start: Bool? = nil, branch: Bool? = nil) {
+    public init(port: Int? = nil, url: String? = nil, provider: String? = nil, name: String? = nil, collaboration: Bool? = nil, hostname: String? = nil, replaceDNS: Bool? = nil, funnel: Bool? = nil, start: Bool? = nil, branch: Bool? = nil, macApp: String? = nil, macAppData: String? = nil) {
         self.port = port
         self.url = url
         self.provider = provider
@@ -325,6 +335,8 @@ public struct APIShareRequest: Codable, Equatable, Sendable {
         self.funnel = funnel
         self.start = start
         self.branch = branch
+        self.macApp = macApp
+        self.macAppData = macAppData
     }
 }
 
@@ -463,6 +475,11 @@ public protocol OpenTrafficAPIBackend: Sendable {
     func regeneratePassword(_ share: String) async throws -> APIProtection
     func deleteComment(_ share: String, commentID: String) async throws
     func localServices() async -> [APILocalService]
+    /// The Mac apps being built on this Mac (rescanned), for `GET /v1/services`.
+    func macApps() async -> [APIMacApp]
+    /// Starts a Mac app share's app again on the same address (a rebuilt app is copied again first),
+    /// or with `resetData` over from the data it started with. Answers once it's back.
+    func restartMacApp(_ share: String, resetData: Bool, client: String) async throws -> APIShare
     func projects() async -> [APIProject]
     func startProject(_ name: String, client: String) async throws -> APIProject
     func stopProject(_ name: String) async throws -> APIProject
@@ -496,6 +513,8 @@ extension OpenTrafficAPIBackend {
     public func regeneratePassword(_ share: String) async throws -> APIProtection { throw unsupported }
     public func deleteComment(_ share: String, commentID: String) async throws { throw unsupported }
     public func localServices() async -> [APILocalService] { [] }
+    public func macApps() async -> [APIMacApp] { [] }
+    public func restartMacApp(_ share: String, resetData: Bool, client: String) async throws -> APIShare { throw unsupported }
     public func projects() async -> [APIProject] { [] }
     public func startProject(_ name: String, client: String) async throws -> APIProject { throw unsupported }
     public func stopProject(_ name: String) async throws -> APIProject { throw unsupported }

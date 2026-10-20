@@ -112,6 +112,14 @@ final class AppAPIBackend: OpenTrafficAPIBackend {
         await store.apiLocalServices()
     }
 
+    func macApps() async -> [APIMacApp] {
+        await store.apiMacApps()
+    }
+
+    func restartMacApp(_ share: String, resetData: Bool, client: String) async throws -> APIShare {
+        try await store.apiRestartMacApp(share, resetData: resetData)
+    }
+
     func projects() async -> [APIProject] {
         await store.apiProjects()
     }
@@ -302,7 +310,8 @@ extension AppStore {
             },
             branch: definition.kind.supportsCollaboration ? definition.workOnBranch : nil,
             branchName: definition.branchSession?.branch,
-            baseBranch: definition.branchSession?.original
+            baseBranch: definition.branchSession?.original,
+            macApp: apiMacAppInfo(definition)
         )
     }
 
@@ -317,6 +326,7 @@ extension AppStore {
         let definition = try apiDefinition(reference)
         if !isActive(definition.id) {
             try await apiCheckTailscaleReady(definition)
+            try apiCheckMacAppShareReady(definition)
             try confirmAPIPublishing("start “\(definition.name)”", client: client)
             startSharing(definition)
         }

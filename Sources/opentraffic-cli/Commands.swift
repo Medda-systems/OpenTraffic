@@ -9,12 +9,18 @@ enum Commands {
                     arguments: 1...1),
         CommandSpec(
             name: "share", group: "Shares",
-            usage: "share <port|host:port|url|App.app> [--via quick|opentunnel|tailscale|ngrok|domain] [--name NAME] [--collab]",
-            summary: "Share a local server; prints the public URL once it's live",
+            usage: "share <port|host:port|url|App.app|app name> [--via quick|opentunnel|tailscale|ngrok|domain] [--name NAME] [--collab]",
+            summary: "Share a local server or a Mac app; prints the public URL once it's live",
             details: """
             Electron apps: share an app you're developing by its dev server's port, or a finished
             app you built by its path (dist/Orbit.app; it must be running). Either way its windows
             open in the browser and its main process runs sandboxed on this Mac (quick, opentunnel).
+
+            Mac apps: share a native app you're building (SwiftUI, AppKit, Catalyst) by its name as
+            `opentraffic services` lists it, or by its .app path. An isolated copy runs hidden on this
+            Mac and viewers use its window in the browser, with live collaboration (quick, opentunnel).
+            The copy starts with a copy of the app's data; --empty-data starts it with none.
+            OpenTraffic needs Accessibility and Screen Recording for it.
 
             Ways to share (--via):
               quick        A temporary trycloudflare.com URL, new each start (the default). No account.
@@ -34,15 +40,25 @@ enum Commands {
               --password       ngrok: protect it with a generated password (--user NAME, default guest)
               --save           Save it without starting it
               --copy           Copy the public URL to the clipboard
+              --empty-data     Mac apps: start the copy with no data instead of a copy of the app's
 
             Sharing an existing share's address starts that share. OpenTraffic asks before anything goes
             public, unless you allow apps to share without asking in Settings → Integrations.
             """,
-            flags: ["collab", "branch", "replace-dns", "funnel", "password", "save", "copy"], options: ["via", "name", "hostname", "user"], arguments: 1...1
+            flags: ["collab", "branch", "replace-dns", "funnel", "password", "save", "copy", "empty-data"], options: ["via", "name", "hostname", "user"], arguments: 1...1
         ),
         CommandSpec(name: "start", group: "Shares", usage: "start <share>", summary: "Start a saved share; prints its public URL", flags: ["copy"], arguments: 1...1),
         CommandSpec(name: "stop", group: "Shares", usage: "stop <share> | stop --all", summary: "Stop a share, or every running one", flags: ["all"], arguments: 0...1),
-        CommandSpec(name: "restart", group: "Shares", usage: "restart <share>", summary: "Restart a share", arguments: 1...1),
+        CommandSpec(
+            name: "restart", group: "Shares", usage: "restart <share> [--app | --reset-data]", summary: "Restart a share, or just its Mac app",
+            details: """
+            Options (Mac app shares):
+              --app          Start just the app again, from its latest build, on the same address;
+                             viewers stay connected. Run it after rebuilding the app to show a fix
+              --reset-data   Start the app over from the data it started with
+            """,
+            flags: ["app", "reset-data"], arguments: 1...1
+        ),
         CommandSpec(name: "remove", aliases: ["rm", "delete"], group: "Shares", usage: "remove <share> [--yes]", summary: "Remove a share, with its settings and comments", flags: ["yes"], arguments: 1...1),
         CommandSpec(name: "rename", group: "Shares", usage: "rename <share> <new name>", summary: "Rename a share", arguments: 2...2),
         CommandSpec(
@@ -92,7 +108,7 @@ enum Commands {
         CommandSpec(name: "logs", group: "Feedback", usage: "logs <share> [-n LINES] [-f]", summary: "The share's log; -f keeps following it", flags: ["follow"], options: ["lines"], arguments: 1...1),
         CommandSpec(name: "watch", group: "Feedback", usage: "watch [share]", summary: "Follow what happens: shares starting, people joining, comments", arguments: 0...1),
         // This Mac
-        CommandSpec(name: "services", group: "This Mac", usage: "services", summary: "Web servers running on this Mac, with how long they've been up"),
+        CommandSpec(name: "services", group: "This Mac", usage: "services", summary: "Web servers running on this Mac, with how long they've been up, and the Mac apps you're building"),
         CommandSpec(name: "projects", group: "This Mac", usage: "projects", summary: "Projects: shares that start and stop together"),
         CommandSpec(name: "project", group: "This Mac", usage: "project start|stop <name>", summary: "Start or stop every share in a project", arguments: 2...2),
         CommandSpec(name: "domains", group: "This Mac", usage: "domains", summary: "Domains in your Cloudflare account, for --via domain"),
@@ -195,7 +211,7 @@ struct Context {
             table.rows.append([
                 style.bold(share.name), Format.state(share.state, style: style), Format.via(share),
                 share.publicURL.map { share.state == "running" ? style.cyan($0) : style.dim($0) } ?? style.dim("—"),
-                Format.local(share.localURL), style.dim(extra.joined(separator: " · ")),
+                share.macApp.map { URL(fileURLWithPath: $0.path).lastPathComponent } ?? Format.local(share.localURL), style.dim(extra.joined(separator: " · ")),
             ])
         }
         say(table.render(style: style))
@@ -211,7 +227,18 @@ struct Context {
         say("\(style.bold(share.name))  \(Format.state(share.state, style: style))")
         var rows: [(String, String)] = []
         rows.append(("Public URL", share.publicURL.map { style.cyan($0) } ?? style.dim("none yet")))
-        rows.append(("Local", share.localURL))
+        if let app = share.macApp {
+            var state = [app.name]
+            if let current = app.state { state.append(current) }
+            if let viewers = app.viewers { state.append(Format.plural(viewers, "viewer")) }
+            rows.append(("Mac app", state.joined(separator: " · ")))
+            rows.append(("App", (app.path as NSString).abbreviatingWithTildeInPath))
+            rows.append(("Data", app.data == "empty" ? "started empty" : "a copy of the app's data"))
+            if let warning = app.warning { rows.append(("", style.yellow(warning))) }
+            if let error = app.error { rows.append(("", style.red(error))) }
+        } else {
+            rows.append(("Local", share.localURL))
+        }
         rows.append(("Via", Format.via(share) + (share.hostname.map { " (\($0))" } ?? "")))
         rows.append(("Who can open", Format.audience(share)))
         if share.collaboration {
@@ -273,6 +300,9 @@ struct Context {
             say("\(style.bold(share.name)) is \(share.state)… follow it with `opentraffic status \"\(share.name)\"`.")
         }
         if let extra { say(extra) }
+        if invocation.command == "share", share.macApp != nil, share.state != "failed" {
+            say(style.dim("  After rebuilding the app, `opentraffic restart \"\(share.name)\" --app` shows the new build."))
+        }
     }
 
     func share() async throws {
@@ -295,13 +325,17 @@ struct Context {
             "funnel": invocation.flag("funnel") ? true : nil,
             "start": invocation.flag("save") || password ? false : nil,
         ]
-        if let port = Int(target) {
-            body["port"] = port
-        } else if target.hasSuffix(".app") || target.hasSuffix(".app/") {
-            // A finished Electron app of yours, by its path.
-            body["url"] = URL(fileURLWithPath: (target as NSString).expandingTildeInPath).standardizedFileURL.path
-        } else {
-            body["url"] = target
+        let shareTarget = ShareTarget(target)
+        switch shareTarget {
+        case .port(let port): body["port"] = port
+        case .url(let url): body["url"] = url
+        // A finished Electron app of yours or a Mac app you're building; OpenTraffic tells them apart.
+        case .appPath(let path): body["url"] = path
+        case .appName(let name): body["macApp"] = name
+        }
+        if invocation.flag("empty-data") {
+            guard shareTarget.isApp else { throw CLIError.usage("--empty-data is for Mac apps: give the app's name or .app path.") }
+            body["macAppData"] = "empty"
         }
         let (created, createdRaw) = try await client.call("POST", "/v1/shares", body: body, as: Share.self)
         guard password else { return try announce(created, raw: createdRaw) }
@@ -340,8 +374,18 @@ struct Context {
     }
 
     func restart() async throws {
-        let (share, raw) = try await client.call("POST", sharePath(args[0], "/restart"), as: Share.self)
-        try announce(share, raw: raw)
+        let app = invocation.flag("app"), reset = invocation.flag("reset-data")
+        guard app || reset else {
+            let (share, raw) = try await client.call("POST", sharePath(args[0], "/restart"), as: Share.self)
+            return try announce(share, raw: raw)
+        }
+        guard !(app && reset) else { throw CLIError.usage("Give --app or --reset-data, not both.") }
+        let (share, raw) = try await client.call("POST", sharePath(args[0], reset ? "/reset-data" : "/restart-app"), as: Share.self)
+        if json { return say(JSON.pretty(raw)) }
+        let name = share.macApp?.name ?? "The app"
+        say(reset
+            ? "\(style.bold(name)) started over from the data it started with\(share.publicURL.map { " at \(style.cyan($0))" } ?? "")."
+            : "\(style.bold(name)) runs its latest build again\(share.publicURL.map { " at \(style.cyan($0))" } ?? "")\(style.dim(" (viewers stay connected)")).")
     }
 
     func remove() async throws {
@@ -644,8 +688,10 @@ struct Context {
     func services() async throws {
         let (body, raw) = try await client.get("/v1/services", as: ServicesBody.self)
         if json { return say(JSON.pretty(raw)) }
+        let apps = body.apps ?? []
         guard !body.services.isEmpty else {
             say("No web servers found on this Mac. Start a dev server and run this again.")
+            sayMacApps(apps)
             return
         }
         var table = Table(header: ["PORT", "NAME", "PROCESS", "UP", "SHARED AS"])
@@ -659,6 +705,27 @@ struct Context {
         say(table.render(style: style))
         if body.services.contains(where: { $0.sharedAs == nil }), let port = body.services.first(where: { $0.sharedAs == nil })?.port {
             say(style.dim("\nShare one with `opentraffic share \(port)`."))
+        }
+        sayMacApps(apps)
+    }
+
+    /// The Mac apps being built here, after the web servers.
+    func sayMacApps(_ apps: [MacAppEntry]) {
+        guard !apps.isEmpty else { return }
+        say("\n\(style.bold("Mac apps"))")
+        var table = Table(header: ["NAME", "STATE", "PROJECT", "SHARED AS"])
+        for app in apps {
+            table.rows.append([
+                style.bold(app.name),
+                app.running ? style.green("running") : app.builtAt.map { "built \(Format.ago($0))" } ?? "built",
+                ((app.projectDirectory ?? app.bundle) as NSString).abbreviatingWithTildeInPath,
+                app.sharedAs.map { style.cyan($0) } ?? style.dim("not shared"),
+            ])
+        }
+        say(table.render(style: style))
+        if let app = apps.first(where: { $0.sharedAs == nil }) {
+            let name = app.name.contains(" ") ? "\"\(app.name)\"" : app.name
+            say(style.dim("\nShare one with `opentraffic share \(name)`."))
         }
     }
 
@@ -783,9 +850,45 @@ struct Context {
           opentraffic share 5173 --collab                     A public URL with live collaboration
           opentraffic share 3000 --via domain --hostname app.example.com
           opentraffic share 8080 --via ngrok --password        Password protected
+          opentraffic share Orbit --via opentunnel             A Mac app you're building
           opentraffic comments Orbit && opentraffic reply Orbit 015ec043 "Fixed"
 
         `opentraffic help <command>` for its options; --json for scripts.
         """)
+    }
+}
+
+/// What `opentraffic share` was given: a port, an address, an app by its path, or an app by its name.
+enum ShareTarget: Equatable {
+    case port(Int)
+    case url(String)
+    /// An .app, as a full path: a finished Electron app or a Mac app.
+    case appPath(String)
+    /// A Mac app you're building, as `opentraffic services` lists it.
+    case appName(String)
+
+    init(_ target: String, currentDirectory: String = FileManager.default.currentDirectoryPath) {
+        let lowercased = target.lowercased()
+        if let port = Int(target) {
+            self = .port(port)
+        } else if lowercased.hasSuffix(".app") || lowercased.hasSuffix(".app/") {
+            let expanded = (target as NSString).expandingTildeInPath
+            let url = expanded.hasPrefix("/")
+                ? URL(fileURLWithPath: expanded)
+                : URL(fileURLWithPath: currentDirectory, isDirectory: true).appendingPathComponent(expanded)
+            self = .appPath(url.standardizedFileURL.path)
+        } else if !target.contains(":"), !target.contains("/"), lowercased != "localhost", target.contains(" ") || !target.contains(".") {
+            // A name, not an address: no scheme, port, path, or domain (`localhost` stays an address).
+            self = .appName(target.trimmingCharacters(in: .whitespaces))
+        } else {
+            self = .url(target)
+        }
+    }
+
+    var isApp: Bool {
+        switch self {
+        case .appPath, .appName: true
+        case .port, .url: false
+        }
     }
 }

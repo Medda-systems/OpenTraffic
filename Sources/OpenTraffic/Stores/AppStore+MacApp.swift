@@ -237,20 +237,31 @@ extension AppStore {
     }
 
     /// Starts the share's app again on the same address; a rebuilt app is copied again first.
-    func restartMacApp(_ id: UUID) {
-        guard let session = macAppSessions[id] else { return }
+    /// The task ends once it's back, with why it failed if it did; nil when the share has no app running.
+    @discardableResult
+    func restartMacApp(_ id: UUID) -> Task<String?, Never>? {
+        guard let session = macAppSessions[id] else { return nil }
         appendMacAppLog("Restarting \(session.name).", for: id)
-        Task { [weak self] in
-            do { try await session.restart() } catch { self?.macAppActionFailed(error, for: id) }
+        return Task { [weak self] in
+            do { try await session.restart() } catch {
+                self?.macAppActionFailed(error, for: id)
+                return error.localizedDescription
+            }
+            return nil
         }
     }
 
-    /// Starts the share's app over from the data it started with.
-    func resetMacAppData(_ id: UUID) {
-        guard let session = macAppSessions[id] else { return }
+    /// Starts the share's app over from the data it started with (see `restartMacApp`).
+    @discardableResult
+    func resetMacAppData(_ id: UUID) -> Task<String?, Never>? {
+        guard let session = macAppSessions[id] else { return nil }
         appendMacAppLog("Resetting \(session.name)'s data.", for: id)
-        Task { [weak self] in
-            do { try await session.resetData() } catch { self?.macAppActionFailed(error, for: id) }
+        return Task { [weak self] in
+            do { try await session.resetData() } catch {
+                self?.macAppActionFailed(error, for: id)
+                return error.localizedDescription
+            }
+            return nil
         }
     }
 

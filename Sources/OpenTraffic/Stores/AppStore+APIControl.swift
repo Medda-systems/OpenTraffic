@@ -49,8 +49,17 @@ extension AppStore {
     }
 
     func apiCreateShare(_ request: APIShareRequest, client: String) async throws -> APIShare {
-        // A finished Electron app of yours, by its path: `opentraffic share ~/code/orbit/dist/Orbit.app`.
+        // A Mac app you're building, by its path or name: `opentraffic share Orbit`.
+        if let reference = request.macApp {
+            return try await apiShareMacApp(APIMacAppReference(reference), request: request, client: client)
+        }
+        // An app by its path: `opentraffic share ~/code/orbit/dist/Orbit.app`. A finished Electron app
+        // of yours, or else a Mac app.
         if let path = request.url, path.hasPrefix("/"), path.hasSuffix(".app") || path.hasSuffix(".app/") {
+            let electron = URL(fileURLWithPath: path).appendingPathComponent("Contents/Frameworks/Electron Framework.framework")
+            guard FileManager.default.fileExists(atPath: electron.path) else {
+                return try await apiShareMacApp(.path(path), request: request, client: client)
+            }
             return try await apiShareElectronApp(atPath: path, request: request, client: client)
         }
         let localURL = try apiLocalURL(port: request.port, url: request.url)
@@ -167,6 +176,144 @@ extension AppStore {
             throw OpenTrafficAPIError.badRequest("Couldn't share \(app.name).")
         }
         return try await apiWaitUntilLive(definition.id)
+    }
+
+    // MARK: Mac apps
+
+    /// Shares a Mac app you're building, like its Share menu: an isolated copy, mirrored to viewers,
+    /// with live collaboration. Sharing an app that's already shared this way answers with that share.
+    private func apiShareMacApp(_ reference: APIMacAppReference, request: APIShareRequest, client: String) async throws -> APIShare {
+        let kind: TunnelKind
+        switch request.provider?.lowercased() {
+        case nil, "quick", "cloudflare", "temporary": kind = .quick
+        case "opentunnel": kind = .opentunnel
+        default: throw OpenTrafficAPIError.badRequest("Mac apps are shared with quick or opentunnel.")
+        }
+        let data: MacAppSession.DataSource
+        switch request.macAppData?.lowercased() {
+        case nil, "copy": data = .copy
+        case "empty": data = .empty
+        default: throw OpenTrafficAPIError.badRequest("macAppData must be copy or empty.")
+        }
+        if request.start == false {
+            throw OpenTrafficAPIError.badRequest("A Mac app share starts right away: it can't be saved without starting.")
+        }
+        let app = try await apiMacApp(reference)
+        let shares = definitions.filter { $0.macApp == app.id && (isActive($0.id) || runtime(for: $0.id).state == .stopping) }
+        if let running = shares.first(where: { $0.kind == kind && isActive($0.id) }) {
+            return try await apiWaitUntilLive(running.id)
+        }
+        if let other = shares.first {
+            throw OpenTrafficAPIError.conflict("\(app.name) is already shared by “\(other.name)”. Stop that share first.")
+        }
+        try apiCheckMacAppSupport()
+        if let blocker = await apiBlocker(for: kind) {
+            throw OpenTrafficAPIError(status: 409, code: "not_ready", message: blocker)
+        }
+        try confirmAPIPublishing("share the Mac app \(app.name) publicly with \(kind.provider.title) and live collaboration", client: client)
+        let earlierNotice = notice?.id
+        share(app, kind: kind, data: data)
+        guard let definition = definitions.first(where: { $0.macApp == app.id && $0.kind == kind }) else {
+            let message = notice.flatMap { $0.id != earlierNotice && $0.severity == .error ? $0.message : nil }
+            throw OpenTrafficAPIError.badRequest(message ?? "Couldn't share \(app.name).")
+        }
+        return try await apiWaitUntilLive(definition.id)
+    }
+
+    /// The app a `macApp` names: an .app of yours by its path, or a Mac app OpenTraffic lists (or
+    /// has shared before) by its name.
+    private func apiMacApp(_ reference: APIMacAppReference) async throws -> MacApp {
+        await scanMacApps() // one built a moment ago may not be listed yet
+        switch reference {
+        case .path(let path):
+            guard path.hasPrefix("/") || path.hasPrefix("~") else {
+                throw OpenTrafficAPIError.badRequest("Give the full path of the .app, like /Users/me/code/Orbit/build/Orbit.app.")
+            }
+            let expanded = (path as NSString).expandingTildeInPath
+            if let found = detectedMacApps.first(where: { ElectronDiscovery.realURL($0.bundle).path == ElectronDiscovery.realURL(URL(fileURLWithPath: expanded)).path }) {
+                return found
+            }
+            guard FileManager.default.fileExists(atPath: expanded) else { throw OpenTrafficAPIError.notFound("There is no app at \(path).") }
+            do {
+                return try await Task.detached { try MacAppDiscovery.resolve(path: expanded) }.value
+            } catch let refusal as MacAppRefusal {
+                throw OpenTrafficAPIError.badRequest(refusal.message)
+            }
+        case .name(let name):
+            switch APIMacAppReference.match(name, in: detectedMacApps) {
+            case .found(let app):
+                return app
+            case .ambiguous(let apps):
+                throw OpenTrafficAPIError.conflict("Several Mac apps are called \(name): \(apps.map(\.bundle.path).joined(separator: ", ")). Give the path of the one to share.")
+            case .none:
+                // An app shared before whose build is no longer recent enough to be listed.
+                let saved = definitions.filter { $0.macApp != nil && $0.name.caseInsensitiveCompare(name) == .orderedSame }.compactMap(\.macApp)
+                    + definitions.compactMap(\.macApp).filter { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent.caseInsensitiveCompare(name) == .orderedSame }
+                if let path = saved.first(where: { FileManager.default.fileExists(atPath: $0) }),
+                   let app = try? await Task.detached(operation: { try MacAppDiscovery.resolve(path: path) }).value {
+                    return app
+                }
+                throw OpenTrafficAPIError.notFound("No Mac app called “\(name)” was found. OpenTraffic lists the debug builds of yours that are running and recent builds (see services); give the .app's path for any other build.")
+            }
+        }
+    }
+
+    /// Mac apps need OpenTraffic's viewer and the Accessibility and Screen Recording permissions.
+    private func apiCheckMacAppSupport() throws {
+        guard Self.macAppViewer != nil, Self.collaborationScript != nil else {
+            throw OpenTrafficAPIError(status: 500, code: "internal", message: "OpenTraffic's Mac app support is missing from the app. Reinstall OpenTraffic.")
+        }
+        refreshMacAppPermissions()
+        if !missingMacAppPermissions.isEmpty { throw OpenTrafficAPIError.missingMacAppPermissions(missingMacAppPermissions) }
+    }
+
+    /// A saved Mac app share that is about to start: refused (before asking) without the permissions,
+    /// or while another share runs a copy of the same app.
+    func apiCheckMacAppShareReady(_ definition: TunnelDefinition) throws {
+        guard let path = definition.macApp, !isActive(definition.id) else { return }
+        try apiCheckMacAppSupport()
+        if let other = definitions.first(where: { $0.id != definition.id && $0.macApp == path && (isActive($0.id) || runtime(for: $0.id).state == .stopping) }) {
+            throw OpenTrafficAPIError.conflict("\(URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent) is already shared by “\(other.name)”. Stop that share first.")
+        }
+    }
+
+    /// Restarts a running Mac app share's app on the same address (from its latest build), or with
+    /// `resetData` starts it over from the data it started with; answers once it's back.
+    func apiRestartMacApp(_ reference: String, resetData: Bool) async throws -> APIShare {
+        let definition = try apiDefinition(reference)
+        let id = definition.id
+        guard definition.macApp != nil else { throw OpenTrafficAPIError.badRequest("“\(definition.name)” doesn't share a Mac app.") }
+        guard let work = resetData ? resetMacAppData(id) : restartMacApp(id) else {
+            throw OpenTrafficAPIError.conflict("“\(definition.name)” isn't running. Start it first.")
+        }
+        if let failure = await work.value {
+            throw OpenTrafficAPIError(status: 502, code: "restart_failed", message: failure)
+        }
+        // The session's state reaches the store as an event, a moment later.
+        for _ in 0..<20 where macAppStatus[id]?.state != .running {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        return apiShare(definitions.first { $0.id == id } ?? definition)
+    }
+
+    /// The Mac app a share publishes and how its copy is doing, for `APIShare.macApp`.
+    func apiMacAppInfo(_ definition: TunnelDefinition) -> APIShareMacApp? {
+        guard let path = definition.macApp else { return nil }
+        let status = isActive(definition.id) ? macAppStatus[definition.id] : nil
+        let described = status.map { APIShareMacApp.describe($0.state) }
+        let name = macAppSessions[definition.id]?.name ?? detectedMacApps.first { $0.id == path }?.name
+            ?? URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        return APIShareMacApp(
+            path: path, name: name, data: (definition.macAppData ?? .copy).rawValue,
+            state: described?.state, viewers: status?.viewers, warning: status?.warning, error: described?.error
+        )
+    }
+
+    func apiMacApps() async -> [APIMacApp] {
+        await scanMacApps()
+        return detectedMacApps.map { app in
+            APIMacApp(app, sharedAs: definitions.first { $0.macApp == app.id && isActive($0.id) }?.name)
+        }
     }
 
     /// The Electron app in development whose dev server `localURL` is, if any.
@@ -354,6 +501,7 @@ extension AppStore {
     func apiRestartShare(_ reference: String, client: String) async throws -> APIShare {
         let definition = try apiDefinition(reference)
         try await apiCheckTailscaleReady(definition)
+        try apiCheckMacAppShareReady(definition)
         if isActive(definition.id) {
             await restart(definition.id)
         } else {

@@ -93,7 +93,8 @@ struct APIRouter: Sendable {
         }
         if segments == ["v1", "services"] {
             try allow("GET")
-            return .json(ServicesBody(services: await backend.localServices()))
+            let services = await backend.localServices()
+            return .json(ServicesBody(services: services, apps: await backend.macApps()))
         }
         if segments == ["v1", "zones"] {
             try allow("GET")
@@ -143,6 +144,9 @@ struct APIRouter: Sendable {
         case ["restart"]:
             try allow("POST")
             return .json(try await backend.restartShare(share, client: client))
+        case ["restart-app"], ["reset-data"]:
+            try allow("POST")
+            return .json(try await backend.restartMacApp(share, resetData: rest == ["reset-data"], client: client))
         case ["protection"]:
             switch method {
             case "GET": return .json(try await backend.protection(share))
@@ -250,7 +254,11 @@ struct APIRouter: Sendable {
         let next: Int
     }
     private struct ResolveBody: Decodable { let resolved: Bool }
-    private struct ServicesBody: Encodable { let services: [APILocalService] }
+    private struct ServicesBody: Encodable {
+        let services: [APILocalService]
+        /// Mac apps being built here (`kind` "macapp"): no port, shared by path or name.
+        let apps: [APIMacApp]
+    }
     private struct ZonesBody: Encodable { let zones: [APIZone] }
     private struct ProjectsBody: Encodable { let projects: [APIProject] }
     private struct ToolsBody: Encodable { let tools: [APITool] }
@@ -289,7 +297,19 @@ struct APIRouter: Sendable {
     }
 
     static func validate(_ request: APIShareRequest) throws {
-        guard request.port != nil || request.url != nil else { throw OpenTrafficAPIError.badRequest("Give a port or a url") }
+        if let macApp = request.macApp {
+            guard !macApp.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw OpenTrafficAPIError.badRequest("macApp is empty") }
+            guard request.port == nil, request.url == nil else { throw OpenTrafficAPIError.badRequest("Give a Mac app, or a port or url, not both") }
+            if let provider = request.provider, !["quick", "cloudflare", "temporary", "opentunnel"].contains(provider.lowercased()) {
+                throw OpenTrafficAPIError.badRequest("Mac apps are shared with quick or opentunnel")
+            }
+            if request.start == false { throw OpenTrafficAPIError.badRequest("A Mac app share starts right away: start: false isn't supported for Mac apps") }
+        }
+        guard request.port != nil || request.url != nil || request.macApp != nil else { throw OpenTrafficAPIError.badRequest("Give a port, a url, or a Mac app") }
+        if let data = request.macAppData {
+            guard ["copy", "empty"].contains(data.lowercased()) else { throw OpenTrafficAPIError.badRequest("macAppData must be copy or empty") }
+            guard request.port == nil else { throw OpenTrafficAPIError.badRequest("macAppData is for Mac apps") }
+        }
         if let port = request.port, !(1...65535).contains(port) { throw OpenTrafficAPIError.badRequest("port must be between 1 and 65535") }
         // The names and aliases the app's share handler maps, in any case.
         if let provider = request.provider,

@@ -28,6 +28,30 @@ struct Share: Decodable {
     let branch: Bool?
     let branchName: String?
     let baseBranch: String?
+    /// A Mac app share's app (newer versions of OpenTraffic).
+    let macApp: SharedMacApp?
+}
+
+struct SharedMacApp: Decodable {
+    let path: String
+    let name: String
+    /// "copy" or "empty".
+    let data: String
+    let state: String?
+    let viewers: Int?
+    let warning: String?
+    let error: String?
+}
+
+/// A Mac app being built on this Mac, as `GET /v1/services` lists it.
+struct MacAppEntry: Decodable {
+    let kind: String
+    let name: String
+    let bundle: String
+    let projectDirectory: String?
+    let running: Bool
+    let builtAt: Date?
+    let sharedAs: String?
 }
 
 struct Person: Decodable {
@@ -188,7 +212,11 @@ struct SharesBody: Decodable { let shares: [Share] }
 struct CommentsBody: Decodable { let comments: [Comment] }
 struct ErrorsBody: Decodable { let errors: [ErrorGroup] }
 struct LogsBody: Decodable { let lines: [String] }
-struct ServicesBody: Decodable { let services: [LocalService] }
+struct ServicesBody: Decodable {
+    let services: [LocalService]
+    /// Absent from older versions of OpenTraffic.
+    let apps: [MacAppEntry]?
+}
 struct ProjectsBody: Decodable { let projects: [Project] }
 struct ZonesBody: Decodable { let zones: [Zone] }
 struct EventsBody: Decodable {
