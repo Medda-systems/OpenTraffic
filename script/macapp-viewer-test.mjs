@@ -184,7 +184,8 @@ function takeFromCollab(start) {
   throw new Error("couldn't read `" + start + "` from collab.js");
 }
 function collabLabelSource() {
-  return ["const CONTROL_RE", "const MAX_LABEL", "function oneLine", "const INPUT_KINDS", "const EDITABLE_SEL", "function fieldKind", "function labelFor"]
+  return ["const CONTROL_RE", "const MAX_LABEL", "function oneLine", "const INPUT_KINDS", "const EDITABLE_SEL", "function fieldKind",
+    "function nativeElement", "const NATIVE_ROLE_NAMES", "function nativeRoleName", "function nativeLabel", "function labelFor", "function elementContext"]
     .map(takeFromCollab).join("\n");
 }
 
@@ -260,7 +261,7 @@ await check("the first full frame paints the canvas", async () => {
   await shot("1-loaded-1440");
 });
 
-await check("collab.js's picker hits the overlay elements and labels them by their names", async () => {
+await check("collab.js's picker hits the overlay elements and labels them by their roles and names", async () => {
   const c = await nodeCenter(ADD);
   const hit = await evaluate(`(() => { const el = document.elementFromPoint(${c.x}, ${c.y}); return el && (el.localName + '#' + el.id); })()`);
   assert(hit === "div#ax-3tt01y", "elementFromPoint at Add Order: " + hit);
@@ -268,13 +269,16 @@ await check("collab.js's picker hits the overlay elements and labels them by the
     const at = (key) => document.querySelector('[data-key="' + CSS.escape(key) + '"]');
     return { add: labelFor(at(${JSON.stringify(ADD)})), heading: labelFor(at(${JSON.stringify(G + "/StaticText:New Order")})),
       field: labelFor(at(${JSON.stringify(CUSTOMER)})), row: labelFor(at(${JSON.stringify(G + "/List:/Row:Grace Hopper#2")})),
-      blank: labelFor(at(${JSON.stringify(G)})), unique: document.querySelectorAll('#ax-3tt01y').length }; })()`);
-  assert(labels.add === "Add Order", "Add Order labelled " + labels.add);
-  assert(labels.heading === "New Order", "heading labelled " + labels.heading);
-  assert(labels.field === "text field", "field labelled " + labels.field);
-  assert(labels.row === "Grace Hopper", "row labelled " + labels.row);
-  assert(labels.blank === "Orbit window", "blank group labelled " + labels.blank);
+      blank: labelFor(at(${JSON.stringify(G)})), unique: document.querySelectorAll('#ax-3tt01y').length,
+      context: JSON.stringify(elementContext(at(${JSON.stringify(ADD)}))) }; })()`);
+  assert(labels.add === "Button \u201cAdd Order\u201d", "Add Order labelled " + labels.add);
+  assert(labels.heading === "Text \u201cNew Order\u201d", "heading labelled " + labels.heading);
+  assert(labels.field === "Text field \u201cCustomer\u201d", "field labelled " + labels.field);
+  assert(labels.row === "Row \u201cGrace Hopper\u201d", "row labelled " + labels.row);
+  assert(labels.blank === "Group in \u201cOrbit window\u201d", "blank group labelled " + labels.blank);
   assert(labels.unique === 1, "#ax-3tt01y isn't unique");
+  // Agents get the accessibility path as the selector, not the overlay's CSS.
+  assert(labels.context === JSON.stringify({ selector: ADD, styles: {} }), "context " + labels.context);
 });
 
 await check("ids and elements are stable across trees; the layer follows additions, removals and values", async () => {
@@ -827,7 +831,7 @@ await check("a comment pinned in either view finds the same element in the other
   const c = await simpleCenter(ADD);
   const picked = await evaluate(`(() => { ${collabLabelSource()} const el = document.elementFromPoint(${c.x}, ${c.y});
     return el.localName + '#' + el.id + '|' + labelFor(el) + '|' + labelFor(${inSimple(CHECK)}); })()`);
-  assert(picked === "button#ax-3tt01y|Add Order|Express shipping", "picker in the Simple view: " + picked);
+  assert(picked === "button#ax-3tt01y|Button \u201cAdd Order\u201d|Checkbox \u201cExpress shipping\u201d", "picker in the Simple view: " + picked);
   // And back: the bar's toggle shows the window at this size; the Simple view's anchors land on the layer.
   await evaluate(`document.getElementById('otm-view-window').click(), true`);
   await waitFor(`document.body.dataset.view === 'window' && !document.getElementById('otm-desk').hidden`, "the window view");

@@ -175,6 +175,11 @@ extension AppStore {
                 self.notice = AppNotice(.info, "\(comment.author)'s comment on “\(share.name)” is waiting for you: \(hold.reason(agent: self.agentClientName)).")
                 return
             }
+            // A Mac app whose project isn't known: the agent would have nowhere to work.
+            if share.macApp != nil, self.agentDirectory(for: share) == nil {
+                self.holdForProjectFolder(commentID, on: share)
+                return
+            }
             if AgentDispatchPolicy.countsAgainstBudget(comment, on: share) {
                 self.agentRunBudget.record(share: id, visitor: comment.authorClient ?? comment.author)
             }
@@ -200,16 +205,24 @@ extension AppStore {
                   agentClaims.claim(share: id, comment: commentID) == nil else { continue }
             guard let directory = agentDirectory(for: definition) else {
                 agentQueues[id] = nil
-                notice = AppNotice(.error, "Choose the project folder for “\(definition.name)” in its Feedback tab, so the agent knows where to work.")
+                if definition.macApp != nil {
+                    holdForProjectFolder(commentID, on: definition)
+                } else {
+                    notice = AppNotice(.error, "Choose the project folder for “\(definition.name)” in its Feedback tab, so the agent knows where to work.")
+                }
                 return
             }
             let model = AgentPreset.matching(agentCommand).flatMap(agentModel(for:))
-            launchAgent(AgentRunRequest(shareID: id, shareName: definition.name, commentID: commentID, client: agentClientName, socket: AppSocket.path(), model: model), in: directory)
+            let request = AgentRunRequest(shareID: id, shareName: definition.name, commentID: commentID, client: agentClientName, socket: AppSocket.path(), model: model)
+            launchAgent(request, in: directory, macAppComment: definition.macApp != nil ? comment : nil)
             return
         }
     }
 
-    private func launchAgent(_ request: AgentRunRequest, in directory: URL) {
+    /// `macAppComment`: the comment, on a Mac app share; the agent then also gets what OpenTraffic sees in
+    /// the app (`macAppAgentContext`).
+    private func launchAgent(_ request: AgentRunRequest, in directory: URL, macAppComment: CollabComment? = nil) {
+        var request = request
         let id = request.shareID
         let command = agentCommand
         let run = AgentRun(commentID: request.commentID, client: request.client, model: request.model, directory: directory.path, startedAt: Date())
@@ -217,7 +230,8 @@ extension AppStore {
         Task { [weak self] in
             guard let self else { return }
             let path = await self.userShellPath()
-            // Stopped (or the share removed) while looking up PATH.
+            if let comment = macAppComment { request.macApp = await self.macAppAgentContext(for: id, comment: comment) }
+            // Stopped (or the share removed) while looking up PATH or reading the app.
             guard self.agentRuns[id]?.id == run.id, self.agentRuns[id]?.state == .running else { return }
             let process = AgentProcess(command: command, directory: directory, environment: request.environment, path: self.agentPath(path))
             do {
@@ -280,6 +294,7 @@ extension AppStore {
                 apiEvents.append(.commentReleased, share: share, comment: APIComment(comment, shareID: id))
             }
         }
+        if definitions.first(where: { $0.id == id })?.macApp != nil { macAppAgentFinished(run, for: id) }
         if case .failed(let reason) = run.state, notifyCollaboration, let share = definitions.first(where: { $0.id == id }) {
             TunnelNotifications.post(
                 title: "\(run.client) couldn't finish a comment on \(share.name)",
@@ -338,6 +353,14 @@ extension AppStore {
                 return URL(fileURLWithPath: path, isDirectory: true)
             }
         }
+        // A Mac app share: the project the app is built from (its mirror server's address says nothing).
+        if let app = definition.macApp {
+            let found = macAppSessions[definition.id]?.options.app.projectDirectory
+                ?? detectedMacApps.first { $0.id == app }?.projectDirectory
+            guard let found, FileManager.default.fileExists(atPath: found.path) else { return nil }
+            setAgentDirectory(found.path, for: definition.id)
+            return found
+        }
         guard let directory = detectedProjectDirectory(for: definition) else { return nil }
         setAgentDirectory(directory.path, for: definition.id)
         return directory
@@ -373,4 +396,83 @@ extension AppStore {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         setAgentDirectory(url.path, for: id)
     }
+
+    // MARK: Mac app shares
+
+    /// The comment waits for the host: OpenTraffic doesn't know the Mac app's project, so the agent would
+    /// have nowhere to work. Choosing the folder and then Send to … starts it.
+    private func holdForProjectFolder(_ commentID: String, on share: TunnelDefinition) {
+        let hold = AgentHold.noProjectFolder
+        agentHolds[share.id, default: [:]][commentID] = hold
+        notice = AppNotice(.info, "A comment on “\(share.name)” is waiting for you: \(hold.reason(agent: agentClientName)).")
+    }
+
+    /// What the agent gets about a Mac app share's comment: the pinned element as the running copy's
+    /// accessibility tree has it now (else as its path says), the app's windows, what viewers did before
+    /// the comment and what the app printed around it (`MacAppSession.recentActions`, `recentLog`).
+    func macAppAgentContext(for id: UUID, comment: CollabComment) async -> MacAppAgentContext {
+        let definition = definitions.first { $0.id == id }
+        let session = macAppSessions[id]
+        let app = session?.options.app ?? detectedMacApps.first { $0.id == definition?.macApp }
+        let pid = session?.pid
+        var context = MacAppAgentContext(
+            appName: app?.name ?? definition?.name ?? "the app",
+            bundleIdentifier: app?.bundleIdentifier,
+            running: pid != nil
+        )
+        if let session {
+            context.actions = MacAppAgentContext.describe(session.recentActions, before: comment.createdAt)
+            context.log = MacAppAgentContext.appLog(session.recentLog, around: comment.createdAt)
+        }
+        let reference = MacAppAgentContext.reference(selector: comment.context?.selector, anchor: comment.anchor)
+        if let pid, AccessibilityTree.isTrusted {
+            let read = await Self.readMacAppElement(pid: pid, reference: reference)
+            context.windows = read.windows
+            context.element = read.element
+        }
+        if context.element == nil, case .key(let key)? = reference {
+            context.element = NativeElementContext(key: key)
+        }
+        return context
+    }
+
+    /// The app's windows and the element in them, read through Accessibility with a tree of its own (the
+    /// mirror's is busy with viewers); gives up after 5 s, as a hung app answers no one.
+    private static func readMacAppElement(pid: pid_t, reference: MacAppAgentContext.ElementReference?) async
+        -> (windows: [MacAppAgentContext.WindowSummary], element: NativeElementContext?) {
+        let read = Task.detached { () -> ([MacAppAgentContext.WindowSummary], NativeElementContext?) in
+            guard let tree = try? AccessibilityTree(pid: pid), let windows = try? await tree.windows() else { return ([], nil) }
+            let summaries = windows.map { MacAppAgentContext.WindowSummary(title: $0.title, isMain: $0.isMain, isFocused: $0.isFocused) }
+            guard let reference else { return (summaries, nil) }
+            // Keys of every window start at /Window:, so the element's window is the first that has it, the
+            // main window first. Its identifier is read right after its snapshot, which remembers its elements.
+            for window in windows.filter(\.isMain) + windows.filter({ !$0.isMain }) {
+                guard let number = window.number, let snapshot = try? await tree.snapshot(window: .number(number)) else { continue }
+                let windowTree = MacAppAgentContext.WindowTree(number: number, title: window.title, isMain: window.isMain,
+                                                               isFocused: window.isFocused, nodes: snapshot.nodes)
+                guard var found = MacAppAgentContext.find(reference, in: [windowTree]) else { continue }
+                if let identifier = try? await tree.identifier(key: found.element.key, window: number) {
+                    found.element.identifier = NativeElementContext.ownIdentifier(identifier)
+                }
+                return (summaries, found.element)
+            }
+            return (summaries, nil)
+        }
+        return await withTaskGroup(of: (([MacAppAgentContext.WindowSummary], NativeElementContext?))?.self) { group in
+            group.addTask { await read.value }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(5))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first.map { (windows: $0.0, element: $0.1) } ?? (windows: [], element: nil)
+        }
+    }
+
+    /// The hook for after an agent's run on a Mac app share ended (`run.state` says how; `.finished` when it
+    /// answered the comment). TASK-015 rebuilds the app here, restarts the share's copy and replays what
+    /// viewers did; until then the change shows once the host rebuilds the app and presses Restart App
+    /// (the agent is told so: `MacAppAgentContext.afterFinishing`).
+    func macAppAgentFinished(_ run: AgentRun, for id: UUID) {}
 }

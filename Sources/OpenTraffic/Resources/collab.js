@@ -411,9 +411,44 @@
     return null;
   }
 
+  // An element of a shared Mac app's mirrored window (macapp-viewer.js, either view): `data-key` is its
+  // accessibility path ("/Window:/Group:/Button:Add Order"), `data-role` its role ("AXButton"). Else null.
+  function nativeElement(el) {
+    const n = el && el.nodeType === 1 ? el.closest("[data-key][data-role]") : null;
+    return n && n.dataset.key.startsWith("/Window:") && (n.classList.contains("otm-node") || n.classList.contains("otm-s-node")) ? n : null;
+  }
+  // A role in words: "AXButton" -> "Button", "AXPopUpButton" -> "Pop-up button". Matches the app's
+  // NativeElementContext.roleName.
+  const NATIVE_ROLE_NAMES = {
+    StaticText: "Text", CheckBox: "Checkbox", PopUpButton: "Pop-up button", Incrementor: "Stepper",
+    SecureTextField: "Password field", Unknown: "Element", "": "Element",
+  };
+  function nativeRoleName(role) {
+    const bare = role.startsWith("AX") ? role.slice(2) : role;
+    if (Object.prototype.hasOwnProperty.call(NATIVE_ROLE_NAMES, bare)) return NATIVE_ROLE_NAMES[bare];
+    const words = bare.replace(/([a-z])([A-Z])/g, "$1 $2").split(" ");
+    return words.map((w, i) => (i ? w.toLowerCase() : w)).join(" ");
+  }
+  // `Button “Add Order”`: the role and the accessibility label (the app's words, never a field's value);
+  // without a label, the nearest labelled container: `Group in “Orbit window”`.
+  function nativeLabel(el) {
+    const name = nativeRoleName(el.dataset.role || "");
+    const room = Math.max(10, MAX_LABEL - name.length - 3);
+    const label = oneLine(el.getAttribute("aria-label"), room);
+    if (label) return name + " \u201c" + label + "\u201d";
+    for (let a = el.parentElement, i = 0; a && a !== document.body && i < 4; a = a.parentElement, i++) {
+      const around = oneLine(a.getAttribute("aria-label"), room - 3);
+      if (around) return name + " in \u201c" + around + "\u201d";
+    }
+    return name;
+  }
+
   // Short description of the element under a pin: aria-label, alt, title or visible text
-  // (form controls: their kind only). Walks up a few ancestors for icon-only targets.
+  // (form controls: their kind only). Walks up a few ancestors for icon-only targets. A Mac app's
+  // element: its role and label.
   function labelFor(target) {
+    const native = nativeElement(target);
+    if (native) return nativeLabel(native);
     for (let el = target, i = 0; el && el.nodeType === 1 && i < 4; el = el.parentElement, i++) {
       if (el === document.body || el === document.documentElement) break;
       const kind = fieldKind(el);
@@ -608,9 +643,16 @@
     return null;
   }
 
-  // What agents get with a comment: where the element comes from and how it looks.
+  // What agents get with a comment: where the element comes from and how it looks. For a Mac app's
+  // element, its accessibility path as the selector (the overlay's styles say nothing about the app);
+  // a path too long to send goes as its #ax-… id, which OpenTraffic looks up in the app.
   function elementContext(el) {
     if (!el || el.nodeType !== 1) return null;
+    const native = nativeElement(el);
+    if (native) {
+      const key = native.dataset.key;
+      return { selector: Array.from(key).length <= 300 ? key : native.id ? "#" + native.id : key, styles: {} };
+    }
     const out = { selector: readableSelector(el), styles: {} };
     try {
       const cs = getComputedStyle(el);

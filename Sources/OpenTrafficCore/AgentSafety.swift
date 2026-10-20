@@ -194,6 +194,8 @@ public enum AgentHold: String, Equatable, Sendable {
     case readsLikeOrders
     /// The agent already ran by itself as often as it may this hour.
     case budgetSpent
+    /// A Mac app share whose project folder OpenTraffic doesn't know: the agent would have nowhere to work.
+    case noProjectFolder
 
     /// Says why, after "Waiting for you: ".
     public func reason(agent: String) -> String {
@@ -201,6 +203,7 @@ public enum AgentHold: String, Equatable, Sendable {
         case .notTrusted: "only people you trust start \(agent) by themselves"
         case .readsLikeOrders: "it reads more like instructions than feedback"
         case .budgetSpent: "\(agent) already ran by itself as often as it may this hour"
+        case .noProjectFolder: "OpenTraffic doesn't know which project the app is built from; choose its project folder in the Feedback tab"
         }
     }
 }

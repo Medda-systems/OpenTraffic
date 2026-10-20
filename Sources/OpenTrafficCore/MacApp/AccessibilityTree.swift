@@ -144,6 +144,17 @@ public final class AccessibilityTree: @unchecked Sendable {
         }
     }
 
+    /// The AXIdentifier of the element with this key in the last snapshot of `window` (by default the
+    /// window snapshotted last): SwiftUI's `accessibilityIdentifier`, AppKit's `identifier`. Nil when it has
+    /// none or isn't in that snapshot. For the agent's context (`MacAppAgentContext`), not the mirror.
+    public func identifier(key: String, window: UInt32? = nil) async throws -> String? {
+        try await run { [self] in
+            try checkTrust()
+            guard let windowID = window ?? lastWindow, let element = elementsByWindow[windowID]?[key] else { return nil }
+            return copy(element, "AXIdentifier") as? String
+        }
+    }
+
     // MARK: Changes
 
     /// The app's accessibility notifications as a stream: values, focus, destroyed elements,
