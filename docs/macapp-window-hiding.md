@@ -54,7 +54,11 @@ Other notes from the spike:
    ordered in on the off-screen display, where SCK captures them. About 0.9 to 1.4 s after the
    display is ready for the test app, 2.9 to 3.1 s for Calculator (its own start-up). If the windows
    can't be moved (a window-server deadline passed), the app is quit while still hidden and the
-   error is thrown.
+   error is thrown. With `output:` (MacAppSession uses it) the app's standard output and error go
+   to that file: NSWorkspace can't redirect them (its private `_additionalLSOpenOptions` with
+   LaunchServices' stdout/stderr keys is ignored on macOS 27), so the app is opened the same way
+   through `/usr/bin/open -n -j -g --stdout --stderr --env … --args …` and found among the running
+   apps by its bundle path.
 3. **Later windows.** `keepOffScreen(pid:)` installs an `AXObserver` for window created, focused
    window changed and main window changed (on the app) and moved (on each window), plus a
    watchdog: every 16 ms, on its own queue, it lists on-screen window ids, describes only new ones

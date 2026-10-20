@@ -438,6 +438,8 @@ public final class MacAppWindowHider {
         /// The process isn't trusted for Accessibility (System Settings > Privacy & Security).
         case notTrusted
         case observerFailed(pid_t, Int32)
+        /// LaunchServices (through `/usr/bin/open`) didn't start the app; its message.
+        case launchFailed(String)
     }
 
     /// Accessibility is what moves the windows; without it nothing can be hidden.
@@ -492,18 +494,27 @@ public final class MacAppWindowHider {
     /// unhides it so its windows are ordered in (capturable) where nobody sees them. When the
     /// windows can't be moved (the window server doesn't answer), the app is quit while still
     /// hidden and the error is thrown.
+    ///
+    /// With `output`, the app's standard output and error are appended to that file. NSWorkspace
+    /// can't redirect them, so the app is then launched the same way through `/usr/bin/open`
+    /// (`-n -j -g --stdout --stderr`) and found among the running apps by its bundle path.
     public func launch(bundle: URL, environment: [String: String] = [:], arguments: [String] = [],
-                       windowTimeout: Duration = .seconds(10)) async throws -> NSRunningApplication {
+                       windowTimeout: Duration = .seconds(10), output: URL? = nil) async throws -> NSRunningApplication {
         guard Self.isPermitted else { throw Failure.notTrusted }
         try await offscreenDisplay()
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = false
-        configuration.hides = true
-        configuration.createsNewApplicationInstance = true
-        configuration.addsToRecentItems = false
-        configuration.environment = environment
-        configuration.arguments = arguments
-        let app = try await NSWorkspace.shared.openApplication(at: bundle, configuration: configuration)
+        let app: NSRunningApplication
+        if let output {
+            app = try await Self.openHidden(bundle: bundle, environment: environment, arguments: arguments, output: output)
+        } else {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = false
+            configuration.hides = true
+            configuration.createsNewApplicationInstance = true
+            configuration.addsToRecentItems = false
+            configuration.environment = environment
+            configuration.arguments = arguments
+            app = try await NSWorkspace.shared.openApplication(at: bundle, configuration: configuration)
+        }
         do {
             // Hidden, its windows are ordered out: moving them now can't flash anything.
             let element = AXUIElementCreateApplication(app.processIdentifier)
@@ -526,6 +537,45 @@ public final class MacAppWindowHider {
             throw error
         }
         return app
+    }
+
+    /// Launches a new instance of the app hidden, in the background, with its standard output and
+    /// error going to `output`, and returns it once it is among the running apps.
+    private static func openHidden(bundle: URL, environment: [String: String], arguments: [String],
+                                   output: URL) async throws -> NSRunningApplication {
+        let path = bundle.standardizedFileURL.resolvingSymlinksInPath().path
+        func instances() -> [NSRunningApplication] {
+            NSWorkspace.shared.runningApplications.filter { $0.bundleURL?.standardizedFileURL.resolvingSymlinksInPath().path == path }
+        }
+        let before = Set(instances().map(\.processIdentifier))
+        var openArguments = ["-n", "-j", "-g", "--stdout", output.path, "--stderr", output.path]
+        for (name, value) in environment.sorted(by: { $0.key < $1.key }) { openArguments += ["--env", "\(name)=\(value)"] }
+        openArguments += ["-a", path]
+        if !arguments.isEmpty { openArguments += ["--args"] + arguments }
+        let finished = await Task.detached { () -> (status: Int32, message: String) in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            process.arguments = openArguments
+            var own = ProcessInfo.processInfo.environment
+            own.removeValue(forKey: "ELECTRON_RUN_AS_NODE")
+            process.environment = own
+            let errors = Pipe()
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = errors
+            do { try process.run() } catch { return (-1, error.localizedDescription) }
+            let data = errors.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return (process.terminationStatus, String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+        }.value
+        guard finished.status == 0 else {
+            throw Failure.launchFailed(finished.message.isEmpty ? "open exited with status \(finished.status)" : finished.message)
+        }
+        let deadline = ContinuousClock.now + .seconds(10)
+        while ContinuousClock.now < deadline {
+            if let app = instances().first(where: { !before.contains($0.processIdentifier) }) { return app }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        throw Failure.launchFailed("the app was opened but didn't show up among the running apps")
     }
 
     /// Waits (up to `timeout`) until every window accessibility reports for the app is in the
