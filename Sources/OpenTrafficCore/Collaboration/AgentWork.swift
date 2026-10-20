@@ -202,9 +202,10 @@ public struct MacAppAgentContext: Equatable, Sendable {
     static let lineLimit = 300
     static let contentsLimit = 8
 
-    /// What the agent is told happens after it's done. TASK-015 (rebuild, relaunch, replay) changes this
-    /// when OpenTraffic restarts the share by itself (`AppStore.macAppAgentFinished`).
-    public static let afterFinishing = "Viewers see your change once the app is rebuilt and the share restarted (Restart App on the share's card): say so in your reply, and don't ask anyone to reload."
+    /// What the agent is told happens after it's done: OpenTraffic builds the app from the changed sources,
+    /// restarts the share's copy and puts viewers back on their screen (`MacAppSession.watchSources`,
+    /// `AppStore.macAppAgentFinished`).
+    public static let afterFinishing = "When you save the sources, OpenTraffic builds the app, restarts the share's copy with the new build and puts viewers back on the screen they were on, usually within a minute: say so in your reply, and don't ask anyone to reload. If the build fails, viewers keep seeing the previous version and the build's errors are in the share's log."
 
     public init(appName: String, bundleIdentifier: String? = nil, element: NativeElementContext? = nil, windows: [WindowSummary] = [],
                 actions: [String] = [], log: [String] = [], running: Bool = false) {

@@ -11,15 +11,19 @@ public final class ProjectWatcher: @unchecked Sendable {
 
     public let directory: URL
     private let delay: TimeInterval
+    /// Folder names whose changes don't count (`ignoredFolders` unless the watcher was given others).
+    private let ignored: Set<String>
     private let changed: @Sendable () -> Void
     private let queue = DispatchQueue(label: "OpenTraffic project watcher")
     private let lock = NSLock()
     private var stream: FSEventStreamRef?
     private var pending: DispatchWorkItem?
 
-    public init(directory: URL, delay: TimeInterval = 0.4, changed: @escaping @Sendable () -> Void) {
+    public init(directory: URL, delay: TimeInterval = 0.4, ignoring ignored: Set<String> = ProjectWatcher.ignoredFolders,
+                changed: @escaping @Sendable () -> Void) {
         self.directory = directory.resolvingSymlinksInPath()
         self.delay = delay
+        self.ignored = ignored
         self.changed = changed
     }
 
@@ -67,10 +71,10 @@ public final class ProjectWatcher: @unchecked Sendable {
     /// Whether a change at `path` can change the page: inside the folder, not in an ignored folder, and
     /// not a hidden file (editors' swap files, .DS_Store).
     func matters(_ path: String) -> Bool {
-        Self.matters(path, under: directory.path)
+        Self.matters(path, under: directory.path, ignoring: ignored)
     }
 
-    static func matters(_ path: String, under root: String) -> Bool {
+    static func matters(_ path: String, under root: String, ignoring ignoredFolders: Set<String> = ProjectWatcher.ignoredFolders) -> Bool {
         let base = root.hasSuffix("/") ? root : root + "/"
         // FSEvents reports /private/tmp for /tmp and the like.
         let candidates = [path, path.hasPrefix("/private/") ? String(path.dropFirst("/private".count)) : "/private" + path]

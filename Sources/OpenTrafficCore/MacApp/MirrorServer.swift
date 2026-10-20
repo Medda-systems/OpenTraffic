@@ -533,6 +533,51 @@ public final class MirrorServer: @unchecked Sendable {
         (try? await loop.submit { self.windows }.get()) ?? []
     }
 
+    // MARK: Replaying after a relaunch
+
+    /// Where a viewer's action is aimed in the app as viewers see it now: its window's key root and
+    /// the element (the action's key, or the deepest element under a pointer event) with its frame.
+    /// Nil when it names no mirrored window. The session records this with the action, for a replay.
+    public func replayTarget(for message: MirrorProtocol.ClientMessage) async -> MacAppReplay.Target? {
+        guard let window = message.window else { return nil }
+        return try? await loop.submit { () -> MacAppReplay.Target? in
+            guard let mirrored = self.mirrored[window] else { return nil }
+            let nodes = self.snapshots[window]?.nodes ?? []
+            func frame(_ node: MirrorProtocol.AXNode) -> CGRect { CGRect(x: node.x, y: node.y, width: node.w, height: node.h) }
+            switch message {
+            case .act(let act):
+                return MacAppReplay.Target(windowRoot: mirrored.root, key: act.key, frame: nodes.first { $0.key == act.key }.map(frame))
+            case .setText(let setText):
+                return MacAppReplay.Target(windowRoot: mirrored.root, key: setText.key, frame: nodes.first { $0.key == setText.key }.map(frame))
+            case .pointer(let pointer):
+                let node = MacAppReplay.element(at: CGPoint(x: pointer.x, y: pointer.y), in: nodes)
+                return MacAppReplay.Target(windowRoot: mirrored.root, key: node?.key, frame: node.map(frame))
+            default:
+                return MacAppReplay.Target(windowRoot: mirrored.root)
+            }
+        }.get() ?? nil
+    }
+
+    /// The windows viewers see now with every element's key and frame (empty until a launch is live).
+    public func replayWindows() async -> [MacAppReplay.Window] {
+        (try? await loop.submit { () -> [MacAppReplay.Window] in
+            guard self.live else { return [] }
+            return self.windows.compactMap { info in
+                guard let mirrored = self.mirrored[info.id], let snapshot = self.snapshots[info.id] else { return nil }
+                var nodes: [String: CGRect] = [:]
+                for node in snapshot.nodes { nodes[node.key] = CGRect(x: node.x, y: node.y, width: node.w, height: node.h) }
+                return MacAppReplay.Window(id: info.id, root: mirrored.root, nodes: nodes)
+            }
+        }.get()) ?? []
+    }
+
+    /// Applies an action as the host's own (whatever the control mode), in order with viewers'
+    /// input. It isn't reported as a viewer message, so the session doesn't record it again.
+    public func replay(_ message: MirrorProtocol.ClientMessage) {
+        guard MacAppSession.isRecorded(message) else { return }
+        inboxSink.yield((0, message))
+    }
+
     /// The app's appearance on this Mac's account, for `hello` when the session doesn't say.
     public static func hostAppearance() -> MirrorProtocol.Appearance {
         UserDefaults.standard.string(forKey: "AppleInterfaceStyle")?.lowercased() == "dark" ? .dark : .light

@@ -14,6 +14,8 @@ struct MacAppShareStatus: Equatable {
     var control: MirrorServer.ControlState?
     /// The appearance the copy runs with.
     var appearance: MirrorProtocol.Appearance?
+    /// Building the app after its sources changed (idle when none runs).
+    var build: MacAppSession.BuildState = .idle
 }
 
 /// A Mac app share waiting for the permissions it needs; it starts once they're on.
@@ -212,6 +214,7 @@ extension AppStore {
             let port = try await session.start()
             if macAppSessions[id] === session { macAppStatus[id, default: MacAppShareStatus()].appearance = session.appearance }
             if let host = runtime(for: id).publicURL.flatMap(Self.publicOrigin) { session.server?.setAllowedOrigins([host]) }
+            watchMacAppSources(session, app: app, agentDirectory: definition.agentDirectory, for: id)
             return port
         } catch {
             if macAppSessions[id] === session { stopMacAppSession(id) }
@@ -288,6 +291,37 @@ extension AppStore {
         }
     }
 
+    // MARK: Rebuilding
+
+    /// Like `watchElectronCode`: when the app's project sources change, the session builds the app
+    /// (xcodebuild or swift build), starts the new build on the same address and puts viewers back
+    /// where they were. The project is the one discovery found the app's build in, else the share's
+    /// agent folder.
+    private func watchMacAppSources(_ session: MacAppSession, app: MacApp, agentDirectory: String?, for id: UUID) {
+        guard app.simulator == nil else { return }
+        let folders = [app.projectDirectory, agentDirectory.map { URL(fileURLWithPath: $0, isDirectory: true) }].compactMap { $0 }
+        guard let project = folders.first(where: { MacAppBuild.detect(project: $0, bundle: app.bundle) != nil }) else {
+            appendMacAppLog("\(app.name) isn't rebuilt when its sources change: OpenTraffic found no Xcode project or Swift package it's built from.", for: id)
+            return
+        }
+        Task { [weak self] in
+            do {
+                let plan = try await MacAppBuild.plan(for: app, project: project)
+                guard let self, self.macAppSessions[id] === session else { return }
+                session.watchSources(plan)
+            } catch {
+                guard let self, self.macAppSessions[id] === session else { return }
+                self.appendMacAppLog("\(app.name) isn't rebuilt when its sources change: \(error)", for: id)
+            }
+        }
+    }
+
+    /// An agent finished a comment on the share: build and restart now if it changed the sources
+    /// (the watcher usually has already).
+    func rebuildMacAppIfChanged(_ id: UUID) {
+        macAppSessions[id]?.sourcesMayHaveChanged()
+    }
+
     // MARK: Viewer options
 
     /// The host's viewer options for a Mac app share (saved with it; a running share follows at once,
@@ -362,6 +396,8 @@ extension AppStore {
             }
         case .appearance(let appearance):
             macAppStatus[id, default: MacAppShareStatus()].appearance = appearance
+        case .build(let build):
+            macAppStatus[id, default: MacAppShareStatus()].build = build
         case .message:
             break
         }

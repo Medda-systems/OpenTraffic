@@ -474,9 +474,12 @@ extension AppStore {
         }
     }
 
-    /// The hook for after an agent's run on a Mac app share ended (`run.state` says how; `.finished` when it
-    /// answered the comment). TASK-015 rebuilds the app here, restarts the share's copy and replays what
-    /// viewers did; until then the change shows once the host rebuilds the app and presses Restart App
-    /// (the agent is told so: `MacAppAgentContext.afterFinishing`).
-    func macAppAgentFinished(_ run: AgentRun, for id: UUID) {}
+    /// After an agent's run on a Mac app share ended (`run.state` says how; `.finished` when it answered
+    /// the comment): if it changed the app's sources, the share's copy is rebuilt, restarted and put back
+    /// where viewers were (the source watcher usually started that already; the agent is told so:
+    /// `MacAppAgentContext.afterFinishing`).
+    func macAppAgentFinished(_ run: AgentRun, for id: UUID) {
+        guard case .finished = run.state else { return }
+        rebuildMacAppIfChanged(id)
+    }
 }

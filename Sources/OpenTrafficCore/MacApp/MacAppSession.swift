@@ -91,6 +91,27 @@ public final class MacAppSession {
         public var boot: String
         /// `act`, `pointer` (not moves), `text`, `key`, `setText` or `menuAction`.
         public var message: MirrorProtocol.ClientMessage
+        /// Its window and element when it arrived, to find them again in a later launch.
+        public var target: MacAppReplay.Target?
+    }
+
+    /// How far a replay after a rebuild got.
+    public struct ReplayReport: Sendable, Equatable {
+        /// Actions sent again.
+        public var replayed: Int
+        /// Actions there were to replay.
+        public var total: Int
+        /// The action it stopped at, because its window or element isn't in the new build.
+        public var stoppedAt: String?
+    }
+
+    /// Building the app from its sources (`watchSources`).
+    public enum BuildState: Sendable, Equatable {
+        /// No build running; the last one (if any) succeeded.
+        case idle
+        case building
+        /// The last build failed; the copy runs the previous build.
+        case failed(String)
     }
 
     public enum Event: Sendable {
@@ -106,6 +127,8 @@ public final class MacAppSession {
         case control(MirrorServer.ControlState)
         /// The appearance the running copy shows (it changes with a relaunch).
         case appearance(MirrorProtocol.Appearance)
+        /// A build of the app from its sources started, failed or ended (`watchSources`).
+        case build(BuildState)
     }
 
     public struct Options: Sendable {
@@ -123,6 +146,8 @@ public final class MacAppSession {
         public var restartsAutomatically: Bool
         /// The home folder the app's real data is read from for `.copy`.
         public var realHomeDirectory: String
+        /// How long a build from the sources may take (`watchSources`).
+        public var buildTimeout: Duration = MacAppBuild.defaultTimeout
 
         public init(app: MacApp, data: DataSource, assets: MirrorServer.Assets, viewerOptions: MacAppViewerOptions = .init(),
                     sessionDirectory: URL? = nil, windowTimeout: Duration = .seconds(20), restartsAutomatically: Bool = true,
@@ -152,6 +177,13 @@ public final class MacAppSession {
     nonisolated public static let stopGrace: Duration = .seconds(3)
     /// An app that ran this long after an automatic restart gets another one when it quits.
     nonisolated public static let stableRun: Duration = .seconds(60)
+    /// Replaying after a rebuild: the gap between actions...
+    nonisolated public static let replayGap: Duration = .milliseconds(150)
+    /// ...how long an action's window or element may take to appear (a sheet opening) before the
+    /// replay stops there...
+    nonisolated public static let replayElementWait: Duration = .seconds(2)
+    /// ...and how long the new launch's first tree may take.
+    nonisolated public static let replayTreeWait: Duration = .seconds(10)
 
     public let options: Options
     /// The host's choices in force (`options.viewerOptions` at first).
@@ -192,6 +224,11 @@ public final class MacAppSession {
     nonisolated public var recentActions: [RecordedAction] { actions.items }
     /// The last `logLimit` log lines, oldest first.
     nonisolated public var recentLog: [LogLine] { logLines.items }
+    /// How the app is built from its sources, once `watchSources` was called.
+    public private(set) var buildPlan: MacAppBuild.Plan?
+    public private(set) var buildState: BuildState = .idle
+    /// How the last replay after a rebuild went.
+    public private(set) var lastReplay: ReplayReport?
 
     private let hider: MacAppWindowHider
     private let logSink: AsyncStream<LogLine>.Continuation
@@ -221,6 +258,14 @@ public final class MacAppSession {
     /// Whether the card was told that dark needs this Mac in Dark.
     private var warnedAboutDark = false
     private var queueTail: Task<Void, Never>?
+    /// The actions that brought the running launch to where viewers are: the ones replayed into it,
+    /// then what viewers did in it. Replayed after a rebuild; cleared by every other relaunch.
+    private var replayPath: [RecordedAction] = []
+    private var sourceWatcher: MacAppSourceWatcher?
+    private var builds: Task<Void, Never>?
+    /// Sources changed again while a build ran: build once more after it.
+    private var buildAgain = false
+    private var buildCount = 0
 
     public init(options: Options, hider: MacAppWindowHider = MacAppWindowHider()) {
         self.options = options
@@ -251,7 +296,14 @@ public final class MacAppSession {
     /// Quits the app and starts it again on the same port with the same data. A rebuilt .app is
     /// copied again first. Viewers stay connected and get a new `hello`.
     public func restart() async throws {
-        try await serially { try await self.relaunch(resetting: false, automatic: false) }
+        try await restart(replaying: false)
+    }
+
+    /// `restart()`; with `replaying`, the viewer actions that led to the current screen are then sent
+    /// to the new launch (each element found again by its key, 150 ms apart, stopping at the first
+    /// one that is gone) while viewers see `restarting`, so they end up where they were.
+    public func restart(replaying: Bool) async throws {
+        try await serially { try await self.relaunch(resetting: false, automatic: false, replaying: replaying) }
     }
 
     /// Quits the app, puts its data back as it was at the start (a new copy, or empty), and starts
@@ -313,7 +365,7 @@ public final class MacAppSession {
         }
     }
 
-    private func relaunch(resetting: Bool, automatic: Bool, because reason: String? = nil) async throws {
+    private func relaunch(resetting: Bool, automatic: Bool, because reason: String? = nil, replaying: Bool = false) async throws {
         guard let server else { throw MacAppSessionError.stopped }
         switch state {
         case .running, .crashed, .failed: break
@@ -322,6 +374,8 @@ public final class MacAppSession {
         setState(.restarting)
         server.setStatus(.init(state: .restarting, message: reason ?? (resetting ? "\(name) is starting again with fresh data." : "\(name) is restarting.")))
         note(reason ?? (resetting ? "Resetting \(name)'s data and starting it again." : automatic ? "Starting \(name) again after it quit." : "Restarting \(name)."))
+        let path = replaying ? replayPath : []
+        replayPath = []
         await quitApp()
         do {
             if resetting {
@@ -334,6 +388,13 @@ public final class MacAppSession {
             server.setAppearance(appearance)
             try await server.replace(app: mirrored)
             if !automatic { lastAutomaticRestart = nil }
+            if replaying {
+                // A new launch shows its first screen: viewers keep seeing `restarting` until they're back.
+                server.setStatus(.init(state: .restarting, message: "Putting \(name) back where you were."))
+                let report = await replay(path, on: server)
+                lastReplay = report
+                server.setStatus(.init(state: .running))
+            }
             setState(.running)
         } catch {
             let failure = Self.failure(error, name: name)
@@ -355,6 +416,10 @@ public final class MacAppSession {
 
     /// Stops the server, quits the app, removes its preferences and the session folder.
     private func tearDown() async {
+        sourceWatcher?.stop()
+        sourceWatcher = nil
+        builds?.cancel()
+        builds = nil
         serverEvents?.cancel()
         serverEvents = nil
         if let server {
@@ -488,6 +553,148 @@ public final class MacAppSession {
         kill(pid, 0) == 0 || errno == EPERM
     }
 
+    // MARK: Rebuilding from the sources
+
+    /// Watches the project's sources (`plan.project`, debounced 1 s) and, when they change, builds the
+    /// app with `plan` while the running copy keeps serving; after a successful build the new build is
+    /// copied and started on the same port, and viewers are put back on the screen they were on
+    /// (`restart(replaying: true)`). A failed build is logged and shown as a warning; the copy keeps
+    /// running the previous build. False when the folder can't be watched.
+    @discardableResult
+    public func watchSources(_ plan: MacAppBuild.Plan, delay: TimeInterval = 1) -> Bool {
+        sourceWatcher?.stop()
+        buildPlan = plan
+        let watcher = MacAppSourceWatcher(directory: plan.project, delay: delay) { [weak self] in
+            Task { @MainActor in self?.rebuild(because: "The sources changed.") }
+        }
+        guard watcher.start() else {
+            sourceWatcher = nil
+            note("Couldn't watch \(plan.project.path) for changes.")
+            return false
+        }
+        sourceWatcher = watcher
+        note("Watching \(plan.project.path): a change builds \(name) (\(plan.summary)) and restarts it.")
+        return true
+    }
+
+    /// Builds and restarts now if the sources changed since the last build (an agent finished its
+    /// work; the watcher may not have fired yet).
+    public func sourcesMayHaveChanged() {
+        guard let sourceWatcher else { return }
+        Task.detached(priority: .utility) { [weak self] in
+            guard sourceWatcher.takeChange() else { return }
+            await self?.rebuild(because: "The sources changed.")
+        }
+    }
+
+    /// Builds the app with `buildPlan` and restarts it with a replay; a build already running is
+    /// followed by one more.
+    public func rebuild(because reason: String) {
+        guard buildPlan != nil, isServing else { return }
+        if builds != nil {
+            buildAgain = true
+            return
+        }
+        builds = Task { @MainActor [weak self] in
+            var reason = reason
+            while let self {
+                self.buildAgain = false
+                await self.buildAndRestart(because: reason)
+                guard self.buildAgain, !Task.isCancelled, self.isServing else { break }
+                reason = "The sources changed again while it was building."
+            }
+            self?.builds = nil
+        }
+    }
+
+    /// The server answers (running, or after a failed or crashed launch): a build can restart it.
+    private var isServing: Bool {
+        switch state {
+        case .running, .restarting, .crashed, .failed: server != nil
+        default: false
+        }
+    }
+
+    private func buildAndRestart(because reason: String) async {
+        guard let plan = buildPlan else { return }
+        buildCount += 1
+        let logs = options.sessionDirectory.appendingPathComponent("logs", isDirectory: true)
+        try? FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        let logFile = logs.appendingPathComponent("build-\(buildCount).log")
+        note("\(reason) Building \(name): \(plan.summary)")
+        setBuildState(.building)
+        let started = ContinuousClock.now
+        let outcome = await MacAppBuild.run(plan, log: logFile, timeout: options.buildTimeout) { [logSink, logLines] text in
+            guard MacAppBuild.isNotable(text) else { return }
+            let line = LogLine(source: .session, text: "build: " + text.trimmingCharacters(in: .whitespaces))
+            logLines.append(line)
+            logSink.yield(line)
+        }
+        guard isServing, !Task.isCancelled else { return setBuildState(.idle) }
+        let took = (ContinuousClock.now - started).components.seconds
+        switch outcome {
+        case .succeeded:
+            note("Built \(name) in \(took) s (log: \(logFile.path)).")
+            setBuildState(.idle)
+            // Copied again even when only resources changed (the executable's stamp may not).
+            bundleStamp = nil
+            do {
+                try await serially { [self] in
+                    guard isServing else { return }
+                    try await relaunch(resetting: false, automatic: false, because: "\(name) was rebuilt: starting the new version.", replaying: true)
+                }
+            } catch {
+                // relaunch logged it and set the state; the viewers see the failure.
+            }
+        case .failed(_, let lines):
+            for line in lines { note("build: " + line) }
+            setBuildState(.failed(outcome.message))
+            warn("\(name) didn't build, so viewers still see the previous version. \(outcome.message) (log: \(logFile.path))")
+        case .timedOut, .cancelled:
+            setBuildState(.failed(outcome.message))
+            warn("\(outcome.message) Viewers still see the previous version of \(name).")
+        }
+    }
+
+    private func setBuildState(_ state: BuildState) {
+        guard state != buildState else { return }
+        buildState = state
+        eventSink.yield(.build(state))
+    }
+
+    // MARK: Replaying
+
+    /// A viewer action in the running launch: part of the way to the current screen.
+    private func appendToReplayPath(_ action: RecordedAction) {
+        replayPath.append(action)
+        if replayPath.count > Self.actionLimit { replayPath.removeFirst(replayPath.count - Self.actionLimit) }
+    }
+
+    /// Sends `path` to the new launch through the server as the host (`MacAppReplay.run`), and keeps
+    /// what was replayed as the start of the new launch's replay path.
+    private func replay(_ path: [RecordedAction], on server: MirrorServer) async -> ReplayReport {
+        let boot = launch?.boot ?? ""
+        let count = path.filter { MacAppReplay.replays($0.message) }.count
+        if count > 0 { note("Putting viewers back: replaying \(count) action\(count == 1 ? "" : "s").") }
+        let result = await MacAppReplay.run(
+            path, gap: Self.replayGap, elementWait: Self.replayElementWait, treeWait: Self.replayTreeWait,
+            windows: { await server.replayWindows() },
+            send: { [weak self] action in
+                server.replay(action.message)
+                // In order with what viewers do meanwhile.
+                self?.appendToReplayPath(RecordedAction(date: Date(), viewer: action.viewer, boot: boot, message: action.message, target: action.target))
+            },
+            isCurrent: { [weak self] in self?.launch?.boot == boot }
+        )
+        let report = result.report
+        if let step = report.stoppedAt {
+            note("Stopped putting viewers back after \(report.replayed) of \(report.total) actions: \(step) has nothing to act on in the new build.")
+        } else if report.total > 0 {
+            note("Viewers are back where they were (\(report.total) action\(report.total == 1 ? "" : "s") replayed).")
+        }
+        return report
+    }
+
     // MARK: Server events
 
     private func watch(_ server: MirrorServer) {
@@ -499,7 +706,12 @@ public final class MacAppSession {
                     self.eventSink.yield(.viewers(viewers))
                 case .message(let viewer, let message, let date):
                     if Self.isRecorded(message) {
-                        self.actions.append(RecordedAction(date: date, viewer: viewer, boot: self.launch?.boot ?? "", message: message))
+                        let boot = self.launch?.boot ?? ""
+                        // Where it was aimed, read before the server applies it (the message comes first).
+                        let target = await server.replayTarget(for: message)
+                        let action = RecordedAction(date: date, viewer: viewer, boot: boot, message: message, target: target)
+                        self.actions.append(action)
+                        if self.launch?.boot == boot { self.appendToReplayPath(action) }
                     }
                     self.eventSink.yield(.message(viewer: viewer, message, at: date))
                 case .failed(let reason):

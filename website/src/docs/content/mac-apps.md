@@ -66,7 +66,15 @@ If the app quits by itself, viewers see that it did, and OpenTraffic opens it ag
 
 ## Show a fix
 
-OpenTraffic doesn't rebuild the app for you yet. After changing the code, build the app the way you usually do, then click **Restart App**, or run `opentraffic restart Orbit --app`. The share keeps its address, and viewers stay on the page.
+When you or an agent save a change to the app's code, OpenTraffic builds the app, starts the new build on the same address, and puts viewers back where they were:
+
+1. A second after the last change, it builds the project the app comes from: `xcodebuild` with the scheme that makes the app and the configuration you built (Debug) for an Xcode project or workspace, or `swift build` for a Swift package, followed by the package's own `package.sh` when it has one. Build folders (`.build`, `DerivedData`, `build`, `dist`), `.git`, and Xcode's per-user files don't count as changes.
+2. While it builds, viewers keep using the running copy. If the build fails, they keep it: the errors are in the share's **Logs**, and the card shows a warning. The whole build output is in the session's `logs/build-<n>.log`.
+3. When it built, the copy restarts with the new build and its data. Viewers see that it's restarting, then OpenTraffic repeats what they did since the share started or was last restarted by hand (clicks, presses, typing, menu commands), finding each element again by its accessibility path, so they land on the same screen with the same row selected. If an element is gone in the new build, it stops there.
+
+Repeating what viewers did also repeats what changed the app's data: an order they added is added again. Use **Reset Data** to start over.
+
+You can still build the app yourself and click **Restart App**, or run `opentraffic restart Orbit --app`; a restart you start doesn't repeat what viewers did.
 
 ## Comments and agents
 
@@ -81,7 +89,7 @@ The agent works in the share's project folder, shown in the Feedback tab. By def
 
 Give the views people comment on an identifier, and the agent finds them in the code at once: `.accessibilityIdentifier("addOrder")` in SwiftUI, the view's `identifier` in AppKit. Without one, it searches for the label's text.
 
-Agents that read comments through MCP, the REST API, or the `opentraffic` command get the element's accessibility path as the comment's `context.selector`. The agent is told that viewers see its change once the app is rebuilt and restarted, and says so in its reply.
+Agents that read comments through MCP, the REST API, or the `opentraffic` command get the element's accessibility path as the comment's `context.selector`. The agent is told that OpenTraffic rebuilds the app and restarts it once it saves its change, and says so in its reply; when it's done, OpenTraffic builds right away if the code changed.
 
 ## From the terminal and from agents
 
