@@ -95,6 +95,9 @@ public final class WindowCapture: @unchecked Sendable {
     private var refreshedAt: ContinuousClock.Instant?
     private var refreshing = false
     private let finished = OSAllocatedUnfairLock(initialState: false)
+    /// Set by `stop()` before it waits for `queue`: frames still queued are dropped unprocessed, so a
+    /// queue busy comparing frames (slow in debug builds) frees up for it.
+    private let stopping = OSAllocatedUnfairLock(initialState: false)
 
     private static let log = Logger(subsystem: "se.medda.opentraffic", category: "macapp-capture")
 
@@ -197,7 +200,14 @@ public final class WindowCapture: @unchecked Sendable {
 
     /// Stops the stream and finishes `frames`.
     public func stop() async {
-        let stream: SCStream? = queue.sync { defer { self.stream = nil }; return self.stream }
+        stopping.withLock { $0 = true }
+        // Not queue.sync: that would hold a concurrency thread while the queue drains.
+        let stream = await withCheckedContinuation { (done: CheckedContinuation<Unchecked<SCStream?>, Never>) in
+            queue.async {
+                defer { self.stream = nil }
+                done.resume(returning: Unchecked(value: self.stream))
+            }
+        }.value
         nonisolated(unsafe) let stopping = stream
         _ = try? await Self.within(.seconds(2)) { try await stopping?.stopCapture() }
         finish()
@@ -282,7 +292,7 @@ public final class WindowCapture: @unchecked Sendable {
     // MARK: Frames (on `queue`)
 
     fileprivate func receive(_ sample: CMSampleBuffer) {
-        guard !finished.withLock({ $0 }), !reconfiguring,
+        guard !finished.withLock({ $0 }), !stopping.withLock({ $0 }), !reconfiguring,
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               let info = attachments.first,
               let raw = info[.status] as? Int, let status = SCFrameStatus(rawValue: raw) else { return }

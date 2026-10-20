@@ -21,7 +21,9 @@ the upstream of CollabProxy, so viewers reach it through the share URL with the 
 | WebSocket `/__opentraffic/macapp/ws` | Everything live, below |
 
 All mirror paths start with `/__opentraffic/macapp/`; a proxy in front passes that prefix through
-untouched.
+untouched. The WebSocket refuses (403) pages from other sites: its `Origin` must be a loopback address,
+the request's own `Host`, or an origin the session allows, so a proxy that rewrites `Host` must have
+the share's public origin allowed.
 
 ## WebSocket rules
 
