@@ -100,8 +100,17 @@ public final class OffscreenDisplay {
 
     /// Size in points; the backing store is twice that, like a Retina screen.
     nonisolated public static let pointSize = CGSize(width: 1920, height: 1200)
+    /// The display's identity: always the same, so macOS sees the display it already knows. macOS
+    /// keys a display's ColorSync profile on its vendor, product and serial; with the process id as
+    /// the serial (development builds until 20 October 2026) every process that made the display
+    /// wrote a new factory profile into /Library/ColorSync/Profiles/Displays, and ColorSync's
+    /// daemons then churned for hours. See "One identity, one profile" in
+    /// docs/macapp-window-hiding.md.
+    nonisolated public static let displayName = "OpenTraffic"
     /// The vendor id the display reports ("OT").
     nonisolated public static let vendorID: UInt32 = 0x4F54
+    nonisolated public static let productID: UInt32 = 0x0001
+    nonisolated public static let serialNumber: UInt32 = 1
     /// How long making the display and waiting for it to come online may take (1.1 to 2.2 s usually).
     nonisolated public static let createTimeout: Duration = .seconds(10)
     /// How long any other single window-server call may take.
@@ -203,14 +212,14 @@ public final class OffscreenDisplay {
 
         let size = pointSize
         let descriptor = descriptorClass.init()
-        descriptor.setValue("OpenTraffic", forKey: "name")
+        descriptor.setValue(displayName, forKey: "name")
         descriptor.setValue(UInt32(size.width * 2), forKey: "maxPixelsWide")
         descriptor.setValue(UInt32(size.height * 2), forKey: "maxPixelsHigh")
         // About 27 inches, so AppKit picks ordinary text sizes.
         descriptor.setValue(NSValue(size: NSSize(width: 597, height: 373)), forKey: "sizeInMillimeters")
         descriptor.setValue(vendorID, forKey: "vendorID")
-        descriptor.setValue(UInt32(0x0001), forKey: "productID")
-        descriptor.setValue(UInt32(getpid()), forKey: "serialNum")
+        descriptor.setValue(productID, forKey: "productID")
+        descriptor.setValue(serialNumber, forKey: "serialNum")
         descriptor.setValue(DispatchQueue.main, forKey: "queue")
 
         typealias InitWithDescriptor = @convention(c) (AnyObject, Selector, AnyObject) -> Unmanaged<NSObject>?

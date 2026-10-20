@@ -39,7 +39,8 @@ Other notes from the spike:
 
 1. **The off-screen display.** `OffscreenDisplay.shared()` makes one virtual display per process,
    on first use, and keeps it until the process exits: 1920 x 1200 pt at 2x (3840 x 2400 px), named
-   "OpenTraffic", vendor id `0x4F54`. macOS first attaches a new display to the right of the main
+   "OpenTraffic", vendor id `0x4F54`, product 1, serial 1, the same in every process (see "One
+   identity, one profile"). macOS first attaches a new display to the right of the main
    one; it is moved diagonally off a corner of a physical screen so it touches the user's screens at
    one point only (here `1710,1112`, the main display's bottom-right corner), clear of other
    processes' OpenTraffic displays, and moved again if the arrangement changes. Coming online takes
@@ -94,6 +95,53 @@ test suites calls it; the display goes away with the process.
 
 The cost: once something was shared, System Settings > Displays and Mission Control show the
 "OpenTraffic" display until OpenTraffic quits.
+
+## One identity, one profile
+
+macOS treats a display it hasn't seen before as new hardware: ColorSync makes a factory profile for
+it and writes it to `/Library/ColorSync/Profiles/Displays/<name>-<UUID>.icc`, and
+`colorsync.displayservices` and `colorsyncd` work through the change. A display is recognised by its
+vendor, product and serial number. Until 20 October 2026 the serial was the process id, so every
+process that made the display (each share in a new OpenTraffic process, each `swift test` run) was a
+new display to macOS and added a profile: after one day of test runs the folder held 146
+`OpenTraffic-<UUID>.icc` files, the two ColorSync daemons sat at 60% and 35% CPU for hours after
+every display change, `CGGetActiveDisplayList`, `screencapture` and `system_profiler` took 1 to 3 s
+instead of 50 ms, and on 19 October they hung outright (one cause of the hang described under
+"Deadlines").
+
+Now the identity is constant: name "OpenTraffic", vendor `0x4F54` ("OT"), product 1, serial 1
+(`OffscreenDisplay.displayName`, `vendorID`, `productID`, `serialNumber`). The first display made
+after the change should add one profile; every later one, in any process, is then the display macOS
+already knows. To check it: count the files in `/Library/ColorSync/Profiles/Displays`, run the two
+display tests (`swift test --filter
+'aLaunchedAppStaysOffScreenUnfocusedAndCapturable|aSecondHiddenLaunchInOneProcessStaysOffScreen'`)
+twice, and count again: at most one more file, and none after the second run. (One older profile, "OpenTraffic Offscreen", came from an earlier name of the display.)
+
+**Two processes at once** (a `swift test` run next to a live share, or two test runs) now make two
+displays with the same identity. Whether the window server brings the second one online had not
+been checked when this changed: on 20 October 2026 the display subsystem of the test Mac was still
+too slow to run display tests, even after the old profiles were deleted and both ColorSync daemons
+restarted (the display-list probe below took 19 to 97 s for 45 minutes). Nothing can go wrong for the user either way: a share makes its display ready
+before it opens the app, so a refused display fails that share with
+`OffscreenDisplay.Failure.timedOut("the virtual display coming online")` after 10 s and no window is
+ever shown. If it turns out to be refused, the fallback is a small fixed set of serials (1 to 4):
+each process takes the lowest serial no online display with vendor `0x4F54` has
+(`CGDisplaySerialNumber`), so at most four profiles can ever exist.
+
+**One-time clean-up on a Mac that ran older builds.** The profiles the old builds left behind stay
+until removed, and OpenTraffic doesn't remove them: the folder belongs to root, and OpenTraffic
+won't ask for an administrator password for this. In Terminal:
+
+```sh
+sudo rm /Library/ColorSync/Profiles/Displays/OpenTraffic*.icc
+```
+
+then log out and back in, so the ColorSync daemons start over without the backlog. The files are
+harmless to delete: they are factory profiles macOS made itself, and it makes the one it needs again
+the next time the display appears. Until then, a quick health check: a CoreGraphics display-list
+call (`CGGetActiveDisplayList` in a one-line Swift program) should answer in well under a second.
+If it takes seconds, ColorSync is still working through profiles; don't run display tests until it
+is fast again.
 
 ## Deadlines: the window server must never take the Mac down
 
@@ -173,7 +221,8 @@ fixture (`Examples/macapp-orbit`, built by the tests when missing):
   off screen and any visibility lasts under 250 ms, that the app is never active, frontmost or the
   menu bar owner, and that releasing quits it and keeps the display;
 - the other launches Orbit twice in one process with the sampler running and checks that neither
-  launch was ever visible on a physical screen and that both used the same display.
+  launch was ever visible on a physical screen, that both used the same display, and that the
+  display reports the constant vendor, product and serial.
 
 Every test that launches the fixture goes through `OrbitFixture.launch()` /
 `withOrbitFixture` in `MacAppFixtureSupport.swift`, so it is launched by `MacAppWindowHider`: never

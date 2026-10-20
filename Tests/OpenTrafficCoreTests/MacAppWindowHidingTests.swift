@@ -339,4 +339,11 @@ func aSecondHiddenLaunchInOneProcessStaysOffScreen() async throws {
         displays.formUnion(OffscreenDisplay.liveDisplayIDs)
     }
     #expect(displays.count == 1, "one display per process, reused: \(displays)")
+    // The same identity in every process, so macOS keeps one ColorSync profile for it instead of
+    // writing a new one per test run (see "One identity, one profile" in the docs).
+    for display in displays {
+        #expect(CGDisplayVendorNumber(display) == OffscreenDisplay.vendorID)
+        #expect(CGDisplayModelNumber(display) == OffscreenDisplay.productID)
+        #expect(CGDisplaySerialNumber(display) == OffscreenDisplay.serialNumber)
+    }
 }
