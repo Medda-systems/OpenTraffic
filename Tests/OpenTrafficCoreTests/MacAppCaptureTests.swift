@@ -95,7 +95,10 @@ private typealias Rect = WindowCapture.TileRect
 
 // MARK: Live capture (Screen Recording permission)
 
-@Suite(.serialized, .enabled(if: WindowCapture.isPermitted, "needs Screen Recording permission"), .timeLimit(.minutes(1)))
+// Each test takes a MacAppFixtureTurn (capture timing suffers when another Mac app test of this run
+// runs at the same time, and ScreenCaptureKit stalls while another test process keeps a virtual
+// display); the time limit allows for waiting for it.
+@Suite(.serialized, .enabled(if: WindowCapture.isPermitted, "needs Screen Recording permission"), .macAppFixtureTurn, .timeLimit(.minutes(10)))
 @MainActor
 struct LiveWindowCaptureTests {
     @Test func theFirstFrameIsOneFullTileOfTheWindowsSize() async throws {

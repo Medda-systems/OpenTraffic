@@ -6,13 +6,11 @@ import Testing
 
 // Mac app sharing: launching an app so its windows stay off the user's screens (on OpenTraffic's
 // virtual display) yet ScreenCaptureKit can capture them, without taking focus. The end-to-end
-// test needs Accessibility and Screen Recording for the process running `swift test`, and skips
-// without them (as on GitHub Actions). It shares the Orbit fixture when it is built
-// (`sh Examples/macapp-orbit/package.sh`) and Calculator otherwise.
+// tests need Accessibility and Screen Recording for the process running `swift test`, and skip
+// without them (as on GitHub Actions). They share the Orbit fixture (Examples/macapp-orbit, built
+// when missing) and take a MacAppFixtureTurn for the whole test, so they wait for other Mac app
+// tests, including those of parallel `swift test` runs in other checkouts.
 
-private let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-private let orbit = repository.appendingPathComponent("Examples/macapp-orbit/dist/Orbit.app")
-private let sharedApp = FileManager.default.fileExists(atPath: orbit.path) ? orbit : URL(fileURLWithPath: "/System/Applications/Calculator.app")
 private let mayCapture = AXIsProcessTrusted() && CGPreflightScreenCaptureAccess()
 
 @Test func theDisplayGoesDiagonallyOffACornerTouchingNoScreenEdge() {
@@ -42,39 +40,143 @@ private let mayCapture = AXIsProcessTrusted() && CGPreflightScreenCaptureAccess(
     #expect(!OffscreenDisplay.sharesEdge(screen, CGRect(x: 300, y: 300, width: 50, height: 50)))
 }
 
-/// Where the windows of processes that didn't exist when sampling began were, every few milliseconds.
-private final class WindowSampler: @unchecked Sendable {
-    struct Sample { var time: ContinuousClock.Instant; var pid: pid_t; var id: CGWindowID; var bounds: CGRect }
-    private let lock = NSLock()
-    private var samples: [Sample] = []
-    private var running = true
-    private let existing: Set<pid_t>
+@Test func theDisplayKeepsClearOfOtherProcessesDisplays() {
+    let size = CGSize(width: 1920, height: 1200)
+    let screens = [CGRect(x: 0, y: 0, width: 1710, height: 1112)]
+    // Another OpenTraffic process's display already sits at the first corner.
+    let other = CGRect(origin: CGPoint(x: 1710, y: 1112), size: size)
+    let origins = OffscreenDisplay.cornerOrigins(for: size, around: screens, avoiding: [other])
+    #expect(!origins.isEmpty)
+    #expect(!origins.contains(CGPoint(x: 1710, y: 1112)))
+    for origin in origins { #expect(!other.intersects(CGRect(origin: origin, size: size))) }
+}
 
-    init() {
-        let all = (CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]]) ?? []
-        existing = Set(all.compactMap { $0[kCGWindowOwnerPID as String] as? pid_t })
-        Thread.detachNewThread { [self] in
-            while lock.withLock({ running }) {
-                let now = ContinuousClock.now
-                let onScreen = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]) ?? []
-                let fresh = onScreen.compactMap { entry -> Sample? in
-                    guard let pid = entry[kCGWindowOwnerPID as String] as? pid_t, !existing.contains(pid),
-                          let id = entry[kCGWindowNumber as String] as? CGWindowID,
-                          let bounds = entry[kCGWindowBounds as String].flatMap({ CGRect(dictionaryRepresentation: $0 as! CFDictionary) })
-                    else { return nil }
-                    return Sample(time: now, pid: pid, id: id, bounds: bounds)
-                }
-                lock.withLock { samples += fresh }
-                Thread.sleep(forTimeInterval: 0.004)
-            }
-        }
+@Test func aStuckWindowServerCallThrowsAndLaterCallsFailAtOnceUntilItReturns() async throws {
+    let calls = WindowServerCalls(label: "se.medda.opentraffic.test-calls")
+    #expect(try await calls.run("quick", timeout: .seconds(1)) { 42 } == 42)
+    await #expect(throws: OffscreenDisplay.Failure.unavailable("no")) {
+        try await calls.run("failing", timeout: .seconds(1)) { throw OffscreenDisplay.Failure.unavailable("no") }
     }
 
-    func stop() -> [Sample] {
-        lock.withLock {
-            running = false
-            return samples
-        }
+    let stuck = DispatchSemaphore(value: 0)
+    let started = ContinuousClock.now
+    await #expect(throws: OffscreenDisplay.Failure.timedOut("configuring")) {
+        try await calls.run("configuring", timeout: .milliseconds(100)) { stuck.wait() }
+    }
+    #expect(ContinuousClock.now - started < .seconds(1), "the caller waited for the stuck call")
+    // Nothing queues behind the stuck call.
+    let next = ContinuousClock.now
+    await #expect(throws: OffscreenDisplay.Failure.windowServerNotResponding("configuring")) {
+        try await calls.run("listing", timeout: .seconds(1)) { 1 }
+    }
+    #expect(ContinuousClock.now - next < .milliseconds(100))
+
+    // Once it returns, calls go through again.
+    stuck.signal()
+    var answer: Int?
+    for _ in 0..<50 where answer == nil {
+        answer = try? await calls.run("listing", timeout: .seconds(1)) { 7 }
+        if answer == nil { try await Task.sleep(for: .milliseconds(20)) }
+    }
+    #expect(answer == 7)
+}
+
+// MARK: The cross-process fixture lock
+
+private func scratchLockPath() throws -> String {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("opentraffic-turn-test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    return folder.appendingPathComponent("lock").path
+}
+
+/// A pid no process has: one that just exited.
+private func exitedPID() throws -> pid_t {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/true")
+    try process.run()
+    process.waitUntilExit()
+    return process.processIdentifier
+}
+
+private func holdLock(_ path: String, as pid: pid_t) {
+    mkdir(path, 0o700)
+    try? "\(pid)\n".write(toFile: path + "/owner", atomically: false, encoding: .utf8)
+}
+
+@Test func theLockIsADirectoryWithTheHoldersPidKeptUntilTheProcessExits() async throws {
+    let path = try scratchLockPath()
+    let turn = MacAppFixtureTurn(lockPath: path)
+    try await turn.acquire()
+    var isDirectory: ObjCBool = false
+    #expect(FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue)
+    #expect(turn.holder() == getpid() && turn.holdsLock)
+    turn.release()
+    // The next test of this process takes the turn at once; the lock stays with the process.
+    #expect(turn.holder() == getpid())
+    let again = ContinuousClock.now
+    try await turn.acquire()
+    #expect(ContinuousClock.now - again < .milliseconds(100))
+    turn.release()
+    turn.releaseLock()
+    #expect(!FileManager.default.fileExists(atPath: path))
+}
+
+@Test func anotherProcesssLockIsWaitedForUntilItsHolderExits() async throws {
+    let path = try scratchLockPath()
+    // launchd (pid 1) is alive and never releases: the stand-in for another `swift test` run.
+    holdLock(path, as: 1)
+    let turn = MacAppFixtureTurn(lockPath: path)
+    let taken = Task { try await turn.acquire() }
+    try await Task.sleep(for: .milliseconds(400))
+    #expect(turn.holder() == 1, "took a live holder's lock")
+    // The other run exits (or dies) without removing it: the lock is broken.
+    try? "\(try exitedPID())\n".write(toFile: path + "/owner", atomically: false, encoding: .utf8)
+    try await taken.value
+    #expect(turn.holder() == getpid())
+    turn.release()
+    turn.releaseLock()
+}
+
+@Test func aLockUntouchedForFiveMinutesIsBroken() async throws {
+    let path = try scratchLockPath()
+    holdLock(path, as: 1)
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-MacAppFixtureTurn.staleAge - 10)], ofItemAtPath: path)
+    let turn = MacAppFixtureTurn(lockPath: path)
+    let started = ContinuousClock.now
+    try await turn.acquire()
+    #expect(ContinuousClock.now - started < .seconds(2))
+    #expect(turn.holder() == getpid())
+    turn.release()
+    turn.releaseLock()
+}
+
+@Test func theHolderKeepsItsLockFresh() async throws {
+    let path = try scratchLockPath()
+    let turn = MacAppFixtureTurn(lockPath: path, heartbeat: 0.1)
+    try await turn.acquire()
+    turn.release()
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-MacAppFixtureTurn.staleAge - 10)], ofItemAtPath: path)
+    // The heartbeat runs at utility priority: on a busy Mac it can come late.
+    var age = TimeInterval.infinity
+    for _ in 0..<100 where age > 5 {
+        try await Task.sleep(for: .milliseconds(50))
+        let touched = try #require(try FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date)
+        age = Date().timeIntervalSince(touched)
+    }
+    #expect(age < 5, "the lock wasn't touched")
+    turn.releaseLock()
+}
+
+/// A ScreenCaptureKit call with a deadline, tried once more if it times out. A request can be lost
+/// for good when replayd drops its connection (seen with two full `swift test` runs at once): without
+/// a deadline the test, and the fixture turn it holds, would wait forever, and Swift Testing's time
+/// limit can't end an await that ignores cancellation.
+private func screenCaptureKit<T>(_ call: @escaping @Sendable () async throws -> T) async throws -> T {
+    do {
+        return try await WindowCapture.within(.seconds(10)) { WindowCapture.Unchecked(value: try await call()) }.value
+    } catch WindowCaptureError.timedOut {
+        print("a ScreenCaptureKit call took over 10 s; trying once more")
+        return try await WindowCapture.within(.seconds(10)) { WindowCapture.Unchecked(value: try await call()) }.value
     }
 }
 
@@ -94,15 +196,18 @@ private func pressAboutItem(of pid: pid_t) -> Bool {
     return AXUIElementPerformAction(about, kAXPressAction as CFString) == .success
 }
 
+// The time limits allow for waiting for the turn: behind every other Mac app test of this run, and
+// for a parallel run to finish.
 @MainActor
-@Test(.enabled(if: mayCapture, "Accessibility and Screen Recording for the test runner"), .timeLimit(.minutes(1)))
+@Test(.enabled(if: mayCapture, "Accessibility and Screen Recording for the test runner"), .timeLimit(.minutes(10)))
 func aLaunchedAppStaysOffScreenUnfocusedAndCapturable() async throws {
-    await MacAppFixtureTurn.shared.acquire()
+    try await MacAppFixtureTurn.shared.acquire()
     defer { MacAppFixtureTurn.shared.release() }
     let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier
     let sampler = WindowSampler()
-    let hider = MacAppWindowHider()
-    let app = try await hider.launch(bundle: sharedApp)
+    let orbit = try await OrbitFixture.launch()
+    let hider = orbit.hider
+    let app = orbit.running
     let pid = app.processIdentifier
     let launched = ContinuousClock.now
     var released = false
@@ -118,17 +223,19 @@ func aLaunchedAppStaysOffScreenUnfocusedAndCapturable() async throws {
     }
 
     // ScreenCaptureKit lists the windows as on screen and captures real pixels.
-    let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+    let content = try await screenCaptureKit { try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) }
     let listed = content.windows.filter { $0.owningApplication?.processID == pid }
     for window in windows {
         let match = listed.first { $0.windowID == window.id }
-        #expect(match?.isOnScreen == true, "window \(window.id) not listed on screen")
+        #expect(match?.isOnScreen == true, "window \(window.id) (\(window.title ?? "untitled") at \(window.frame)) not listed on screen: \(match.map { "\($0.frame)" } ?? "not listed")")
     }
     let first = try #require(listed.first { $0.windowID == windows[0].id })
     let configuration = SCStreamConfiguration()
     configuration.width = Int(first.frame.width) * 2
     configuration.height = Int(first.frame.height) * 2
-    let image = try await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(desktopIndependentWindow: first), configuration: configuration)
+    let filter = WindowCapture.Unchecked(value: SCContentFilter(desktopIndependentWindow: first))
+    let settings = WindowCapture.Unchecked(value: configuration)
+    let image = try await screenCaptureKit { try await SCScreenshotManager.captureImage(contentFilter: filter.value, configuration: settings.value) }
     let bitmap = NSBitmapImageRep(cgImage: image)
     var colors = Set<UInt32>()
     for y in stride(from: 0, to: bitmap.pixelsHigh, by: 9) {
@@ -195,5 +302,41 @@ func aLaunchedAppStaysOffScreenUnfocusedAndCapturable() async throws {
     await hider.release(pid: pid)
     released = true
     #expect(app.isTerminated)
-    #expect(OffscreenDisplay.liveDisplayIDs.isEmpty)
+    // The display stays for the next share in this process.
+    #expect(OffscreenDisplay.liveDisplayIDs.count == 1)
+}
+
+/// The bug this guards against: a second virtual display in one process never came online, so the
+/// second hidden launch showed the app on the user's screen. Each launch here is at least the second
+/// in this process when another Mac app test ran first, and the second one always is.
+@MainActor
+@Test(.enabled(if: mayCapture, "Accessibility and Screen Recording for the test runner"), .timeLimit(.minutes(10)))
+func aSecondHiddenLaunchInOneProcessStaysOffScreen() async throws {
+    try await MacAppFixtureTurn.shared.acquire()
+    defer { MacAppFixtureTurn.shared.release() }
+    var displays: Set<CGDirectDisplayID> = []
+    for round in 1...2 {
+        let sampler = WindowSampler()
+        let orbit = try await OrbitFixture.launch()
+        let pid = orbit.pid
+        do {
+            try await Task.sleep(for: .milliseconds(500))
+            let offscreen = try #require(orbit.hider.offscreenBounds)
+            #expect(!OffscreenDisplay.isVisible(offscreen))
+            let windows = orbit.hider.windows(pid: pid)
+            #expect(!windows.isEmpty, "round \(round): no windows")
+            for window in windows {
+                #expect(!OffscreenDisplay.isVisible(window.frame), "round \(round): \(window.title ?? "") at \(window.frame)")
+                #expect(offscreen.intersects(window.frame), "round \(round): not on the off-screen display")
+            }
+        } catch {
+            await orbit.quit()
+            throw error
+        }
+        await orbit.quit()
+        let seen = sampler.stop().filter { $0.pid == pid && !$0.bounds.isEmpty && OffscreenDisplay.isVisible($0.bounds) }
+        #expect(seen.isEmpty, "round \(round): visible on a physical screen at \(Set(seen.map { "\($0.bounds)" }))")
+        displays.formUnion(OffscreenDisplay.liveDisplayIDs)
+    }
+    #expect(displays.count == 1, "one display per process, reused: \(displays)")
 }

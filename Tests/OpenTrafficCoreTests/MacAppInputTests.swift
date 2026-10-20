@@ -5,14 +5,11 @@ import Testing
 @testable import OpenTrafficCore
 
 // Input synthesis: the pure mappings run everywhere; the fixture tests launch the Orbit fixture
-// (building it with Examples/macapp-orbit/package.sh when dist/Orbit.app is missing) without
-// activating it, move its window as far off screen as macOS allows, drive it only through
-// InputSynthesizer, and read frames and results through AccessibilityTree snapshots. They need
-// Accessibility permission (CGEvent posting and AX reads) and skip without it, as on GitHub Actions,
-// and they take MacAppFixtureTurn like every test that drives a real app.
-//
-// They don't launch through MacAppWindowHider: a second off-screen display made in the same test
-// process never comes online, so only the first hidden launch per process stays off screen.
+// through MacAppWindowHider (MacAppFixtureSupport.swift: hidden, never activated, its window on the
+// off-screen display), drive it only through InputSynthesizer, and read frames and results through
+// AccessibilityTree snapshots. They need Accessibility permission (CGEvent posting and AX reads) and
+// skip without it, as on GitHub Actions, and they take MacAppFixtureTurn like every test that drives
+// a real app.
 
 private typealias Key = MirrorProtocol.KeyCode
 
@@ -143,29 +140,19 @@ struct MacAppInputTests {
     }
 }
 
-/// Takes the fixture turn, launches Orbit, runs the body, checks that Orbit was never activated and
-/// the host's frontmost app didn't change, and quits Orbit even when the body throws.
+/// Takes the fixture turn, launches Orbit hidden, runs the body, checks that Orbit was never
+/// activated and the host's frontmost app didn't change, and quits Orbit even when the body throws.
 @MainActor
 private func withOrbit(_ body: (Orbit, InputSynthesizer) async throws -> Void, sourceLocation: SourceLocation = #_sourceLocation) async throws {
-    await MacAppFixtureTurn.shared.acquire()
-    defer { MacAppFixtureTurn.shared.release() }
-    let orbit = try await Orbit.launch()
-    do {
+    try await withOrbitFixture { fixture in
+        let orbit = try await Orbit.attach(fixture)
         let host = try #require(Orbit.hostFrontmost())
         try await body(orbit, InputSynthesizer(pid: orbit.pid))
         orbit.expectNeverActivated(host: host, sourceLocation: sourceLocation)
-    } catch {
-        orbit.quit()
-        throw error
     }
-    orbit.quit()
 }
 
 // MARK: - The fixture, driven from outside
-
-private let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-private let fixtureDirectory = repository.appendingPathComponent("Examples/macapp-orbit")
-private let fixtureExecutable = fixtureDirectory.appendingPathComponent("dist/Orbit.app/Contents/MacOS/Orbit")
 
 private extension MirrorProtocol.AXNode {
     /// Window-relative frame and centre, as InputSynthesizer takes them.
@@ -173,63 +160,17 @@ private extension MirrorProtocol.AXNode {
     var center: CGPoint { CGPoint(x: x + w / 2, y: y + h / 2) }
 }
 
-private struct FixtureError: Error, CustomStringConvertible {
-    let description: String
-    init(_ description: String) { self.description = description }
-}
-
 @MainActor
 private struct Orbit {
-    let process: Process
+    let fixture: OrbitFixture
     let tree: AccessibilityTree
-    var pid: pid_t { process.processIdentifier }
+    var pid: pid_t { fixture.pid }
 
-    /// Starts the fixture's executable directly (it doesn't activate: the host's frontmost app keeps
-    /// focus), waits for its main window and moves it off screen.
-    static func launch() async throws -> Orbit {
-        try buildIfNeeded()
-        quitLeftovers()
-        let process = Process()
-        process.executableURL = fixtureExecutable
-        process.arguments = ["-ApplePersistenceIgnoreState", "YES"]
-        var environment = ProcessInfo.processInfo.environment
-        environment.removeValue(forKey: "ELECTRON_RUN_AS_NODE")
-        process.environment = environment
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        let orbit: Orbit
-        do {
-            orbit = Orbit(process: process, tree: try AccessibilityTree(pid: process.processIdentifier))
-            // The main window, once its list has rows (AXWindows is empty while the window is on
-            // another Space; the snapshot's .main goes through AXMainWindow, which still finds it).
-            _ = try await orbit.waitFor(timeout: .seconds(15)) { $0.title == "Orbit Orders" && !rows(in: $0).isEmpty }
-        } catch {
-            process.terminate()
-            throw error
-        }
-        orbit.moveOffScreen()
-        try? await Task.sleep(for: .milliseconds(300))
+    /// Waits for the fixture's main window with rows in its list.
+    static func attach(_ fixture: OrbitFixture) async throws -> Orbit {
+        let orbit = Orbit(fixture: fixture, tree: try AccessibilityTree(pid: fixture.pid))
+        _ = try await orbit.waitFor(timeout: .seconds(15)) { $0.title == "Orbit Orders" && !rows(in: $0).isEmpty }
         return orbit
-    }
-
-    func quit() {
-        guard process.isRunning else { return }
-        process.terminate()
-        let deadline = Date().addingTimeInterval(3)
-        while process.isRunning, Date() < deadline { usleep(20_000) }
-        if process.isRunning { kill(pid, SIGKILL); process.waitUntilExit() }
-    }
-
-    /// As far off screen as macOS allows (it keeps a corner of the window on some display).
-    private func moveOffScreen() {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(pid), kAXMainWindowAttribute as CFString, &value) == .success,
-              let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return }
-        var offScreen = CGPoint(x: -20000, y: -20000)
-        if let position = AXValueCreate(.cgPoint, &offScreen) {
-            AXUIElementSetAttributeValue(value as! AXUIElement, kAXPositionAttribute as CFString, position)
-        }
     }
 
     func snapshot() async throws -> AXSnapshot {
@@ -247,7 +188,7 @@ private struct Orbit {
         let deadline = clock.now.advanced(by: timeout)
         var last: AXSnapshot?
         while clock.now < deadline {
-            guard process.isRunning else { throw FixtureError("Orbit exited") }
+            guard fixture.isRunning else { throw FixtureError("Orbit exited") }
             if let snapshot = try? await tree.snapshot(window: .main) {
                 if condition(snapshot) { return snapshot }
                 last = snapshot
@@ -287,8 +228,8 @@ private struct Orbit {
     /// The system-wide AX query is only a fallback: it fails with cannotComplete whenever the
     /// frontmost app (Chrome, for one) doesn't answer.
     static func hostFrontmost() -> pid_t? {
-        let asn = run("/usr/bin/lsappinfo", ["front"]).trimmingCharacters(in: .whitespacesAndNewlines)
-        if !asn.isEmpty, let match = run("/usr/bin/lsappinfo", ["info", "-only", "pid", asn]).firstMatch(of: /pid"?\s*=\s*(\d+)/),
+        let asn = OrbitFixture.run("/usr/bin/lsappinfo", ["front"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !asn.isEmpty, let match = OrbitFixture.run("/usr/bin/lsappinfo", ["info", "-only", "pid", asn]).firstMatch(of: /pid"?\s*=\s*(\d+)/),
            let pid = pid_t(match.1) {
             return pid
         }
@@ -297,19 +238,6 @@ private struct Orbit {
         if AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString, &focused) == .success,
            let focused, CFGetTypeID(focused) == AXUIElementGetTypeID(), AXUIElementGetPid(focused as! AXUIElement, &pid) == .success { return pid }
         return nil
-    }
-
-    private static func run(_ tool: String, _ arguments: [String]) -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: tool)
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        guard (try? process.run()) != nil else { return "" }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return String(decoding: data, as: UTF8.self)
     }
 
     /// Orbit never became the active app and the host's frontmost app is the one from before.
@@ -325,46 +253,5 @@ private struct Orbit {
     static func describe(_ pid: pid_t?) -> String {
         guard let pid else { return "none" }
         return "\(NSRunningApplication(processIdentifier: pid)?.localizedName ?? "?") (\(pid))"
-    }
-
-    /// Builds dist/Orbit.app once when it is missing.
-    static func buildIfNeeded() throws {
-        if FileManager.default.isExecutableFile(atPath: fixtureExecutable.path) { return }
-        let build = Process()
-        build.executableURL = URL(fileURLWithPath: "/bin/sh")
-        build.arguments = [fixtureDirectory.appendingPathComponent("package.sh").path]
-        var environment = ProcessInfo.processInfo.environment
-        environment.removeValue(forKey: "ELECTRON_RUN_AS_NODE")
-        build.environment = environment
-        build.standardOutput = FileHandle.nullDevice
-        build.standardError = FileHandle.nullDevice
-        try build.run()
-        build.waitUntilExit()
-        guard build.terminationStatus == 0, FileManager.default.isExecutableFile(atPath: fixtureExecutable.path) else {
-            throw FixtureError("building the Orbit fixture failed (sh Examples/macapp-orbit/package.sh)")
-        }
-    }
-
-    /// Kills copies of this checkout's fixture left by an earlier, interrupted run: matched by path
-    /// (other checkouts' Orbits are left alone) and started before this test process, so the Orbit
-    /// another suite (window hiding, accessibility) may be running right now is left alone too.
-    static func quitLeftovers() {
-        let escaped = fixtureExecutable.path.replacingOccurrences(of: #"[.^$*+?()\[\]{}|\\]"#, with: #"\\$0"#, options: .regularExpression)
-        guard let testsStarted = startTime(of: getpid()) else { return }
-        // The fixture itself, not commands that mention its path.
-        for line in run("/usr/bin/pgrep", ["-f", "^\(escaped)( |$)"]).split(separator: "\n") {
-            guard let pid = pid_t(line.trimmingCharacters(in: .whitespaces)), pid != getpid(),
-                  let started = startTime(of: pid), started < testsStarted else { continue }
-            kill(pid, SIGKILL)
-        }
-    }
-
-    private static func startTime(of pid: pid_t) -> Date? {
-        var info = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
-        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
-        let start = info.kp_proc.p_starttime
-        return Date(timeIntervalSince1970: TimeInterval(start.tv_sec) + TimeInterval(start.tv_usec) / 1_000_000)
     }
 }

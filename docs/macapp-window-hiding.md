@@ -37,34 +37,95 @@ Other notes from the spike:
 
 ## The approach
 
-1. **The off-screen display.** `OffscreenDisplay.acquire()` makes one virtual display per process
-   (shared, reference-counted): 1920 x 1200 pt at 2x (3840 x 2400 px), named "OpenTraffic", vendor
-   id `0x4F54`. macOS first attaches a new display to the right of the main one; it is moved
-   diagonally off a corner of a physical screen so it touches the user's screens at one point only
-   (here `1710,1112`, the main display's bottom-right corner), and moved again if the user's
-   arrangement changes (`CGDisplayRegisterReconfigurationCallback`). Coming online takes 1.1 to
-   2.2 s; `ready()` waits for it.
+1. **The off-screen display.** `OffscreenDisplay.shared()` makes one virtual display per process,
+   on first use, and keeps it until the process exits: 1920 x 1200 pt at 2x (3840 x 2400 px), named
+   "OpenTraffic", vendor id `0x4F54`. macOS first attaches a new display to the right of the main
+   one; it is moved diagonally off a corner of a physical screen so it touches the user's screens at
+   one point only (here `1710,1112`, the main display's bottom-right corner), clear of other
+   processes' OpenTraffic displays, and moved again if the arrangement changes. Coming online takes
+   1.1 to 2.2 s; `ready()` waits for it (and throws after 10 s). See "Lifetime" and "Deadlines"
+   below.
 2. **Launch.** `MacAppWindowHider.launch(bundle:environment:arguments:)` opens a fresh instance
    with `activates = false`, `hides = true`, `createsNewApplicationInstance = true`,
    `addsToRecentItems = false`, waits for its first accessibility window (up to 10 s), moves every
    window onto the off-screen display (cascaded 24 pt, clear of that display's menu bar), then
-   unhides it. Hidden windows are ordered out, so moving them can't flash anything; once unhidden
-   they are ordered in on the off-screen display, where SCK captures them. About 0.9 to 1.4 s
-   after the display is ready for the test app, 2.9 to 3.1 s for Calculator (its own start-up).
+   unhides it and waits (up to 2 s) until its windows are in the window server's on-screen list.
+   Hidden windows are ordered out, so moving them can't flash anything; once unhidden they are
+   ordered in on the off-screen display, where SCK captures them. About 0.9 to 1.4 s after the
+   display is ready for the test app, 2.9 to 3.1 s for Calculator (its own start-up). If the windows
+   can't be moved (a window-server deadline passed), the app is quit while still hidden and the
+   error is thrown.
 3. **Later windows.** `keepOffScreen(pid:)` installs an `AXObserver` for window created, focused
    window changed and main window changed (on the app) and moved (on each window), plus a
-   watchdog: every 16 ms it lists on-screen window ids, describes only new ones (and ones still
-   waiting to be moved), and sweeps the app when one of its windows touches a physical screen.
+   watchdog: every 16 ms, on its own queue, it lists on-screen window ids, describes only new ones
+   (and ones still waiting to be moved), and sweeps the app when one of its windows touches a
+   physical screen. Sweeps run one per app at a time; the moves themselves run off the main thread.
    Sheets stay attached to their parent and move with it.
 4. **Reading them.** `windows(pid:)` returns `HiddenWindow`s: the `CGWindowID` (for
    `SCShareableContent` / `SCContentFilter(desktopIndependentWindow:)`), the `AXUIElement` and the
    frame (global, top-left origin).
-5. **Stopping.** `release(pid:)` quits the app (forcibly after 2 s), stops watching it, and drops
-   the display when no app is left. The app must go first: when a display goes away, macOS moves
-   its windows onto a screen the user sees.
+5. **Stopping.** `release(pid:)` quits the app (forcibly after 2 s) and stops watching it. The
+   display stays for the next share. The app must go before the process does: when a display goes
+   away, macOS moves its windows onto a screen the user sees.
 
 The Dock shows the shared app's icon while it runs; the app never becomes active, so the menu bar
 never switches to it.
+
+## Lifetime: one display per process, kept
+
+The display is made the first time a process shares an app and lives until the process exits;
+`release(pid:)` never removes it. Two reasons:
+
+- **A second display in one process never comes online.** After the first `OffscreenDisplay` was
+  released, the first virtual display stayed online and every later one made in the same process
+  never appeared in the display list, so `ready()` gave up and the second hidden launch put the
+  app's windows on the user's screen (found on 2026-10-19 while building the input tests). Reusing
+  the one display avoids that entirely; the second launch in a process is now covered by a test.
+- **Making and removing displays is the window server's most fragile path** (see "Deadlines").
+  Doing it once per process instead of once per share keeps it rare.
+
+`OffscreenDisplay.shutdown()` exists for tests and experiments only: it lets go of the display and
+refuses to make another one in that process (it would never come online). Nothing in the app or the
+test suites calls it; the display goes away with the process.
+
+The cost: once something was shared, System Settings > Displays and Mission Control show the
+"OpenTraffic" display until OpenTraffic quits.
+
+## Deadlines: the window server must never take the Mac down
+
+On 19 October 2026 around 16:09 the Mac's whole display system hung for hours:
+`CGGetActiveDisplayList`, `screencapture` and `system_profiler` blocked in every process until the
+user logged out. Three agents were running the full `swift test` at the same time; each run made
+and removed its own virtual display under heavy load, and a test's main thread sat in a
+display-configuration call that never returned. Each process also re-placed its display from
+inside its display-reconfiguration callback, on the main thread, so every display the other runs
+added or removed set off another configuration in each of them. What exactly wedged the window
+server is not known; the code now avoids every ingredient:
+
+- Every display-configuration and display-list call (making the display, waiting for it to come
+  online, `CGGetActiveDisplayList`, `CGConfigureDisplayOrigin`) and every window move runs on a
+  serial background queue (`WindowServerCalls`), never on the main thread, with a deadline: 10 s to
+  make the display (`OffscreenDisplay.createTimeout`), 2 s per call (`callTimeout`). A call past its
+  deadline throws `OffscreenDisplay.Failure.timedOut`; while it is still stuck, later calls fail at
+  once with `.windowServerNotResponding` instead of queueing behind it, and work again when it
+  returns. A stuck window server costs one share, not the app (and not the Mac).
+- Accessibility calls to the shared app time out after 2 s (`AXUIElementSetMessagingTimeout`, AX's
+  own default is 6 s).
+- Nothing is reconfigured from inside the display-reconfiguration callback: it schedules a check
+  100 ms later (a burst of changes is handled once) that runs on the background queue.
+- The display's bounds and the physical screens' frames are cached (refreshed when the display is
+  made, checked, moved, and after every display change), so `isVisible` and the watchdog's checks
+  ask the window server nothing beyond the window list.
+- The display lives as long as the process, so it is made once, not once per share or test.
+- Tests take a cross-process turn (below) that a test process keeps until it exits, so parallel
+  `swift test` runs never have two virtual displays at once.
+- Two processes that each keep a virtual display and capture with ScreenCaptureKit make replayd
+  stall (see "Taking turns"). The app keeps one display, but a `swift test` run on the same Mac while
+  OpenTraffic shares an app adds a second one.
+
+The private class may still hold window-server state that only a logout clears; this prevents, it
+can't repair. If the display list hangs (a one-line `CGGetActiveDisplayList` probe takes more than
+a second), stop running display tests and log out and back in.
 
 ## Limits
 
@@ -87,8 +148,8 @@ never switches to it.
   Mission Control and display-arranging tools show an "OpenTraffic" display; it has its own menu
   bar (and Dock, if the Dock is set to follow the pointer). The pointer could only reach it through
   the single corner point.
-- **If OpenTraffic quits or crashes** without releasing, the display disappears with the process
-  and macOS moves the shared app's windows onto the user's screens.
+- **If OpenTraffic quits or crashes** while an app is shared, the display disappears with the
+  process and macOS moves the shared app's windows onto the user's screens.
 - **Accessibility is required** (`MacAppWindowHider.isPermitted`); capture needs Screen Recording.
   Without them `launch` throws `.notTrusted` and the tests skip.
 - The watchdog costs one 0.5 ms window-id list every 16 ms while an app is shared
@@ -97,10 +158,38 @@ never switches to it.
 ## Tests
 
 `Tests/OpenTrafficCoreTests/MacAppWindowHidingTests.swift`: the corner placement for several
-display layouts, and, with Accessibility and Screen Recording (skipped otherwise, as on GitHub
-Actions), an end-to-end run that shares `Examples/macapp-orbit/dist/Orbit.app` when it is built and
-Calculator otherwise. It checks that no window was ever on a physical screen while launching (a
-4 ms CGWindowList sampler), that every window is on the off-screen display, that
-`SCShareableContent` lists them on screen and a capture has real pixels, that a window opened
-later (the About panel) ends up off screen and any visibility lasts under 250 ms, that the app is
-never active, frontmost or the menu bar owner, and that releasing quits it and removes the display.
+display layouts (and clear of another process's display), the deadlines (a stuck call throws in
+time, later calls fail at once until it returns), the cross-process lock, and, with Accessibility
+and Screen Recording (skipped otherwise, as on GitHub Actions), two end-to-end runs on the Orbit
+fixture (`Examples/macapp-orbit`, built by the tests when missing):
+
+- one checks that no window was ever on a physical screen while launching (a 4 ms CGWindowList
+  sampler), that every window is on the off-screen display, that `SCShareableContent` lists them
+  on screen and a capture has real pixels, that a window opened later (the About panel) ends up
+  off screen and any visibility lasts under 250 ms, that the app is never active, frontmost or the
+  menu bar owner, and that releasing quits it and keeps the display;
+- the other launches Orbit twice in one process with the sampler running and checks that neither
+  launch was ever visible on a physical screen and that both used the same display.
+
+Every test that launches the fixture goes through `OrbitFixture.launch()` /
+`withOrbitFixture` in `MacAppFixtureSupport.swift`, so it is launched by `MacAppWindowHider`: never
+activated, its window on the off-screen display. That matters for the accessibility tests: a
+window merely parked far off screen keeps most of it off every display, and AppKit relayouts the
+off-screen rows of a list endlessly while accessibility reads them.
+
+**Taking turns.** Every test that launches the fixture, makes the display or captures windows
+holds a `MacAppFixtureTurn` for the whole test (`withOrbitFixture` does it; the capture suite uses
+the `.macAppFixtureTurn` trait). Within a process the turn passes from test to test in order (Swift
+Testing runs suites in parallel). Across processes it is a directory made with `mkdir`,
+`$TMPDIR/opentraffic-macapp-fixture.lock`, with the holder's pid in `owner`, and a test process
+keeps it from its first Mac app test until it exits: every test process keeps its virtual display
+(and its ScreenCaptureKit connection) for life, and two of those at once are what the lock has to
+prevent. With two full `swift test` runs alternating test by test (the first design), replayd sat
+at 80 to 95% CPU for 10 to 40 s around every capture, every capture test timed out, and the display
+list took up to 3.9 s while both displays came online (20 October 2026). So a parallel run's Mac app
+tests wait until the first run has exited (its other tests run meanwhile). The holder touches the
+lock every 30 s; a lock whose holder has exited, or untouched for 5 minutes (a frozen process), is
+broken, and a normal exit removes it. The tests that hold the turn have 10-minute time limits to
+allow for the waiting; ScreenCaptureKit calls in them have 10 s deadlines (a request can be lost
+for good when replayd drops its connection, and Swift Testing's time limit can't end an await that
+ignores cancellation).

@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import os
 
 // Keeping a shared Mac app's windows away from the user while ScreenCaptureKit can still capture
 // them. Hidden, minimized and fully off-screen windows are ordered out, and ordered-out windows
@@ -23,71 +24,191 @@ public struct HiddenWindow: @unchecked Sendable, Equatable {
     }
 }
 
-/// The virtual display windows are kept on. One per process, shared by every hider that holds it;
-/// it disappears when the last one lets go (and with the process). The Dock and the menu bar may
-/// show up on it, but no physical screen does.
+/// Runs window-server work (display configuration, display lists, window moves) on a serial
+/// background queue with a deadline, so a stuck window server fails one call with an error instead
+/// of hanging the caller's thread. A call that missed its deadline may still be stuck in the window
+/// server; until it returns, every later call fails at once (`windowServerNotResponding`) instead of
+/// queueing behind it.
+final class WindowServerCalls: Sendable {
+    private enum CallState { case pending, finished, timedOut }
+
+    private let queue: DispatchQueue
+    /// The calls that missed their deadline and haven't returned yet.
+    private let stuck = OSAllocatedUnfairLock(initialState: [UInt64: String]())
+    private let nextToken = OSAllocatedUnfairLock(initialState: UInt64(0))
+
+    init(label: String) {
+        queue = DispatchQueue(label: label, qos: .userInitiated)
+    }
+
+    /// What is stuck right now, if anything.
+    var stuckCall: String? { stuck.withLock { $0.values.first } }
+
+    func run<T: Sendable>(_ what: String, timeout: Duration, _ work: @escaping @Sendable () throws -> T) async throws -> T {
+        if let stuckCall { throw OffscreenDisplay.Failure.windowServerNotResponding(stuckCall) }
+        let token = nextToken.withLock { $0 += 1; return $0 }
+        let state = OSAllocatedUnfairLock(initialState: CallState.pending)
+        let stuck = self.stuck
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
+            queue.async {
+                let result = Result { try work() }
+                state.withLock { state in
+                    switch state {
+                    case .pending:
+                        state = .finished
+                        continuation.resume(with: result)
+                    case .timedOut:
+                        // It came back after all: the window server answers again.
+                        state = .finished
+                        stuck.withLock { _ = $0.removeValue(forKey: token) }
+                    case .finished:
+                        break
+                    }
+                }
+            }
+            let seconds = Double(timeout.components.seconds) + Double(timeout.components.attoseconds) / 1e18
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + seconds) {
+                state.withLock { state in
+                    guard state == .pending else { return }
+                    state = .timedOut
+                    stuck.withLock { $0[token] = what }
+                    continuation.resume(throwing: OffscreenDisplay.Failure.timedOut(what))
+                }
+            }
+        }
+    }
+}
+
+/// The virtual display windows are kept on: one per process, made on first use and kept until the
+/// process exits (macOS removes it then). It is never torn down between sessions: a virtual display
+/// made after an earlier one went away in the same process never comes online, and creating and
+/// removing displays is the window server's most fragile path. The Dock and the menu bar may show
+/// up on it, but no physical screen does.
+///
+/// Every display-configuration and display-list call runs off the main thread with a deadline
+/// (`createTimeout` to make it, `callTimeout` per call) and throws instead of hanging.
 @MainActor
 public final class OffscreenDisplay {
     public enum Failure: Error, Equatable {
         /// CoreGraphics' CGVirtualDisplay classes are missing or refused the display.
         case unavailable(String)
+        /// A window-server call didn't return within its deadline (it may still be stuck).
+        case timedOut(String)
+        /// An earlier call that timed out is still stuck in the window server.
+        case windowServerNotResponding(String)
     }
 
     /// Size in points; the backing store is twice that, like a Retina screen.
-    public static let pointSize = CGSize(width: 1920, height: 1200)
+    nonisolated public static let pointSize = CGSize(width: 1920, height: 1200)
     /// The vendor id the display reports ("OT").
-    public static let vendorID: UInt32 = 0x4F54
+    nonisolated public static let vendorID: UInt32 = 0x4F54
+    /// How long making the display and waiting for it to come online may take (1.1 to 2.2 s usually).
+    nonisolated public static let createTimeout: Duration = .seconds(10)
+    /// How long any other single window-server call may take.
+    nonisolated public static let callTimeout: Duration = .seconds(2)
 
-    private static var shared: OffscreenDisplay?
-    private static var holders = 0
-    /// Ids of the virtual displays alive in this process.
-    public private(set) static var liveDisplayIDs: Set<CGDirectDisplayID> = []
+    nonisolated static let calls = WindowServerCalls(label: "se.medda.opentraffic.offscreen-display")
+
+    /// What this process knows about the displays, readable from any thread: refreshed whenever the
+    /// display is made, checked or moved and after every display change.
+    private struct Known {
+        var live: Set<CGDirectDisplayID> = []
+        var physical: [CGRect] = []
+    }
+    nonisolated private static let known = OSAllocatedUnfairLock(initialState: Known())
+
+    private static var current: OffscreenDisplay?
+    private static var creating: Task<OffscreenDisplay, Error>?
+    private static var isShutDown = false
+
+    /// Ids of the virtual displays alive in this process (at most one).
+    nonisolated public static var liveDisplayIDs: Set<CGDirectDisplayID> { known.withLock { $0.live } }
 
     public let displayID: CGDirectDisplayID
-    /// Retained: the display lives as long as this object.
-    private let display: NSObject
+    /// Retained: the display lives as long as this reference (released only by `shutdown`).
+    private var object: DisplayObject?
     private var reconfigurationBox: Unmanaged<OffscreenDisplay>?
     private var placing = false
+    private var replaceScheduled = false
 
-    /// The display's frame in global coordinates (top-left origin).
-    public var bounds: CGRect { CGDisplayBounds(displayID) }
+    /// The display's frame in global coordinates (top-left origin), as of the last check.
+    public private(set) var bounds: CGRect = .zero
 
-    /// The shared display, created on first use. Balance with `release()`.
-    public static func acquire() throws -> OffscreenDisplay {
-        if let shared {
-            holders += 1
-            return shared
-        }
-        let display = try OffscreenDisplay()
-        shared = display
-        holders = 1
+    /// The process's display, made on first use (it may take up to `createTimeout`). Call `ready()`
+    /// before putting windows on it.
+    public static func shared() async throws -> OffscreenDisplay {
+        if let current { return current }
+        if isShutDown { throw Failure.unavailable("the virtual display was shut down in this process") }
+        if let creating { return try await creating.value }
+        let task = Task { @MainActor in try await OffscreenDisplay.make() }
+        creating = task
+        defer { creating = nil }
+        let display = try await task.value
+        current = display
         return display
     }
 
-    public static func release() {
-        guard holders > 0 else { return }
-        holders -= 1
-        if holders == 0, let display = shared {
-            shared = nil
-            display.invalidate()
+    /// For tests only: lets go of the display (macOS removes it) and refuses to make another one in
+    /// this process, since a second display in one process never comes online. Move every window
+    /// off it first: when a display goes away, macOS moves its windows to a screen the user sees.
+    public static func shutdown() async {
+        isShutDown = true
+        guard let display = current else { return }
+        current = nil
+        if let box = display.reconfigurationBox {
+            CGDisplayRemoveReconfigurationCallback(displayReconfigured, box.toOpaque())
+            box.release()
+            display.reconfigurationBox = nil
+        }
+        known.withLock { _ = $0.live.remove(display.displayID) }
+        // The last reference goes on the window-server queue: removing a display is a display
+        // configuration like any other.
+        let object = display.object
+        display.object = nil
+        _ = try? await calls.run("removing the virtual display", timeout: callTimeout) { withExtendedLifetime(object) {} }
+    }
+
+    private static func make() async throws -> OffscreenDisplay {
+        let made = try await calls.run("creating the virtual display", timeout: createTimeout) { try createVirtualDisplay() }
+        let display = OffscreenDisplay(made)
+        try await display.refresh()
+        return display
+    }
+
+    private init(_ made: DisplayObject) {
+        object = made
+        displayID = made.id
+        Self.known.withLock { _ = $0.live.insert(made.id) }
+        let box = Unmanaged.passRetained(self)
+        reconfigurationBox = box
+        CGDisplayRegisterReconfigurationCallback(displayReconfigured, box.toOpaque())
+    }
+
+    /// The CGVirtualDisplay, made through its private Objective-C interface.
+    final class DisplayObject: @unchecked Sendable {
+        let object: NSObject
+        let id: CGDirectDisplayID
+        init(object: NSObject, id: CGDirectDisplayID) {
+            self.object = object
+            self.id = id
         }
     }
 
-    private init() throws {
+    nonisolated private static func createVirtualDisplay() throws -> DisplayObject {
         guard let descriptorClass = NSClassFromString("CGVirtualDisplayDescriptor") as? NSObject.Type,
               let displayClass = NSClassFromString("CGVirtualDisplay") as? NSObject.Type,
               let modeClass = NSClassFromString("CGVirtualDisplayMode") as? NSObject.Type,
               let settingsClass = NSClassFromString("CGVirtualDisplaySettings") as? NSObject.Type
         else { throw Failure.unavailable("CGVirtualDisplay is not available on this macOS") }
 
-        let size = Self.pointSize
+        let size = pointSize
         let descriptor = descriptorClass.init()
         descriptor.setValue("OpenTraffic", forKey: "name")
         descriptor.setValue(UInt32(size.width * 2), forKey: "maxPixelsWide")
         descriptor.setValue(UInt32(size.height * 2), forKey: "maxPixelsHigh")
         // About 27 inches, so AppKit picks ordinary text sizes.
         descriptor.setValue(NSValue(size: NSSize(width: 597, height: 373)), forKey: "sizeInMillimeters")
-        descriptor.setValue(Self.vendorID, forKey: "vendorID")
+        descriptor.setValue(vendorID, forKey: "vendorID")
         descriptor.setValue(UInt32(0x0001), forKey: "productID")
         descriptor.setValue(UInt32(getpid()), forKey: "serialNum")
         descriptor.setValue(DispatchQueue.main, forKey: "queue")
@@ -116,42 +237,79 @@ public final class OffscreenDisplay {
               unsafeBitCast(display.method(for: apply), to: ApplySettings.self)(display, apply, settings),
               let id = (display.value(forKey: "displayID") as? NSNumber)?.uint32Value, id != 0
         else { throw Failure.unavailable("the display settings were refused") }
-
-        self.display = display
-        self.displayID = id
-        Self.liveDisplayIDs.insert(id)
-        place()
-        let box = Unmanaged.passRetained(self)
-        reconfigurationBox = box
-        CGDisplayRegisterReconfigurationCallback(displayReconfigured, box.toOpaque())
+        return DisplayObject(object: display, id: id)
     }
 
-    private func invalidate() {
-        if let box = reconfigurationBox {
-            CGDisplayRemoveReconfigurationCallback(displayReconfigured, box.toOpaque())
-            box.release()
-            reconfigurationBox = nil
-        }
-        Self.liveDisplayIDs.remove(displayID)
-        // The CGVirtualDisplay goes away with this object.
-    }
-
-    /// The frames of the screens people look at: every active display but the virtual ones.
-    public static func physicalScreenFrames() -> [CGRect] {
-        activeDisplays().filter { !liveDisplayIDs.contains($0) && CGDisplayVendorNumber($0) != vendorID }.map(CGDisplayBounds)
+    /// The frames of the screens people look at (every active display but virtual ones), as of the
+    /// last time this process checked: when its display was made, checked by `ready()` or moved, and
+    /// after every display change. Empty before the display exists.
+    nonisolated public static func physicalScreenFrames() -> [CGRect] {
+        known.withLock { $0.physical }
     }
 
     /// Whether any part of `frame` (global, top-left origin) is on a screen people look at.
-    public static func isVisible(_ frame: CGRect) -> Bool {
-        !frame.isEmpty && physicalScreenFrames().contains { $0.intersects(frame) }
+    nonisolated public static func isVisible(_ frame: CGRect) -> Bool {
+        isVisible(frame, on: physicalScreenFrames())
     }
 
-    static func activeDisplays() -> [CGDirectDisplayID] {
+    nonisolated static func isVisible(_ frame: CGRect, on screens: [CGRect]) -> Bool {
+        !frame.isEmpty && screens.contains { $0.intersects(frame) }
+    }
+
+    nonisolated static func activeDisplays() -> [CGDirectDisplayID] {
         var count: UInt32 = 0
         guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
         guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
         return Array(ids.prefix(Int(count)))
+    }
+
+    /// Where the display and the screens around it are. Window-server calls: on `calls` only.
+    struct Layout: Sendable {
+        var online: Bool
+        var bounds: CGRect
+        /// Screens people look at.
+        var physical: [CGRect]
+        /// Other OpenTraffic virtual displays (other processes').
+        var others: [CGRect]
+
+        /// Whether the display is clear of every screen and of other processes' displays.
+        var isParked: Bool {
+            !physical.contains { OffscreenDisplay.sharesEdge($0, bounds) || $0.intersects(bounds) }
+                && !others.contains { $0.intersects(bounds) }
+        }
+    }
+
+    nonisolated private static func layout(of id: CGDirectDisplayID) -> Layout {
+        let active = activeDisplays()
+        let live = known.withLock { $0.live }
+        var physical: [CGRect] = []
+        var others: [CGRect] = []
+        for display in active where display != id && !live.contains(display) {
+            if CGDisplayVendorNumber(display) == vendorID {
+                others.append(CGDisplayBounds(display))
+            } else {
+                physical.append(CGDisplayBounds(display))
+            }
+        }
+        return Layout(online: active.contains(id), bounds: CGDisplayBounds(id), physical: physical, others: others)
+    }
+
+    /// Moves the display to the first free corner while it touches a physical screen or overlaps
+    /// another OpenTraffic display (macOS first puts a new display to the right of the main one,
+    /// and rearranges when screens change). Window-server calls: on `calls` only.
+    nonisolated private static func arrange(_ id: CGDirectDisplayID) -> Layout {
+        var layout = layout(of: id)
+        guard layout.online, !layout.bounds.isEmpty, !layout.isParked else { return layout }
+        let origins = cornerOrigins(for: layout.bounds.size, around: layout.physical, avoiding: layout.others)
+        for origin in origins where !layout.isParked {
+            var config: CGDisplayConfigRef?
+            guard CGBeginDisplayConfiguration(&config) == .success else { break }
+            CGConfigureDisplayOrigin(config, id, Int32(origin.x), Int32(origin.y))
+            guard CGCompleteDisplayConfiguration(config, .forSession) == .success else { break }
+            layout = Self.layout(of: id)
+        }
+        return layout
     }
 
     /// Whether `a` shares more than a corner point with `b` (the pointer could cross between them).
@@ -161,48 +319,70 @@ public final class OffscreenDisplay {
     }
 
     /// Where the display may go: diagonally off a corner of a physical screen, touching nothing
-    /// but that corner, so the pointer practically never wanders onto it.
-    nonisolated static func cornerOrigins(for size: CGSize, around screens: [CGRect]) -> [CGPoint] {
+    /// but that corner, so the pointer practically never wanders onto it, and not on top of
+    /// another OpenTraffic display.
+    nonisolated static func cornerOrigins(for size: CGSize, around screens: [CGRect], avoiding others: [CGRect] = []) -> [CGPoint] {
         screens.flatMap { s in [
             CGPoint(x: s.maxX, y: s.maxY), CGPoint(x: s.minX - size.width, y: s.maxY),
             CGPoint(x: s.maxX, y: s.minY - size.height), CGPoint(x: s.minX - size.width, y: s.minY - size.height),
         ] }.filter { origin in
             let frame = CGRect(origin: origin, size: size)
-            return !screens.contains { $0.intersects(frame) || sharesEdge($0, frame) }
+            return !screens.contains { $0.intersects(frame) || sharesEdge($0, frame) } && !others.contains { $0.intersects(frame) }
         }
     }
 
-    /// Waits until macOS has the display online and parked at a corner (a moment after it's made).
-    public func ready(timeout: Duration = .seconds(5)) async {
+    private func remember(_ layout: Layout) {
+        if layout.online { bounds = layout.bounds }
+        Self.known.withLock { $0.physical = layout.physical }
+    }
+
+    /// Reads where the display and the screens are now.
+    private func refresh() async throws {
+        let id = displayID
+        remember(try await Self.calls.run("listing the displays", timeout: Self.callTimeout) { Self.layout(of: id) })
+    }
+
+    /// Waits until macOS has the display online and parked at a corner (a moment after it's made;
+    /// at once later). Throws when that takes longer than `timeout`.
+    public func ready(timeout: Duration = OffscreenDisplay.createTimeout) async throws {
         let deadline = ContinuousClock.now + timeout
-        while ContinuousClock.now < deadline {
-            if Self.activeDisplays().contains(displayID), !bounds.isEmpty {
-                place()
-                if !Self.physicalScreenFrames().contains(where: { Self.sharesEdge($0, bounds) || $0.intersects(bounds) }) { return }
+        let id = displayID
+        while true {
+            let layout = try await Self.calls.run("waiting for the virtual display", timeout: Self.callTimeout) { Self.layout(of: id) }
+            remember(layout)
+            if layout.online, !layout.bounds.isEmpty {
+                if layout.isParked { return }
+                // Moved (or not, when no corner is free); the next look says whether it worked.
+                try await place()
             }
-            try? await Task.sleep(for: .milliseconds(50))
+            guard ContinuousClock.now < deadline else {
+                throw Failure.timedOut(layout.online ? "parking the virtual display at a corner" : "the virtual display coming online")
+            }
+            try await Task.sleep(for: .milliseconds(50))
         }
     }
 
-    /// Moves the display to a free corner when it shares an edge with a physical screen (macOS
-    /// first puts a new display to the right of the main one, and rearranges when screens change).
-    func place() {
+    /// Moves the display to a free corner if it needs to (off the main thread, with a deadline).
+    func place() async throws {
         guard !placing else { return }
         placing = true
         defer { placing = false }
-        guard !bounds.isEmpty else { return }
-        for origin in Self.cornerOrigins(for: bounds.size, around: Self.physicalScreenFrames()) {
-            if !Self.physicalScreenFrames().contains(where: { Self.sharesEdge($0, bounds) || $0.intersects(bounds) }) { return }
-            var config: CGDisplayConfigRef?
-            guard CGBeginDisplayConfiguration(&config) == .success else { return }
-            CGConfigureDisplayOrigin(config, displayID, Int32(origin.x), Int32(origin.y))
-            guard CGCompleteDisplayConfiguration(config, .forSession) == .success else { return }
-        }
+        let id = displayID
+        remember(try await Self.calls.run("arranging the displays", timeout: Self.callTimeout) { Self.arrange(id) })
     }
 
+    /// A display was added, removed or moved (by the user, another process, or this one). Nothing
+    /// is reconfigured from inside the callback: a moment later the display is checked, and moved
+    /// if it needs to be, on the window-server queue. Changes that come in a burst are handled once.
     fileprivate func reconfigured(_ flags: CGDisplayChangeSummaryFlags) {
-        guard !flags.contains(.beginConfigurationFlag), !placing else { return }
-        place()
+        guard !flags.contains(.beginConfigurationFlag), !replaceScheduled, object != nil else { return }
+        replaceScheduled = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(100))
+            replaceScheduled = false
+            guard object != nil else { return }
+            if placing { try? await refresh() } else { try? await place() }
+        }
     }
 }
 
@@ -248,6 +428,10 @@ private func describeWindows(_ ids: [CGWindowID]) -> [(id: CGWindowID, pid: pid_
 /// window they open (including later ones: panels, alerts; sheets follow their parent) on the
 /// off-screen display, where ScreenCaptureKit can still capture them. The Dock may show the app's
 /// icon; it never becomes the active app, so the menu bar never switches to it.
+///
+/// Window moves run off the main thread with a deadline (`OffscreenDisplay.callTimeout`), and the
+/// watchdog runs on its own queue: a window server that stops answering fails the share that needs
+/// it (with `OffscreenDisplay.Failure`) and never blocks the main thread.
 @MainActor
 public final class MacAppWindowHider {
     public enum Failure: Error, Equatable {
@@ -258,6 +442,10 @@ public final class MacAppWindowHider {
 
     /// Accessibility is what moves the windows; without it nothing can be hidden.
     public static var isPermitted: Bool { AXIsProcessTrusted() }
+
+    /// How long an accessibility call to the shared app may take before it fails (AX's own default
+    /// is 6 s).
+    nonisolated static let messagingTimeout: Float = 2
 
     private final class Watch {
         let pid: pid_t
@@ -271,6 +459,9 @@ public final class MacAppWindowHider {
         }
     }
 
+    /// Accessibility elements handed to and from the window-move queue.
+    private struct Elements: @unchecked Sendable { var elements: [AXUIElement] }
+
     /// kAXWindowCreated can come a few hundred milliseconds after the window shows; focus and
     /// main-window changes come within a frame for ordinary windows.
     private static let appNotifications = [kAXWindowCreatedNotification, kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification]
@@ -282,24 +473,29 @@ public final class MacAppWindowHider {
     }
 
     private var display: OffscreenDisplay?
-    private var watchdog: Timer?
-    private var knownWindowIDs: Set<CGWindowID> = []
-    private var suspectWindowIDs: Set<CGWindowID> = []
+    private var watchdog: DispatchSourceTimer?
     private var watches: [pid_t: Watch] = [:]
+    /// The watched pids, for the watchdog's queue.
+    private let watched = OSAllocatedUnfairLock(initialState: Set<pid_t>())
     private var box: Unmanaged<MacAppWindowHider>?
+    private let moves = WindowServerCalls(label: "se.medda.opentraffic.window-moves")
+    private var sweeps: [pid_t: Task<Void, Error>] = [:]
+    private var sweepAgain: Set<pid_t> = []
 
     public init() {}
 
-    /// The display the windows are kept on (created by the first launch or `keepOffScreen`).
+    /// The display the windows are kept on (once the first launch or `keepOffScreen` made it ready).
     public var offscreenBounds: CGRect? { display?.bounds }
 
     /// Launches a fresh instance of the app hidden and without activating it, waits up to
     /// `windowTimeout` for its first window, moves its windows to the off-screen display, then
-    /// unhides it so its windows are ordered in (capturable) where nobody sees them.
+    /// unhides it so its windows are ordered in (capturable) where nobody sees them. When the
+    /// windows can't be moved (the window server doesn't answer), the app is quit while still
+    /// hidden and the error is thrown.
     public func launch(bundle: URL, environment: [String: String] = [:], arguments: [String] = [],
                        windowTimeout: Duration = .seconds(10)) async throws -> NSRunningApplication {
         guard Self.isPermitted else { throw Failure.notTrusted }
-        try await offscreenDisplay().ready()
+        try await offscreenDisplay()
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = false
         configuration.hides = true
@@ -308,54 +504,82 @@ public final class MacAppWindowHider {
         configuration.environment = environment
         configuration.arguments = arguments
         let app = try await NSWorkspace.shared.openApplication(at: bundle, configuration: configuration)
-        // Hidden, its windows are ordered out: moving them now can't flash anything.
-        let element = AXUIElementCreateApplication(app.processIdentifier)
-        let deadline = ContinuousClock.now + windowTimeout
-        while Self.axWindows(of: element).isEmpty, ContinuousClock.now < deadline, !app.isTerminated {
-            try await Task.sleep(for: .milliseconds(25))
+        do {
+            // Hidden, its windows are ordered out: moving them now can't flash anything.
+            let element = AXUIElementCreateApplication(app.processIdentifier)
+            AXUIElementSetMessagingTimeout(element, Self.messagingTimeout)
+            let deadline = ContinuousClock.now + windowTimeout
+            while Self.axWindows(of: element).isEmpty, ContinuousClock.now < deadline, !app.isTerminated {
+                try await Task.sleep(for: .milliseconds(25))
+            }
+            try await keepOffScreen(pid: app.processIdentifier)
+            app.unhide()
+            // Unhiding takes effect a moment later: wait until the windows are ordered in, so they
+            // can be captured as soon as this returns.
+            try await waitUntilOrderedIn(app.processIdentifier, timeout: .seconds(2))
+            // The windows are on a screen, so AppKit has no reason to move them as it orders them in;
+            // one more look in case it did (the moved notification and the watchdog catch later ones).
+            try await sweep(app.processIdentifier)
+        } catch {
+            unwatch(app.processIdentifier)
+            app.forceTerminate()
+            throw error
         }
-        try keepOffScreen(pid: app.processIdentifier)
-        app.unhide()
-        // The windows are on a screen, so AppKit has no reason to move them as it orders them in;
-        // one more look in case it did (the moved notification and the watchdog catch later ones).
-        try await Task.sleep(for: .milliseconds(25))
-        sweep(app.processIdentifier)
         return app
+    }
+
+    /// Waits (up to `timeout`) until every window accessibility reports for the app is in the
+    /// window server's on-screen list. A window on another Space never is; then it just returns.
+    private func waitUntilOrderedIn(_ pid: pid_t, timeout: Duration) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            let ids = windows(pid: pid).map(\.id)
+            if !ids.isEmpty {
+                let onScreen = try await moves.run("listing windows", timeout: OffscreenDisplay.callTimeout) { Set(onScreenWindowIDs()) }
+                if ids.allSatisfy(onScreen.contains) { return }
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     /// Moves the app's windows to the off-screen display and keeps them there: windows it opens
     /// later and windows it moves back are moved again as soon as accessibility reports them.
-    public func keepOffScreen(pid: pid_t) throws {
+    public func keepOffScreen(pid: pid_t) async throws {
         guard Self.isPermitted else { throw Failure.notTrusted }
-        let display = try offscreenDisplay()
+        try await offscreenDisplay()
         if watches[pid] == nil {
             var observer: AXObserver?
             let made = AXObserverCreate(pid, axNotified, &observer)
             guard made == .success, let observer else { throw Failure.observerFailed(pid, made.rawValue) }
             let app = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
             let watch = Watch(pid: pid, app: app, observer: observer)
             watches[pid] = watch
+            watched.withLock { _ = $0.insert(pid) }
             for notification in Self.appNotifications {
                 AXObserverAddNotification(observer, app, notification as CFString, refcon())
             }
             CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
             if watchdog == nil { startWatchdog() }
         }
-        _ = display
-        sweep(pid)
+        try await sweep(pid)
     }
 
     /// The app's windows as they are now.
     public func windows(pid: pid_t) -> [HiddenWindow] {
-        Self.axWindows(of: AXUIElementCreateApplication(pid)).compactMap { element in
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
+        return Self.axWindows(of: app).compactMap { element in
             var id: CGWindowID = 0
             guard axWindowID(element, &id) == .success, id != 0, let frame = Self.frame(of: element) else { return nil }
             return HiddenWindow(id: id, element: element, frame: frame, title: Self.string(element, kAXTitleAttribute))
         }
     }
 
-    /// Stops watching the app. Quit it first (or with `terminate: true`): when the display goes
-    /// away, macOS moves the windows on it to a screen the user sees.
+    /// Quits the app (with `terminate`, forcibly after 2 s) and stops watching it. The off-screen
+    /// display stays for the next share (it lives as long as the process). Quit the app first if
+    /// you pass `terminate: false`: if the process exits, macOS moves the display's windows to a
+    /// screen the user sees.
     public func release(pid: pid_t, terminate: Bool = true) async {
         if terminate, let app = NSRunningApplication(processIdentifier: pid) {
             app.terminate()
@@ -364,24 +588,20 @@ public final class MacAppWindowHider {
             for _ in 0..<40 where !app.isTerminated { try? await Task.sleep(for: .milliseconds(50)) }
         }
         unwatch(pid)
-        if watches.isEmpty, display != nil {
-            display = nil
-            OffscreenDisplay.release()
-        }
     }
 
     private func unwatch(_ pid: pid_t) {
         guard let watch = watches.removeValue(forKey: pid) else { return }
+        watched.withLock { _ = $0.remove(pid) }
+        sweepAgain.remove(pid)
         CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(watch.observer), .commonModes)
         for notification in Self.appNotifications {
             AXObserverRemoveNotification(watch.observer, watch.app, notification as CFString)
         }
         for window in watch.windows { AXObserverRemoveNotification(watch.observer, window, kAXMovedNotification as CFString) }
         if watches.isEmpty {
-            watchdog?.invalidate()
+            watchdog?.cancel()
             watchdog = nil
-            knownWindowIDs = []
-            suspectWindowIDs = []
             if let box {
                 box.release()
                 self.box = nil
@@ -389,40 +609,71 @@ public final class MacAppWindowHider {
         }
     }
 
-    private func startWatchdog() {
-        watchdog?.invalidate()
-        let seconds = Double(watchdogInterval.components.seconds) + Double(watchdogInterval.components.attoseconds) / 1e18
-        let timer = Timer(timeInterval: max(seconds, 0.005), repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.checkScreens() }
+    /// Window ids the watchdog has seen; touched only on its queue.
+    private final class WatchdogState: @unchecked Sendable {
+        var known: Set<CGWindowID> = []
+        var suspects: Set<CGWindowID> = []
+
+        /// Looks at windows that appeared since the last tick (and ones still waiting to be moved)
+        /// and returns the watched apps with a window on a physical screen.
+        func check(watched: Set<pid_t>) -> Set<pid_t> {
+            guard !watched.isEmpty else { return [] }
+            let current = onScreenWindowIDs()
+            let fresh = current.filter { !known.contains($0) }
+            known = Set(current)
+            let look = fresh + suspects.filter { known.contains($0) && !fresh.contains($0) }
+            guard !look.isEmpty else { return [] }
+            var stillSuspect: Set<CGWindowID> = []
+            var pids: Set<pid_t> = []
+            for window in describeWindows(look) where watched.contains(window.pid) {
+                if OffscreenDisplay.isVisible(window.bounds) {
+                    stillSuspect.insert(window.id)
+                    pids.insert(window.pid)
+                }
+            }
+            suspects = stillSuspect
+            return pids
         }
-        RunLoop.main.add(timer, forMode: .common)
-        watchdog = timer
     }
 
-    /// Looks at windows that appeared since the last tick (and ones still waiting to be moved):
-    /// any of a watched app's that touches a physical screen gets its app swept at once.
-    private func checkScreens() {
-        let current = onScreenWindowIDs()
-        let fresh = current.filter { !knownWindowIDs.contains($0) }
-        knownWindowIDs = Set(current)
-        let look = fresh + suspectWindowIDs.filter { knownWindowIDs.contains($0) && !fresh.contains($0) }
-        guard !look.isEmpty else { return }
-        var stillSuspect: Set<CGWindowID> = []
-        var sweepPIDs: Set<pid_t> = []
-        for window in describeWindows(look) where watches[window.pid] != nil {
-            if OffscreenDisplay.isVisible(window.bounds) {
-                stillSuspect.insert(window.id)
-                sweepPIDs.insert(window.pid)
+    /// A weak reference the watchdog's queue may hold.
+    private final class WeakHider: @unchecked Sendable {
+        weak var hider: MacAppWindowHider?
+        init(_ hider: MacAppWindowHider) { self.hider = hider }
+    }
+
+    /// The watchdog runs on its own queue: listing windows is a window-server call, and the main
+    /// thread must not wait on it. Only apps it finds on a physical screen come back to the main
+    /// thread, to be swept.
+    private func startWatchdog() {
+        watchdog?.cancel()
+        let seconds = Double(watchdogInterval.components.seconds) + Double(watchdogInterval.components.attoseconds) / 1e18
+        watchdog = Self.makeWatchdog(every: max(seconds, 0.005), watched: watched, owner: WeakHider(self))
+    }
+
+    /// Nonisolated, so the timer's handler isn't taken to be main-actor code (Swift checks that at
+    /// run time and traps when it runs on the watchdog's queue).
+    nonisolated private static func makeWatchdog(every seconds: Double, watched: OSAllocatedUnfairLock<Set<pid_t>>, owner: WeakHider) -> DispatchSourceTimer {
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "se.medda.opentraffic.window-watchdog", qos: .userInitiated))
+        timer.schedule(deadline: .now(), repeating: seconds, leeway: .milliseconds(2))
+        let state = WatchdogState()
+        timer.setEventHandler {
+            let pids = state.check(watched: watched.withLock { $0 })
+            guard !pids.isEmpty else { return }
+            Task { @MainActor in
+                for pid in pids { owner.hider?.sweepLater(pid) }
             }
         }
-        suspectWindowIDs = stillSuspect
-        for pid in sweepPIDs { sweep(pid) }
+        timer.resume()
+        return timer
     }
 
-    private func offscreenDisplay() throws -> OffscreenDisplay {
-        if let display { return display }
-        let made = try OffscreenDisplay.acquire()
+    @discardableResult
+    private func offscreenDisplay() async throws -> OffscreenDisplay {
+        let made: OffscreenDisplay
+        if let display { made = display } else { made = try await OffscreenDisplay.shared() }
         display = made
+        try await made.ready()
         return made
     }
 
@@ -435,21 +686,56 @@ public final class MacAppWindowHider {
     }
 
     fileprivate func notified(pid: pid_t) {
+        sweepLater(pid)
+    }
+
+    /// A sweep nobody waits for (an accessibility notification, the watchdog). If it fails, the
+    /// watchdog asks again while a window stays on a physical screen.
+    private func sweepLater(_ pid: pid_t) {
         guard watches[pid] != nil else { return }
-        sweep(pid)
+        Task { try? await sweep(pid) }
     }
 
     /// Puts every window of the app that a person could see onto the off-screen display, and
-    /// subscribes to its moves.
-    private func sweep(_ pid: pid_t) {
+    /// subscribes to its moves. One sweep per app at a time; asking during one runs another after it.
+    private func sweep(_ pid: pid_t) async throws {
+        if let running = sweeps[pid] {
+            sweepAgain.insert(pid)
+            // The running sweep looks again before it finishes, so waiting for it is enough.
+            try await running.value
+            return
+        }
+        let task = Task { @MainActor in
+            defer { sweeps[pid] = nil }
+            repeat {
+                sweepAgain.remove(pid)
+                try await sweepOnce(pid)
+            } while sweepAgain.contains(pid) && watches[pid] != nil
+        }
+        sweeps[pid] = task
+        try await task.value
+    }
+
+    private func sweepOnce(_ pid: pid_t) async throws {
         guard let watch = watches[pid], let bounds = display?.bounds, !bounds.isEmpty else { return }
-        let current = Self.axWindows(of: watch.app)
+        let app = Elements(elements: [watch.app])
+        let current = try await moves.run("moving windows to the off-screen display", timeout: OffscreenDisplay.callTimeout) {
+            Elements(elements: Self.moveWindows(of: app.elements[0], onto: bounds))
+        }.elements
+        guard watches[pid] === watch else { return }
         for window in current where !watch.windows.contains(where: { CFEqual($0, window) }) {
             AXObserverAddNotification(watch.observer, window, kAXMovedNotification as CFString, refcon())
         }
         watch.windows = current
+    }
+
+    /// Moves every window of `app` that isn't on the off-screen display (or shows on a physical
+    /// screen) onto it, and returns the app's windows. Off the main thread.
+    nonisolated private static func moveWindows(of app: AXUIElement, onto bounds: CGRect) -> [AXUIElement] {
+        let current = axWindows(of: app)
         for (index, window) in current.enumerated() {
-            guard let frame = Self.frame(of: window), !bounds.contains(frame.origin) || OffscreenDisplay.isVisible(frame) else { continue }
+            AXUIElementSetMessagingTimeout(window, messagingTimeout)
+            guard let frame = frame(of: window), !bounds.contains(frame.origin) || OffscreenDisplay.isVisible(frame) else { continue }
             // Cascade a little so windows don't sit exactly on top of each other; stay clear of
             // the display's menu bar so AppKit has no reason to move them.
             let step = CGFloat(index % 10) * 24
@@ -458,17 +744,18 @@ public final class MacAppWindowHider {
                 AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, value)
             }
         }
+        return current
     }
 
     // MARK: Accessibility helpers
 
-    static func axWindows(of app: AXUIElement) -> [AXUIElement] {
+    nonisolated static func axWindows(of app: AXUIElement) -> [AXUIElement] {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success else { return [] }
         return (value as? [AXUIElement]) ?? []
     }
 
-    static func frame(of element: AXUIElement) -> CGRect? {
+    nonisolated static func frame(of element: AXUIElement) -> CGRect? {
         var position: CFTypeRef?
         var size: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &position) == .success,
@@ -482,7 +769,7 @@ public final class MacAppWindowHider {
         return CGRect(origin: origin, size: extent)
     }
 
-    static func string(_ element: AXUIElement, _ attribute: String) -> String? {
+    nonisolated static func string(_ element: AXUIElement, _ attribute: String) -> String? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
         return value as? String
