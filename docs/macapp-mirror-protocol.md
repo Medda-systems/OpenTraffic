@@ -46,7 +46,7 @@ window, then live updates.
 
 ```json
 {"t":"hello","boot":"6F1C7D0E-2D7B-4E55-9C59-0B5A3C1D2E3F","scale":2,"appearance":"dark","app":{"name":"Orbit"},
- "windows":[{"id":1,"title":"","w":860,"h":572,"x":0,"y":0,"kind":"main","parent":null}]}
+ "windows":[{"id":1,"title":"","w":860,"h":572,"x":0,"y":0,"kind":"main","parent":null,"focused":false}]}
 ```
 
 - `boot`: a UUID per app launch. If it differs from the `boot` the viewer saw before (after a
@@ -61,24 +61,41 @@ window, then live updates.
 
 ```json
 {"t":"windows","windows":[
-  {"id":1,"title":"","w":860,"h":572,"x":0,"y":0,"kind":"main","parent":null},
-  {"id":2,"title":"New Order","w":400,"h":220,"x":230,"y":28,"kind":"sheet","parent":1}]}
+  {"id":1,"title":"","w":860,"h":572,"x":0,"y":0,"kind":"main","parent":null,"focused":false},
+  {"id":2,"title":"","w":380,"h":154,"x":240,"y":28,"kind":"sheet","parent":1,"focused":true}]}
 ```
 
-The full window list, sent whenever a window appears, moves, resizes or closes. A window missing
-from the list is gone: remove its surface and layer.
+The full window list, sent whenever a window appears, moves, resizes, closes or takes the focus. A
+window missing from the list is gone: remove its surface and layer. Every window in the list is a
+surface of its own: it has its own `tree`, its own `frame`s and tiles, and takes its own input (the
+`window` of client messages). The main window comes first; a sheet, alert, popover or menu comes after
+the window it belongs to, so list order is also stacking order (later is in front).
 
 | Field | Meaning |
 | --- | --- |
 | `id` | Window id (UInt32); the same id in `tree`, `frame`, tiles and client messages |
 | `title` | The window's title, `""` when none |
 | `w`, `h` | Size in points |
-| `x`, `y` | Position in points relative to the main window's top-left (the main window is at 0,0) |
-| `kind` | `main`, `sheet`, `alert`, `popover`, `menu` or `window` (a second ordinary window) |
+| `x`, `y` | Position in points relative to the main window's top-left (the main window is at 0,0), where the app has it on the host |
+| `kind` | `main`, `sheet`, `alert`, `popover`, `menu` or `window` (a second ordinary window or a panel) |
 | `parent` | The id of the window a sheet/alert/popover/menu belongs to, else `null` |
+| `focused` | Whether this is the app's key window, where typing goes: the window the app has in front, or the sheet or alert on it while one is up |
 
-v1 servers may send only `main`; the other kinds come with the extra-windows work, without changes to
-this shape.
+What each kind is and where the viewer draws it:
+
+| `kind` | What it is | Where |
+| --- | --- | --- |
+| `main` | The app's main window, kept as the main one while it exists | The page's window |
+| `window` | A second window or panel (`Window > Statistics`) | Beside the main window, top-aligned; one at a time as tabs when side by side would make everything much smaller |
+| `sheet` | A sheet attached to `parent` (a SwiftUI `.sheet`, an AppKit sheet) | At its `x`,`y` over its window (under the title bar) |
+| `alert` | An alert: one shown as a sheet (SwiftUI `.alert`, `NSAlert` sheets), or an app-modal alert window | Centred over `parent`; an alert sheet keeps its `y` |
+| `popover` | A popover anchored in `parent` | At its `x`,`y`; it may stick out of its window |
+| `menu` | A menu the app popped up (a context menu, a pop-up button's menu); its items come in `menu.context` | At its `x`,`y`; a viewer that draws `menu.context` as its own menu hides these pixels while it does |
+
+Sheets, alerts and popovers are found in their window's accessibility tree (they are windows of their
+own there) and are left out of that window's `tree`; second windows and app-modal alerts are the
+app's other windows; a menu is the app's window at the pop-up-menu level. All of them stay on the
+host's off-screen display, like the main window. Older servers sent only `main`.
 
 ### `tree`
 
@@ -239,6 +256,7 @@ exists is ignored.
 | `{"t":"setText","window":1,"key":"/Window:/Group:/TextField:Customer","value":"Ada Lovelace"}` | Replace a field's whole value (the server focuses it, selects all, types) |
 | `{"t":"viewport","w":1200,"h":700,"appearance":"dark"}` | Reserved (viewer options): the viewer's usable size in CSS pixels and its `prefers-color-scheme` (`dark`, `light` or `null`) |
 | `{"t":"menuAction","path":["Orders","Mark All Shipped"],"context":false}` | Choose a menu item by its titles, from the menu bar down; with `"context":true` from the open context menu down (`["Duplicate"]`), and an empty `path` closes the context menu without choosing |
+| `{"t":"windowAction","window":2,"action":"focus"}` | `focus`: bring a window to the front as the app's key window, so typing goes there (a viewer sends it when it shows a window's tab, or before a press in a window that isn't the focused one); `close`: close it like its close button (a popover is dismissed, a menu closed). The main window is never closed |
 | `{"t":"requestControl"}` | Reserved (viewer options): ask the host for control in `askToControl` mode |
 
 - `pointer.kind`: `move`, `down`, `up`, `rightdown`, `rightup`, `wheel`. `dx`/`dy` are wheel
@@ -265,14 +283,21 @@ exists is ignored.
 
 A key names an element by its path from the window, so it survives re-snapshots:
 
-- One segment per level: `/<role without the AX prefix>:<label>`. The window itself is always
+- One segment per level: `/<role without the AX prefix>:<label>`. The main window itself is always
   `/Window:` (its title is left out, so keys survive a title change).
+- Keys are unique across all of the app's windows, so DOM ids never collide: a second window's root
+  is `/Window:<title>` (`/Window:Statistics`; `#2`, `#3` on windows that would share one, so an
+  untitled one is `/Window:#2`), and a sheet, alert or popover keeps the key it has in its parent's
+  tree, its elements continuing from it (`/Window:/Sheet:/Group:/Button:Save`,
+  `/Window:/Group:/Button:Tracking/Popover:/Group:/StaticText:Tracking`). A comment pinned to a sheet's
+  button finds it again the next time the sheet opens.
 - The label is cut to 40 characters; runs of whitespace (newlines, tabs) become one space and `/`
   becomes `∕` (U+2215), so a label never splits the path. An element without a label ends in `:`.
 - When siblings would have the same segment, the second gets `#2`, the third `#3`, and so on; the
   first keeps the bare segment.
 
-Examples: `/Window:/Group:/Button:Add Order`, `/Window:/Group:/List:/Row:Grace Hopper#2`.
+Examples: `/Window:/Group:/Button:Add Order`, `/Window:/Group:/List:/Row:Grace Hopper#2`,
+`/Window:/Sheet:alert/Button:Delete`, `/Window:Statistics/Group:/StaticText:Revenue`.
 
 The viewer treats keys as opaque strings. The DOM id of a node's element is `ax-` + the djb2 hash of
 the key over its UTF-16 code units, as an unsigned 32-bit number in base 36:

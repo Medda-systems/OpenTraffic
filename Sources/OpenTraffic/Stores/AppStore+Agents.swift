@@ -426,7 +426,9 @@ extension AppStore {
         }
         let reference = MacAppAgentContext.reference(selector: comment.context?.selector, anchor: comment.anchor)
         if let pid, AccessibilityTree.isTrusted {
-            let read = await Self.readMacAppElement(pid: pid, reference: reference)
+            // The mirror's main window, so the other windows' keys are the ones viewers pinned comments with.
+            let mainWindow = await session?.mirroredWindows().first { $0.kind == .main }?.id
+            let read = await Self.readMacAppElement(pid: pid, reference: reference, mainWindow: mainWindow)
             context.windows = read.windows
             context.element = read.element
         }
@@ -438,25 +440,27 @@ extension AppStore {
 
     /// The app's windows and the element in them, read through Accessibility with a tree of its own (the
     /// mirror's is busy with viewers); gives up after 5 s, as a hung app answers no one.
-    private static func readMacAppElement(pid: pid_t, reference: MacAppAgentContext.ElementReference?) async
+    private static func readMacAppElement(pid: pid_t, reference: MacAppAgentContext.ElementReference?, mainWindow: UInt32?) async
         -> (windows: [MacAppAgentContext.WindowSummary], element: NativeElementContext?) {
         let read = Task.detached { () -> ([MacAppAgentContext.WindowSummary], NativeElementContext?) in
             guard let tree = try? AccessibilityTree(pid: pid), let windows = try? await tree.windows() else { return ([], nil) }
             let summaries = windows.map { MacAppAgentContext.WindowSummary(title: $0.title, isMain: $0.isMain, isFocused: $0.isFocused) }
             guard let reference else { return (summaries, nil) }
-            // Keys of every window start at /Window:, so the element's window is the first that has it, the
-            // main window first. Its identifier is read right after its snapshot, which remembers its elements.
-            for window in windows.filter(\.isMain) + windows.filter({ !$0.isMain }) {
-                guard let number = window.number, let snapshot = try? await tree.snapshot(window: .number(number)) else { continue }
-                let windowTree = MacAppAgentContext.WindowTree(number: number, title: window.title, isMain: window.isMain,
-                                                               isFocused: window.isFocused, nodes: snapshot.nodes)
-                guard var found = MacAppAgentContext.find(reference, in: [windowTree]) else { continue }
-                if let identifier = try? await tree.identifier(key: found.element.key, window: number) {
-                    found.element.identifier = NativeElementContext.ownIdentifier(identifier)
-                }
-                return (summaries, found.element)
+            // Every window as viewers see it (second windows, sheets, alerts and popovers too), with the keys
+            // their comments carry: each window's keys start at its own root (MirrorProtocol.NodeKey).
+            guard let viewed = try? await MirrorServer.readWindows(tree, current: mainWindow) else { return (summaries, nil) }
+            let trees = viewed.map { window in
+                MacAppAgentContext.WindowTree(number: window.info.id, title: window.info.title, isMain: window.info.kind == .main,
+                                              isFocused: window.info.focused, nodes: window.snapshot.nodes)
             }
-            return (summaries, nil)
+            guard var found = MacAppAgentContext.find(reference, in: trees) else { return (summaries, nil) }
+            // Its identifier, through the key the tree knows (every window is read as /Window:).
+            if let number = found.window, let window = viewed.first(where: { $0.info.id == number }),
+               let key = MirrorProtocol.NodeKey.unrebase(found.element.key, from: window.root),
+               let identifier = try? await tree.identifier(key: key, window: number) {
+                found.element.identifier = NativeElementContext.ownIdentifier(identifier)
+            }
+            return (summaries, found.element)
         }
         return await withTaskGroup(of: (([MacAppAgentContext.WindowSummary], NativeElementContext?))?.self) { group in
             group.addTask { await read.value }

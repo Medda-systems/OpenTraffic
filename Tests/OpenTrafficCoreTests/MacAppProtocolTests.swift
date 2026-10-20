@@ -22,7 +22,8 @@ private let addOrder = MP.AXNode(key: "/Window:/Group:/Button:Add Order", role: 
 
 private let everyServerMessage: [MP.ServerMessage] = [
     .hello(MP.Hello(boot: UUID().uuidString, scale: 2, appearance: .dark, app: MP.AppInfo(name: "Orbit"), windows: [mainWindow])),
-    .windows([mainWindow, MP.WindowInfo(id: 2, title: "New Order", w: 400, h: 220, x: 230, y: 28, kind: .sheet, parent: 1)]),
+    .windows([mainWindow, MP.WindowInfo(id: 2, title: "New Order", w: 400, h: 220, x: 230, y: 28, kind: .sheet, parent: 1, focused: true),
+              MP.WindowInfo(id: 3, title: "Statistics", w: 360, h: 260, x: 0, y: 0, kind: .window)]),
     .tree(MP.Tree(window: 1, v: "a1b2", nodes: [
         MP.AXNode(key: "/Window:", role: "AXWindow", x: 0, y: 0, w: 860, h: 572, depth: 0),
         addOrder,
@@ -47,6 +48,8 @@ private let everyClientMessage: [MP.ClientMessage] = [
     .viewport(MP.Viewport(w: 1200, h: 700, appearance: .dark)),
     .viewport(MP.Viewport(w: 390, h: 700)),
     .menuAction(MP.MenuAction(path: ["Orders", "Mark All Shipped"])),
+    .windowAction(MP.WindowAction(window: 3, action: .focus)),
+    .windowAction(MP.WindowAction(window: 3, action: .close)),
     .requestControl,
 ]
 
@@ -66,15 +69,15 @@ private let everyClientMessage: [MP.ClientMessage] = [
         #expect(try MP.ClientMessage.decode(text) == message, "\(text)")
         #expect(try object(text)["t"] as? String == message.type)
     }
-    #expect(Set(everyClientMessage.map(\.type)) == ["act", "pointer", "text", "key", "setText", "viewport", "menuAction", "requestControl"])
+    #expect(Set(everyClientMessage.map(\.type)) == ["act", "pointer", "text", "key", "setText", "viewport", "menuAction", "windowAction", "requestControl"])
 }
 
 @Test func theContractsServerExamplesDecodeAndReencodeExactly() throws {
     let examples: [(String, MP.ServerMessage)] = [
-        (#"{"t":"hello","boot":"6F1C7D0E-2D7B-4E55-9C59-0B5A3C1D2E3F","scale":2,"appearance":"dark","app":{"name":"Orbit"},"windows":[{"id":1,"title":"","w":860,"h":572,"x":0,"y":0,"kind":"main","parent":null}]}"#,
+        (#"{"t":"hello","boot":"6F1C7D0E-2D7B-4E55-9C59-0B5A3C1D2E3F","scale":2,"appearance":"dark","app":{"name":"Orbit"},"windows":[{"id":1,"title":"","w":860,"h":572,"x":0,"y":0,"kind":"main","parent":null,"focused":false}]}"#,
          .hello(MP.Hello(boot: "6F1C7D0E-2D7B-4E55-9C59-0B5A3C1D2E3F", scale: 2, appearance: .dark, app: MP.AppInfo(name: "Orbit"), windows: [mainWindow]))),
-        (#"{"t":"windows","windows":[{"id":1,"title":"","w":860,"h":572,"x":0,"y":0,"kind":"main","parent":null}]}"#,
-         .windows([mainWindow])),
+        (#"{"t":"windows","windows":[{"id":1,"title":"","w":860,"h":572,"x":0,"y":0,"kind":"main","parent":null,"focused":false},{"id":2,"title":"","w":380,"h":154,"x":240,"y":28,"kind":"sheet","parent":1,"focused":true}]}"#,
+         .windows([mainWindow, MP.WindowInfo(id: 2, title: "", w: 380, h: 154, x: 240, y: 28, kind: .sheet, parent: 1, focused: true)])),
         (#"{"t":"tree","window":1,"v":"<hash>","nodes":[{"key":"/Window:/Group:/Button:Add Order","role":"AXButton","label":"Add Order","value":null,"x":226,"y":530,"w":86,"h":24,"depth":2,"enabled":true,"focused":false,"selected":false,"actions":["press"]}]}"#,
          .tree(MP.Tree(window: 1, v: "<hash>", nodes: [addOrder]))),
         (#"{"t":"frame","window":1,"seq":12,"full":false,"tiles":3}"#,
@@ -109,6 +112,7 @@ private let everyClientMessage: [MP.ClientMessage] = [
         (#"{"t":"viewport","w":1200,"h":700,"appearance":"dark"}"#, .viewport(MP.Viewport(w: 1200, h: 700, appearance: .dark))),
         (#"{"t":"menuAction","path":["Orders","Mark All Shipped"],"context":false}"#, .menuAction(MP.MenuAction(path: ["Orders", "Mark All Shipped"]))),
         (#"{"t":"menuAction","path":[],"context":true}"#, .menuAction(MP.MenuAction(path: [], context: true))),
+        (#"{"t":"windowAction","window":2,"action":"close"}"#, .windowAction(MP.WindowAction(window: 2, action: .close))),
         (#"{"t":"requestControl"}"#, .requestControl),
     ]
     for (json, expected) in examples {

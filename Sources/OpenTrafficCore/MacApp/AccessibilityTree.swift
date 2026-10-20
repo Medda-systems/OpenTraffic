@@ -31,6 +31,9 @@ public final class AccessibilityTree: @unchecked Sendable {
     private var observer: AXObserver?
     private var elementsByWindow: [UInt32: [String: AXUIElement]] = [:]
     private var lastWindow: UInt32?
+    /// Sheets and popovers found by the latest snapshots, by their window number: they aren't among
+    /// the app's AXWindows, so `.number` finds them here.
+    private var surfaceElements: [UInt32: AXUIElement] = [:]
 
     /// Is this process allowed to use Accessibility (System Settings > Privacy & Security)?
     public static var isTrusted: Bool { AXIsProcessTrusted() }
@@ -155,6 +158,41 @@ public final class AccessibilityTree: @unchecked Sendable {
         }
     }
 
+    // MARK: Windows from the viewer
+
+    /// Brings a window (or a sheet's window) to the front and makes it the app's main and key
+    /// window, so typing goes there. The app isn't activated.
+    public func raise(window number: UInt32) async throws {
+        try await run { [self] in
+            try checkTrust()
+            guard let element = windowElement(number: number) else { throw AccessibilityTreeError.noWindow }
+            let raised = AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+            _ = AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
+            _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            guard raised == .success || raised == .actionUnsupported else {
+                throw AccessibilityTreeError.axFailure(operation: "raise", code: raised.rawValue)
+            }
+        }
+    }
+
+    /// Closes a window like its close button; a popover is cancelled (it has no close button).
+    public func close(window number: UInt32) async throws {
+        try await run { [self] in
+            try checkTrust()
+            guard let element = windowElement(number: number) else { throw AccessibilityTreeError.noWindow }
+            if (copy(element, kAXRoleAttribute) as? String) == "AXPopover" {
+                let result = AXUIElementPerformAction(element, kAXCancelAction as CFString)
+                guard result == .success else { throw AccessibilityTreeError.axFailure(operation: "cancel popover", code: result.rawValue) }
+                return
+            }
+            guard let button = copy(element, kAXCloseButtonAttribute).map({ $0 as! AXUIElement }) else {
+                throw AccessibilityTreeError.axFailure(operation: "close (no close button)", code: AXError.attributeUnsupported.rawValue)
+            }
+            let result = AXUIElementPerformAction(button, kAXPressAction as CFString)
+            guard result == .success else { throw AccessibilityTreeError.axFailure(operation: "close", code: result.rawValue) }
+        }
+    }
+
     // MARK: Changes
 
     /// The app's accessibility notifications as a stream: values, focus, destroyed elements,
@@ -221,7 +259,14 @@ public final class AccessibilityTree: @unchecked Sendable {
     }
 
     private func windowElement(number: UInt32) -> AXUIElement? {
-        windowElements().first { windowNumber($0) == number }
+        if let window = windowElements().first(where: { windowNumber($0) == number }) { return window }
+        // A sheet or popover seen by a snapshot, while it is still there.
+        guard let surface = surfaceElements[number] else { return nil }
+        guard copy(surface, kAXRoleAttribute) != nil, windowNumber(surface) == number else {
+            surfaceElements[number] = nil
+            return nil
+        }
+        return surface
     }
 
     private func resolve(_ selector: WindowSelector) -> AXUIElement? {
@@ -265,6 +310,7 @@ public final class AccessibilityTree: @unchecked Sendable {
         let number = windowNumber(window)
         var nodes: [MirrorProtocol.AXNode] = []
         var elements: [String: AXUIElement] = [:]
+        var surfaces: [AXSnapshot.Surface] = []
 
         /// The batched attributes of one element (`attributes` order), nil for the missing ones.
         func fetch(_ element: AXUIElement) -> [AnyObject?]? {
@@ -303,7 +349,25 @@ public final class AccessibilityTree: @unchecked Sendable {
                 return (child, present, siblings.key(role: role, label: name))
             }
             let childClip = role == kAXScrollAreaRole ? clip.intersection(frame) : clip
-            for (child, present, childKey) in keyed { visit(child, present, key: childKey, depth: depth + 1, clip: childClip) }
+            for (child, present, childKey) in keyed {
+                if let surface = surface(child, present, key: childKey) {
+                    // A sheet or popover is a window of its own: mirrored as its own surface, not here.
+                    surfaces.append(surface)
+                    surfaceElements[surface.number] = child
+                    continue
+                }
+                visit(child, present, key: childKey, depth: depth + 1, clip: childClip)
+            }
+        }
+        /// A child that is a sheet or popover with a window of its own (a window number other than
+        /// this window's), else nil.
+        func surface(_ child: AXUIElement, _ present: [AnyObject?], key: String) -> AXSnapshot.Surface? {
+            let role = present[0] as? String ?? ""
+            guard Self.surfaceRoles.contains(role), let own = windowNumber(child), own != number else { return nil }
+            let position = present[4].flatMap { Self.point($0) } ?? .zero
+            let size = present[5].flatMap { Self.size($0) } ?? .zero
+            return AXSnapshot.Surface(number: own, key: key, role: role, subrole: present[10] as? String,
+                                      description: present[1] as? String ?? "", frame: CGRect(origin: position, size: size))
         }
         guard let root = fetch(window) else { throw AccessibilityTreeError.noWindow }
         visit(window, root, key: MirrorProtocol.NodeKey.root, depth: 0, clip: CGRect(origin: .zero, size: windowFrame.size))
@@ -312,8 +376,11 @@ public final class AccessibilityTree: @unchecked Sendable {
         elementsByWindow[windowID] = elements
         lastWindow = windowID
         return AXSnapshot(windowNumber: number, title: copy(window, kAXTitleAttribute) as? String ?? "", frame: windowFrame,
-                          nodes: nodes)
+                          nodes: nodes, surfaces: surfaces)
     }
+
+    /// Roles of elements that live in windows of their own inside another window's tree.
+    static let surfaceRoles: Set<String> = ["AXSheet", "AXPopover"]
 
     private func actionNames(_ element: AXUIElement) -> [String] {
         var names: CFArray?
@@ -406,17 +473,35 @@ public final class AccessibilityTree: @unchecked Sendable {
 
 /// One window's accessibility tree at one moment, as mirror protocol nodes.
 public struct AXSnapshot: Sendable, Equatable {
+    /// A sheet or popover inside the window that is a window of its own (its own window number):
+    /// left out of `nodes`, it is read with `snapshot(window: .number(number))`. `key` is the key it
+    /// would have had among `nodes`; `frame` is global, like the window's.
+    public struct Surface: Sendable, Equatable {
+        public var number: UInt32
+        public var key: String
+        public var role: String
+        public var subrole: String?
+        public var description: String
+        public var frame: CGRect
+
+        public init(number: UInt32, key: String, role: String, subrole: String? = nil, description: String = "", frame: CGRect) {
+            self.number = number; self.key = key; self.role = role; self.subrole = subrole; self.description = description; self.frame = frame
+        }
+    }
+
     /// The window server number of the window (`CGWindowID`), when known.
     public var windowNumber: UInt32?
     public var title: String
     /// The window's frame in global points, origin at the top-left of the primary display.
     public var frame: CGRect
     public var nodes: [MirrorProtocol.AXNode]
+    /// Sheets and popovers in the window that are windows of their own, in document order.
+    public var surfaces: [Surface]
     /// The content hash the viewer sees as the tree's `v`: equal nodes give an equal `v`.
     public let v: String
 
-    public init(windowNumber: UInt32?, title: String, frame: CGRect, nodes: [MirrorProtocol.AXNode]) {
-        self.windowNumber = windowNumber; self.title = title; self.frame = frame; self.nodes = nodes
+    public init(windowNumber: UInt32?, title: String, frame: CGRect, nodes: [MirrorProtocol.AXNode], surfaces: [Surface] = []) {
+        self.windowNumber = windowNumber; self.title = title; self.frame = frame; self.nodes = nodes; self.surfaces = surfaces
         v = AXSnapshot.hash(nodes)
     }
 

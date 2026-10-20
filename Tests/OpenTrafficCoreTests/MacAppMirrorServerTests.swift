@@ -378,7 +378,7 @@ struct MacAppMirrorServerStubTests {
         #expect(h.scale == 2)
         #expect(h.appearance == .dark)
         #expect(h.app.name == "Orbit")
-        #expect(h.windows == [Proto.WindowInfo(id: stubWindowID, title: "Orders", w: 400, h: 300, x: 0, y: 0, kind: .main, parent: nil)])
+        #expect(h.windows == [Proto.WindowInfo(id: stubWindowID, title: "Orders", w: 400, h: 300, x: 0, y: 0, kind: .main, parent: nil, focused: true)])
 
         let tree = try #require(await viewer.first { $0.tree != nil })
         #expect(tree.index == 1)
@@ -715,14 +715,16 @@ struct MacAppMirrorServerStubTests {
         .init(number: number, title: "W\(number ?? 0)", role: role, subrole: nil, frame: frame, isMain: main, isFocused: focused, isMinimized: minimized)
     }
 
-    @Test func theMainWindowIsMirroredAndKeptWhileItExists() {
+    @Test func theMainWindowComesFirstAndIsKeptWhileItExists() {
         let windows = [window(1), window(2, main: true), window(3, focused: true)]
         let first = MirrorServer.mirroredWindows(windows, current: nil)
-        #expect(first.map(\.info.id) == [2])
+        // The main one first; the others are second windows (side by side in the viewer), not left out.
+        #expect(first.map(\.info.id) == [2, 1, 3])
         #expect(first.first?.info == Proto.WindowInfo(id: 2, title: "W2", w: 300, h: 200, x: 0, y: 0, kind: .main, parent: nil))
         #expect(first.first?.frame == CGRect(x: 10, y: 20, width: 300, height: 200))
+        #expect(first.dropFirst().allSatisfy { $0.info.kind == .window && $0.info.parent == nil })
         // Another window becoming main doesn't move the mirror; the first one closing does.
-        #expect(MirrorServer.mirroredWindows([window(1, main: true), window(2)], current: 2).map(\.info.id) == [2])
+        #expect(MirrorServer.mirroredWindows([window(1, main: true), window(2)], current: 2).map(\.info.id) == [2, 1])
         #expect(MirrorServer.mirroredWindows([window(1, main: true)], current: 2).map(\.info.id) == [1])
         // No number, minimized, zero-sized or not a window: not mirrored.
         #expect(MirrorServer.mirroredWindows([window(nil, main: true), window(4, minimized: true),

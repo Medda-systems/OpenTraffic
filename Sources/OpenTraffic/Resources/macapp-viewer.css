@@ -135,6 +135,23 @@ body[data-appearance="dark"] .otm-menu hr { border-top-color: rgba(255, 255, 255
 /* The desk and the windows on it. */
 .otm-desk[hidden], .otm-simple[hidden] { display: none; }
 .otm-desk { flex: 1; position: relative; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.otm-desk.otm-desk-tabbed { padding-top: 40px; box-sizing: border-box; }
+/* The windows as tabs, when side by side would make them too small. */
+.otm-tabs {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; gap: 2px; max-width: calc(100% - 32px);
+  padding: 2px; border-radius: 999px; background: var(--otm-bar-bg); box-shadow: 0 4px 16px rgba(0, 0, 0, .2); overflow-x: auto;
+  font: 12px/1.35 var(--otm-font); white-space: nowrap; user-select: none; -webkit-user-select: none;
+}
+.otm-tabs[hidden] { display: none; }
+.otm-tab { flex: none; display: inline-flex; align-items: center; border-radius: 999px; }
+.otm-tab:has([aria-selected="true"]) { background: rgba(255, 255, 255, .24); }
+.otm-tab-title, .otm-tab-close {
+  appearance: none; -webkit-appearance: none; margin: 0; border: 0; background: transparent; color: var(--otm-bar-fg); font: inherit; cursor: default;
+}
+.otm-tab-title { padding: 3px 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.otm-tab-close { width: 20px; height: 20px; margin: 0 4px 0 -8px; border-radius: 50%; color: var(--otm-bar-muted); font-size: 14px; line-height: 1; }
+.otm-tab-close:hover { background: rgba(255, 255, 255, .16); color: var(--otm-bar-fg); }
+.otm-tab-title:focus-visible, .otm-tab-close:focus-visible { outline: 2px solid var(--otm-accent); outline-offset: 1px; border-radius: 999px; }
 .otm-fit { position: relative; flex: none; }
 .otm-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .otm-window {
@@ -143,6 +160,14 @@ body[data-appearance="dark"] .otm-menu hr { border-top-color: rgba(255, 255, 255
 }
 .otm-window[data-kind="sheet"], .otm-window[data-kind="alert"] { border-radius: 12px; }
 .otm-window[data-kind="menu"], .otm-window[data-kind="popover"] { border-radius: 8px; box-shadow: 0 0 0 .5px rgba(0, 0, 0, .3), 0 8px 28px rgba(0, 0, 0, .3); }
+.otm-window.otm-hidden { display: none; }
+.otm-window.otm-covered { visibility: hidden; } /* a menu while its web menu shows */
+/* Surfaces come in as on a Mac: a sheet slides down from under the title bar, an alert and a popover pop in. */
+.otm-window[data-kind="sheet"] { animation: otm-sheet-in .2s ease-out; }
+.otm-window[data-kind="alert"], .otm-window[data-kind="popover"] { animation: otm-pop-in .16s ease-out; }
+@keyframes otm-sheet-in { from { clip-path: inset(0 0 100% 0); transform: translateY(-12px); } to { clip-path: inset(0); transform: none; } }
+@keyframes otm-pop-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .otm-window { animation: none !important; } }
 .otm-pixels { position: absolute; left: 0; top: 0; display: block; }
 .otm-layer { position: absolute; inset: 0; }
 

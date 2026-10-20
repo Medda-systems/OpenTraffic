@@ -31,11 +31,19 @@ public enum MirrorProtocol {
 
     public enum Appearance: String, Codable, Sendable, CaseIterable { case dark, light }
 
-    /// What a window is, so the viewer knows where to draw it. `menu` and the non-`main` kinds are
-    /// filled in by the extra-windows Task; v1 servers may send only `main`.
+    /// What a window is, so the viewer knows where to draw it: the `main` window, a `sheet` or an
+    /// `alert` attached to a window (or an app-modal alert), a `popover`, a popped-up `menu`, or a
+    /// second ordinary `window` (a panel too). Servers before the extra-windows work sent only `main`.
     public enum WindowKind: String, Codable, Sendable, CaseIterable {
         case main, sheet, alert, popover, menu, window
+
+        /// Kinds that belong to another window (`parent`) and are drawn over it.
+        public var isAttached: Bool { self == .sheet || self == .alert || self == .popover || self == .menu }
     }
+
+    /// What `windowAction` does to a window: bring it to the front and make it the app's key window
+    /// (`focus`, where typing goes), or close it like its close button (`close`).
+    public enum WindowActionKind: String, Codable, Sendable, CaseIterable { case focus, close }
 
     /// Accessibility actions by their protocol names. A node lists the ones it supports; `act` asks
     /// for one. Other AX actions (AXRaise, AXPick, ...) are not part of the protocol.
@@ -87,7 +95,7 @@ public enum MirrorProtocol {
 
     /// One window of the app. Geometry in points; `x`/`y` place it relative to the main window's
     /// top-left (the main window itself is at 0,0). `parent` is the window a sheet/alert/popover/menu
-    /// belongs to.
+    /// belongs to. `focused` marks the app's key window (where typing goes; a sheet while it is up).
     public struct WindowInfo: Codable, Equatable, Sendable {
         public var id: WindowID
         public var title: String
@@ -97,12 +105,15 @@ public enum MirrorProtocol {
         public var y: Double
         public var kind: WindowKind
         public var parent: WindowID?
+        public var focused: Bool
 
-        public init(id: WindowID, title: String = "", w: Double, h: Double, x: Double = 0, y: Double = 0, kind: WindowKind = .main, parent: WindowID? = nil) {
+        public init(id: WindowID, title: String = "", w: Double, h: Double, x: Double = 0, y: Double = 0, kind: WindowKind = .main, parent: WindowID? = nil,
+                    focused: Bool = false) {
             self.id = id; self.title = title; self.w = w; self.h = h; self.x = x; self.y = y; self.kind = kind; self.parent = parent
+            self.focused = focused
         }
 
-        private enum CodingKeys: String, CodingKey { case id, title, w, h, x, y, kind, parent }
+        private enum CodingKeys: String, CodingKey { case id, title, w, h, x, y, kind, parent, focused }
 
         public init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -114,6 +125,7 @@ public enum MirrorProtocol {
             y = try c.decodeIfPresent(Double.self, forKey: .y) ?? 0
             kind = try c.decodeIfPresent(WindowKind.self, forKey: .kind) ?? .main
             parent = try c.decodeIfPresent(WindowID.self, forKey: .parent)
+            focused = try c.decodeIfPresent(Bool.self, forKey: .focused) ?? false
         }
 
         public func encode(to encoder: any Encoder) throws {
@@ -126,6 +138,7 @@ public enum MirrorProtocol {
             try c.encode(y, forKey: .y)
             try c.encode(kind, forKey: .kind)
             try c.encode(parent, forKey: .parent)
+            try c.encode(focused, forKey: .focused)
         }
     }
 
@@ -452,6 +465,14 @@ public enum MirrorProtocol {
         }
     }
 
+    /// `{"t":"windowAction","window":2,"action":"close"}`: focus or close a window from the viewer
+    /// (a second window's tab, its close button in a tab strip). The main window is never closed.
+    public struct WindowAction: Codable, Equatable, Sendable {
+        public var window: WindowID
+        public var action: WindowActionKind
+        public init(window: WindowID, action: WindowActionKind) { self.window = window; self.action = action }
+    }
+
     // MARK: Messages
 
     public enum ServerMessage: Codable, Equatable, Sendable {
@@ -526,6 +547,8 @@ public enum MirrorProtocol {
         case viewport(Viewport)
         /// Choose a menu item (menu bar or context menu), or close the context menu.
         case menuAction(MenuAction)
+        /// Focus or close a window.
+        case windowAction(WindowAction)
         /// Reserved: the viewer-options Task (`Ask to control`): `{"t":"requestControl"}`.
         case requestControl
 
@@ -538,6 +561,7 @@ public enum MirrorProtocol {
             case .setText: "setText"
             case .viewport: "viewport"
             case .menuAction: "menuAction"
+            case .windowAction: "windowAction"
             case .requestControl: "requestControl"
             }
         }
@@ -550,6 +574,7 @@ public enum MirrorProtocol {
             case .text(let m): m.window
             case .key(let m): m.window
             case .setText(let m): m.window
+            case .windowAction(let m): m.window
             case .viewport, .menuAction, .requestControl: nil
             }
         }
@@ -564,6 +589,7 @@ public enum MirrorProtocol {
             case "setText": self = .setText(try SetText(from: decoder))
             case "viewport": self = .viewport(try Viewport(from: decoder))
             case "menuAction": self = .menuAction(try MenuAction(from: decoder))
+            case "windowAction": self = .windowAction(try WindowAction(from: decoder))
             case "requestControl": self = .requestControl
             default: throw MirrorProtocolError.unknownMessage(type)
             }
@@ -580,6 +606,7 @@ public enum MirrorProtocol {
             case .setText(let payload): try payload.encode(to: encoder)
             case .viewport(let payload): try payload.encode(to: encoder)
             case .menuAction(let payload): try payload.encode(to: encoder)
+            case .windowAction(let payload): try payload.encode(to: encoder)
             case .requestControl: break
             }
         }
@@ -682,11 +709,42 @@ public enum MirrorProtocol {
     /// Node keys name an element by its path from the window, so they survive re-snapshots: one
     /// `/<Role without AX>:<label>` segment per level, the label cut to 40 characters, with `#n`
     /// (n = 2, 3, ...) on the second and later siblings that would otherwise have the same segment.
-    /// The window itself is always `/Window:` (its title is left out, so keys survive a title change),
-    /// e.g. `/Window:/Group:/Button:Add Order`.
+    /// The main window itself is always `/Window:` (its title is left out, so keys survive a title
+    /// change), e.g. `/Window:/Group:/Button:Add Order`. Keys are unique across all of an app's
+    /// windows (so are the viewer's DOM ids): a second window's root is `/Window:<title>` (`#n` when
+    /// windows share one), and a sheet, alert or popover keeps the key it has in its parent's tree
+    /// (`/Window:/Sheet:`), its elements continuing from it.
     public enum NodeKey {
         public static let labelLimit = 40
         public static let root = "/Window:"
+
+        /// The roots of the top-level windows, in order (the main window first): the main window
+        /// `/Window:`, every other `/Window:<title>`, with `#n` on the second and later window that
+        /// would have the same root (an untitled second window is `/Window:#2`).
+        public static func windowRoots(titles: [String]) -> [String] {
+            var seen: [String: Int] = [:]
+            return titles.enumerated().map { index, title in
+                let segment = index == 0 ? root : NodeKey.segment(role: "AXWindow", label: title)
+                let count = (seen[segment] ?? 0) + 1
+                seen[segment] = count
+                return segment + (count > 1 ? "#\(count)" : "")
+            }
+        }
+
+        /// A key read in a window whose root is `/Window:` (as the accessibility bridge reads every
+        /// window), moved under `root`.
+        public static func rebase(_ key: String, onto root: String) -> String {
+            guard root != NodeKey.root, key.hasPrefix(NodeKey.root) else { return key }
+            return root + key.dropFirst(NodeKey.root.count)
+        }
+
+        /// The other way: a key under `root` as the accessibility bridge knows it, or nil when it
+        /// isn't under `root`.
+        public static func unrebase(_ key: String, from root: String) -> String? {
+            guard root != NodeKey.root else { return key.hasPrefix(NodeKey.root) ? key : nil }
+            guard key == root || key.hasPrefix(root + "/") else { return nil }
+            return NodeKey.root + key.dropFirst(root.count)
+        }
 
         /// One path segment, without the sibling suffix. Whitespace runs (newlines, tabs) become one
         /// space and `/` becomes `∕` (U+2215), so a label can never split the path.

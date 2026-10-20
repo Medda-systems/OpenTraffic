@@ -39,12 +39,18 @@ public final class MenuBridge: @unchecked Sendable {
     // Touched on the executor only.
     private let app: AXUIElement
 
-    /// A menu the app has popped up: its items (filtered like the bar's) and its frame in global
-    /// points (origin at the top-left of the primary display).
+    /// A menu the app has popped up: its items (filtered like the bar's), its frame in global
+    /// points (origin at the top-left of the primary display) and the window server number of the
+    /// window it shows in with that window's frame (nil when unknown), so it can be mirrored as a
+    /// `menu` window.
     public struct OpenMenu: Sendable, Equatable {
         public var items: [MirrorProtocol.MenuItem]
         public var frame: CGRect
-        public init(items: [MirrorProtocol.MenuItem], frame: CGRect) { self.items = items; self.frame = frame }
+        public var window: UInt32?
+        public var windowFrame: CGRect?
+        public init(items: [MirrorProtocol.MenuItem], frame: CGRect, window: UInt32? = nil, windowFrame: CGRect? = nil) {
+            self.items = items; self.frame = frame; self.window = window; self.windowFrame = windowFrame
+        }
     }
 
     public init(pid: pid_t) throws {
@@ -102,11 +108,11 @@ public final class MenuBridge: @unchecked Sendable {
     public func openMenu() async throws -> OpenMenu? {
         try await run { [self] in
             try checkTrust()
-            guard let menu = findOpenMenu() else { return nil }
+            guard let (menu, window, windowFrame) = findOpenMenuAndWindow() else { return nil }
             var budget = Self.itemLimit
             let items = readMenu(menu, depth: 1, inAppMenu: false, budget: &budget)
             let frame = Self.frame(of: menu) ?? .zero
-            return OpenMenu(items: items, frame: frame)
+            return OpenMenu(items: items, frame: frame, window: window, windowFrame: window == nil ? nil : windowFrame)
         }
     }
 
@@ -288,16 +294,19 @@ public final class MenuBridge: @unchecked Sendable {
 
     /// The app's popped-up menu: its on-screen window at the pop-up menu level, hit-tested down to the
     /// AXMenu (a popped-up menu isn't among the app's accessibility children).
-    private func findOpenMenu() -> AXUIElement? {
+    private func findOpenMenu() -> AXUIElement? { findOpenMenuAndWindow()?.menu }
+
+    /// The popped-up menu and the number of the window it is in.
+    private func findOpenMenuAndWindow() -> (menu: AXUIElement, window: UInt32?, windowFrame: CGRect)? {
         let windows = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
-        let frames = windows.compactMap { info -> CGRect? in
+        let frames = windows.compactMap { info -> (rect: CGRect, id: UInt32?)? in
             guard (info[kCGWindowOwnerPID as String] as? Int32) == pid, (info[kCGWindowLayer as String] as? Int) == Self.popUpMenuLevel,
                   let bounds = info[kCGWindowBounds as String] as? NSDictionary, let rect = CGRect(dictionaryRepresentation: bounds),
                   rect.width > 0, rect.height > 0 else { return nil }
-            return rect
+            return (rect, (info[kCGWindowNumber as String] as? NSNumber)?.uint32Value)
         }
-        var menus: [AXUIElement] = []
-        for frame in frames {
+        var menus: [(menu: AXUIElement, window: UInt32?, windowFrame: CGRect)] = []
+        for (frame, id) in frames {
             // A point on the first item, the middle and the last item: one of them is on an item, not a separator.
             for point in [CGPoint(x: frame.midX, y: frame.minY + 12), CGPoint(x: frame.midX, y: frame.midY), CGPoint(x: frame.midX, y: frame.maxY - 12)] {
                 var hit: AXUIElement?
@@ -310,14 +319,14 @@ public final class MenuBridge: @unchecked Sendable {
                     element = copy(current, kAXParentAttribute).map { $0 as! AXUIElement }
                 }
                 if let found {
-                    menus.append(found)
+                    menus.append((found, id, frame))
                     break
                 }
             }
         }
         // With a submenu open, the outermost menu: the one that isn't inside a menu item.
-        return menus.first { menu in
-            let parent = copy(menu, kAXParentAttribute).map { $0 as! AXUIElement }
+        return menus.first { entry in
+            let parent = copy(entry.menu, kAXParentAttribute).map { $0 as! AXUIElement }
             return parent.flatMap { copy($0, kAXRoleAttribute) as? String } != kAXMenuItemRole
         } ?? menus.first
     }

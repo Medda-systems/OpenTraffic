@@ -174,6 +174,9 @@ public final class MacAppSession {
     public var homeDirectory: URL { options.sessionDirectory.appendingPathComponent("home", isDirectory: true) }
     /// The running copy's windows (on the off-screen display).
     public var windows: [HiddenWindow] { launch.map { hider.windows(pid: $0.pid) } ?? [] }
+    /// Every window viewers see now, as the mirror sends them (main first; second windows, sheets,
+    /// alerts, popovers and an open menu with their kind, parent and position).
+    public func mirroredWindows() async -> [MirrorProtocol.WindowInfo] { await server?.currentWindows() ?? [] }
     /// The last `actionLimit` viewer actions, oldest first.
     nonisolated public var recentActions: [RecordedAction] { actions.items }
     /// The last `logLimit` log lines, oldest first.
@@ -485,7 +488,7 @@ public final class MacAppSession {
     /// a replay needs; the window size and control requests aren't actions on the app.
     nonisolated static func isRecorded(_ message: MirrorProtocol.ClientMessage) -> Bool {
         switch message {
-        case .act, .text, .key, .setText, .menuAction: true
+        case .act, .text, .key, .setText, .menuAction, .windowAction: true
         case .pointer(let pointer): pointer.kind != .move
         case .viewport, .requestControl: false
         }

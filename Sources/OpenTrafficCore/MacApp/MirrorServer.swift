@@ -16,6 +16,15 @@ public protocol MirrorAccessibility: AnyObject, Sendable {
     func snapshot(window: AccessibilityTree.WindowSelector) async throws -> AXSnapshot
     func perform(key: String, action: MirrorProtocol.Action, window: UInt32?) async throws
     func changes() -> AsyncStream<AXChange>
+    /// Brings a window to the front as the app's key window (`windowAction` `focus`).
+    func raise(window: UInt32) async throws
+    /// Closes a window like its close button, or cancels a popover (`windowAction` `close`).
+    func close(window: UInt32) async throws
+}
+
+extension MirrorAccessibility {
+    public func raise(window: UInt32) async throws {}
+    public func close(window: UInt32) async throws {}
 }
 
 /// One window's pixels (`WindowCapture` in the product). `frames` has a single reader: the server.
@@ -82,8 +91,11 @@ public enum MirrorServerError: Error, Equatable, Sendable, CustomStringConvertib
 /// `key` and `setText` messages from every viewer go through one queue and are applied one after
 /// another; keys resolve against the window's latest snapshot.
 ///
-/// v1 mirrors the app's main window (protocol kind `main`); sheets, alerts, popovers and second
-/// windows come with the extra-windows work (`mirroredWindows`).
+/// Every window the app shows is mirrored as its own surface with its own capture, tree and input:
+/// the main window, second windows and panels (`window`), app-modal alerts (`alert`), and the sheets,
+/// sheet alerts and popovers inside a window's tree that are windows of their own (`sheet`, `alert`,
+/// `popover`, with that window as `parent`), and a popped-up menu (`menu`). Positions are relative to
+/// the main window; node keys are unique across windows (`MirrorProtocol.NodeKey`).
 ///
 /// Menus (when the app has `menus`): the menu bar and any popped-up menu go out as `menu`, read on
 /// connect, on menu notifications, every `treePollInterval` and often for a moment after a right
@@ -163,6 +175,12 @@ public final class MirrorServer: @unchecked Sendable {
     static let menuWatch: Duration = .milliseconds(1500)
     /// Extra tree reads after a menu action (each delay counted from the one before).
     static let menuActionRefreshes: [Duration] = [.milliseconds(150), .milliseconds(350)]
+    /// Extra reads after a press or a click: sheets, popovers and windows open with an animation,
+    /// and not every app announces them.
+    static let pressRefreshes: [Duration] = [.milliseconds(200), .milliseconds(400)]
+    /// Windows smaller than this (points, either side) aren't mirrored: what is left of a closing
+    /// popover, invisible helper windows.
+    static let minimumWindowSide: Double = 8
     /// Tree refreshes start at most this often...
     public static let treeInterval: Duration = .milliseconds(50)
     /// ...and, while viewers are connected, at least this often (for changes AX doesn't announce).
@@ -214,6 +232,9 @@ public final class MirrorServer: @unchecked Sendable {
     private var live = false
     private var app: App
     private var windows: [MirrorProtocol.WindowInfo] = []
+    /// Every mirrored window's key root and global frame, for input and key translation.
+    private var mirrored: [MirrorProtocol.WindowID: MirroredWindow] = [:]
+    /// The latest snapshot per window, its keys as the viewers see them (under the window's root).
     private var snapshots: [MirrorProtocol.WindowID: AXSnapshot] = [:]
     /// The latest `tree` message per window, encoded once.
     private var treeTexts: [MirrorProtocol.WindowID: String] = [:]
@@ -331,6 +352,11 @@ public final class MirrorServer: @unchecked Sendable {
         shared.withLock { $0.runtime }?.requestRefresh()
     }
 
+    /// The windows viewers see now (the latest `windows` list), main first.
+    public func currentWindows() async -> [MirrorProtocol.WindowInfo] {
+        (try? await loop.submit { self.windows }.get()) ?? []
+    }
+
     /// The app's appearance on this Mac's account, for `hello` when the session doesn't say.
     public static func hostAppearance() -> MirrorProtocol.Appearance {
         UserDefaults.standard.string(forKey: "AppleInterfaceStyle")?.lowercased() == "dark" ? .dark : .light
@@ -356,6 +382,12 @@ public final class MirrorServer: @unchecked Sendable {
             var sentV: [MirrorProtocol.WindowID: String] = [:]
             /// The main window's global frame, for placing a popped-up menu relative to it.
             var mainFrame: CGRect?
+            /// Every mirrored window's global frame, for placing a popped-up menu.
+            var frames: [MirrorProtocol.WindowID: CGRect] = [:]
+            /// The sheets and popovers each window had at the last good read, kept while a read fails.
+            var surfaces: [MirrorProtocol.WindowID: [MirroredWindow]] = [:]
+            /// The popped-up menu's window (number and global frame), from the menu reads.
+            var menuWindow: (id: MirrorProtocol.WindowID, frame: CGRect)?
             /// Where the last right click was (window, window-relative point), for a menu without a frame.
             var rightClick: (window: MirrorProtocol.WindowID, point: CGPoint)?
             /// Until when menu reads are requested often (after a right click or showMenu).
@@ -373,6 +405,16 @@ public final class MirrorServer: @unchecked Sendable {
 
         func requestRefresh() { signal.yield() }
         func requestMenuRefresh() { menuSignal.yield() }
+
+        /// Reads again after each delay (counted from the one before), for changes that come late.
+        func refresh(after delays: [Duration]) {
+            add(Task { [weak self] in
+                for delay in delays {
+                    try? await Task.sleep(for: delay)
+                    self?.requestRefresh()
+                }
+            })
+        }
 
         /// Reads the menus often for a while: a menu the app is about to pop up shows within it.
         func watchMenus() {
@@ -421,6 +463,7 @@ public final class MirrorServer: @unchecked Sendable {
             self.live = false
             self.app = app
             self.windows = []
+            self.mirrored = [:]
             self.snapshots = [:]
             self.treeTexts = [:]
             self.captures = [:]
@@ -510,54 +553,192 @@ public final class MirrorServer: @unchecked Sendable {
         var info: MirrorProtocol.WindowInfo
         /// Global frame in points (Accessibility's coordinates).
         var frame: CGRect
+        /// The key of the window's root node (`MirrorProtocol.NodeKey`): its nodes' keys start with it.
+        var root: String
     }
 
-    /// The windows the viewers see, the main one first. v1: the main window only (kind `main`),
-    /// kept while it exists even when another window becomes main.
+    /// The app's top-level windows the viewers see, the main one first: the main window (kept while
+    /// it exists, even when another window becomes main) as `main`, app-modal dialogs as `alert`
+    /// (belonging to the main window), every other window (second windows, panels) as `window`.
+    /// Positions are relative to the main window; minimized, untitled-number and tiny windows are left out.
     static func mirroredWindows(_ windows: [AccessibilityTree.Window], current: MirrorProtocol.WindowID?) -> [MirroredWindow] {
         let candidates = windows.filter { window in
-            window.number != nil && !window.isMinimized && window.frame.width > 0 && window.frame.height > 0
+            window.number != nil && !window.isMinimized && window.frame.width >= minimumWindowSide && window.frame.height >= minimumWindowSide
                 && (window.role.isEmpty || window.role == "AXWindow")
         }
+        let isDialog = { (window: AccessibilityTree.Window) in window.subrole == "AXDialog" || window.subrole == "AXSystemDialog" }
         guard let main = candidates.first(where: { current != nil && $0.number == current })
-            ?? candidates.first(where: \.isMain) ?? candidates.first(where: \.isFocused) ?? candidates.first,
-            let id = main.number else { return [] }
-        let info = MirrorProtocol.WindowInfo(id: id, title: main.title, w: main.frame.width, h: main.frame.height, x: 0, y: 0, kind: .main)
-        return [MirroredWindow(info: info, frame: main.frame)]
+            ?? candidates.first(where: { $0.isMain && !isDialog($0) }) ?? candidates.first(where: { $0.isFocused && !isDialog($0) })
+            ?? candidates.first(where: { !isDialog($0) }) ?? candidates.first,
+            let mainID = main.number else { return [] }
+        let others = candidates.filter { $0.number != mainID }
+        let roots = MirrorProtocol.NodeKey.windowRoots(titles: [main.title] + others.map(\.title))
+        let origin = main.frame.origin
+        return zip([main] + others, roots).map { window, root in
+            let id = window.number!
+            let kind: MirrorProtocol.WindowKind = id == mainID ? .main : isDialog(window) ? .alert : .window
+            let info = MirrorProtocol.WindowInfo(id: id, title: window.title, w: window.frame.width, h: window.frame.height,
+                                                 x: window.frame.minX - origin.x, y: window.frame.minY - origin.y, kind: kind,
+                                                 parent: kind == .alert ? mainID : nil)
+            return MirroredWindow(info: info, frame: window.frame, root: root)
+        }
+    }
+
+    /// The kind of a sheet or popover found in a window's tree: a sheet that is an alert (AppKit and
+    /// SwiftUI alerts are sheets described as `alert`) is an `alert`.
+    static func kind(of surface: AXSnapshot.Surface) -> MirrorProtocol.WindowKind {
+        if surface.role == "AXPopover" { return .popover }
+        let alert = surface.description.lowercased() == "alert" || surface.subrole == "AXDialog" || surface.subrole == "AXSystemDialog"
+        return alert ? .alert : .sheet
+    }
+
+    /// A sheet or popover of `parent` as a mirrored window, nil when it is too small to see.
+    static func surfaceWindow(_ surface: AXSnapshot.Surface, of parent: MirroredWindow, origin: CGPoint) -> MirroredWindow? {
+        let frame = surface.frame
+        guard frame.width >= minimumWindowSide, frame.height >= minimumWindowSide else { return nil }
+        let info = MirrorProtocol.WindowInfo(id: surface.number, title: "", w: frame.width, h: frame.height,
+                                             x: frame.minX - origin.x, y: frame.minY - origin.y, kind: kind(of: surface), parent: parent.info.id)
+        return MirroredWindow(info: info, frame: frame, root: MirrorProtocol.NodeKey.rebase(surface.key, onto: parent.root))
+    }
+
+    /// A popped-up menu as a mirrored window, belonging to the window it was opened in.
+    static func menuWindow(id: MirrorProtocol.WindowID, frame: CGRect, parent: MirrorProtocol.WindowID, origin: CGPoint) -> MirroredWindow? {
+        guard frame.width >= minimumWindowSide, frame.height >= minimumWindowSide else { return nil }
+        let info = MirrorProtocol.WindowInfo(id: id, title: "", w: frame.width, h: frame.height, x: frame.minX - origin.x,
+                                             y: frame.minY - origin.y, kind: .menu, parent: parent)
+        return MirroredWindow(info: info, frame: frame, root: "/Menu:")
+    }
+
+    /// Which window has the app's focus: the focused window (else the main one) of the app, or the
+    /// sheet or alert on it, which takes the focus while it is up.
+    static func focusedWindow(_ windows: [AccessibilityTree.Window], mirrored: [MirroredWindow]) -> MirrorProtocol.WindowID? {
+        guard let key = windows.first(where: \.isFocused)?.number ?? windows.first(where: \.isMain)?.number,
+              mirrored.contains(where: { $0.info.id == key }) else { return nil }
+        var focused = key
+        // A sheet on a sheet: follow them down.
+        while let sheet = mirrored.last(where: { $0.info.parent == focused && ($0.info.kind == .sheet || $0.info.kind == .alert) }) {
+            focused = sheet.info.id
+        }
+        return focused
+    }
+
+    /// The snapshot with its keys moved under the window's root (the bridge reads every window as `/Window:`).
+    static func rebased(_ snapshot: AXSnapshot, root: String) -> AXSnapshot {
+        guard root != MirrorProtocol.NodeKey.root else { return snapshot }
+        var nodes = snapshot.nodes
+        for index in nodes.indices { nodes[index].key = MirrorProtocol.NodeKey.rebase(nodes[index].key, onto: root) }
+        let surfaces = snapshot.surfaces.map { surface in
+            var surface = surface
+            surface.key = MirrorProtocol.NodeKey.rebase(surface.key, onto: root)
+            return surface
+        }
+        return AXSnapshot(windowNumber: snapshot.windowNumber, title: snapshot.title, frame: snapshot.frame, nodes: nodes, surfaces: surfaces)
+    }
+
+    /// One window as the viewers see it: its `windows` entry, its key root, and its snapshot with the
+    /// keys viewers (and comments pinned by them) use.
+    public struct ViewerWindow: Sendable {
+        public var info: MirrorProtocol.WindowInfo
+        public var root: String
+        public var snapshot: AXSnapshot
+    }
+
+    /// Reads every window of an app as a mirror shows it, without a server: the top-level windows
+    /// (`current` is the mirror's main window, so the key roots match what viewers got; nil picks the
+    /// app's main window) and the sheets, alerts and popovers in them, in the `windows` list's order,
+    /// each snapshot's keys under its root. Popped-up menus aren't included (they have no tree).
+    /// `MirrorProtocol.NodeKey.unrebase(key, from: root)` gives a node's key as `accessibility` knows it.
+    public static func readWindows(_ accessibility: any MirrorAccessibility, current: MirrorProtocol.WindowID? = nil) async throws -> [ViewerWindow] {
+        let axWindows = try await accessibility.windows()
+        let tops = mirroredWindows(axWindows, current: current)
+        let origin = tops.first?.frame.origin ?? .zero
+        var mirrored: [MirroredWindow] = []
+        var snapshots: [MirrorProtocol.WindowID: AXSnapshot] = [:]
+        func read(_ window: MirroredWindow, depth: Int) async {
+            guard snapshots[window.info.id] == nil, !mirrored.contains(where: { $0.info.id == window.info.id }) else { return }
+            mirrored.append(window)
+            guard let raw = try? await accessibility.snapshot(window: .number(window.info.id)) else { return }
+            let snapshot = rebased(raw, root: window.root)
+            snapshots[window.info.id] = snapshot
+            guard depth < 4 else { return }
+            for child in snapshot.surfaces.compactMap({ surfaceWindow($0, of: window, origin: origin) }) { await read(child, depth: depth + 1) }
+        }
+        for window in tops { await read(window, depth: 0) }
+        let focused = focusedWindow(axWindows, mirrored: mirrored)
+        return mirrored.compactMap { window in
+            guard let snapshot = snapshots[window.info.id] else { return nil }
+            var info = window.info
+            info.focused = info.id == focused
+            return ViewerWindow(info: info, root: window.root, snapshot: snapshot)
+        }
     }
 
     /// Reads the window list and every mirrored window's tree, and hands what changed to the viewers.
+    /// Sheets and popovers come out of their window's tree and are read in turn, right after it.
     @discardableResult
     private func refresh(_ runtime: Runtime) async throws -> [MirroredWindow] {
         let accessibility = runtime.app.accessibility
-        let current = runtime.state.withLock { $0.mainID }
-        let mirrored = Self.mirroredWindows(try await accessibility.windows(), current: current)
-        runtime.state.withLock { state in
-            state.mainID = mirrored.first?.info.id
-            state.mainFrame = mirrored.first?.frame
-        }
+        let (current, menuWindow, rightClick) = runtime.state.withLock { ($0.mainID, $0.menuWindow, $0.rightClick) }
+        let axWindows = try await accessibility.windows()
+        let tops = Self.mirroredWindows(axWindows, current: current)
+        let origin = tops.first?.frame.origin ?? .zero
+        var mirrored: [MirroredWindow] = []
         var trees: [(MirrorProtocol.WindowID, AXSnapshot, String?)] = []
-        for window in mirrored {
+        var surfacesByParent: [MirrorProtocol.WindowID: [MirroredWindow]] = [:]
+        var seen: Set<MirrorProtocol.WindowID> = []
+
+        func read(_ window: MirroredWindow, depth: Int) async {
+            guard seen.insert(window.info.id).inserted else { return }
+            mirrored.append(window)
             let id = window.info.id
-            guard let snapshot = try? await accessibility.snapshot(window: .number(id)) else { continue }
-            let changed = runtime.state.withLock { state -> Bool in
-                defer { state.sentV[id] = snapshot.v }
-                return state.sentV[id] != snapshot.v
+            var children: [MirroredWindow]
+            if let read = try? await accessibility.snapshot(window: .number(id)) {
+                let snapshot = Self.rebased(read, root: window.root)
+                let changed = runtime.state.withLock { state -> Bool in
+                    defer { state.sentV[id] = snapshot.v }
+                    return state.sentV[id] != snapshot.v
+                }
+                let text = changed ? try? MirrorProtocol.ServerMessage.tree(snapshot.tree(window: id)).jsonString() : nil
+                trees.append((id, snapshot, text))
+                children = snapshot.surfaces.compactMap { Self.surfaceWindow($0, of: window, origin: origin) }
+            } else {
+                // A read that failed (the app busy) keeps the sheets and popovers it had.
+                children = runtime.state.withLock { $0.surfaces[id] } ?? []
             }
-            let text = changed ? try? MirrorProtocol.ServerMessage.tree(snapshot.tree(window: id)).jsonString() : nil
-            trees.append((id, snapshot, text))
+            surfacesByParent[id] = children
+            guard depth < 4 else { return }
+            for child in children { await read(child, depth: depth + 1) }
+        }
+        for window in tops { await read(window, depth: 0) }
+        if let menu = menuWindow, !seen.contains(menu.id) {
+            let parent = rightClick.flatMap { click in seen.contains(click.window) ? click.window : nil } ?? tops.first?.info.id
+            if let parent, let window = Self.menuWindow(id: menu.id, frame: menu.frame, parent: parent, origin: origin) { mirrored.append(window) }
+        }
+        let focused = Self.focusedWindow(axWindows, mirrored: mirrored)
+        for index in mirrored.indices { mirrored[index].info.focused = mirrored[index].info.id == focused }
+
+        let frames = Dictionary(mirrored.map { ($0.info.id, $0.frame) }, uniquingKeysWith: { a, _ in a })
+        let surfaces = surfacesByParent
+        runtime.state.withLock { state in
+            state.mainID = tops.first?.info.id
+            state.mainFrame = tops.first?.frame
+            state.frames = frames
+            state.surfaces = surfaces
+            state.sentV = state.sentV.filter { frames[$0.key] != nil }
         }
         let generation = runtime.generation
-        let windows = mirrored.map(\.info)
+        let all = mirrored
         let read = trees
-        try await loop.submit { self.update(generation: generation, windows: windows, trees: read) }.get()
+        try await loop.submit { self.update(generation: generation, windows: all, trees: read) }.get()
         return mirrored
     }
 
     /// On the loop: takes a refresh's results and sends viewers the window list and trees that changed.
-    private func update(generation: Int, windows: [MirrorProtocol.WindowInfo], trees: [(MirrorProtocol.WindowID, AXSnapshot, String?)]) {
+    private func update(generation: Int, windows mirrored: [MirroredWindow], trees: [(MirrorProtocol.WindowID, AXSnapshot, String?)]) {
         guard generation == self.generation else { return }
         var texts: [String] = []
+        self.mirrored = Dictionary(mirrored.map { ($0.info.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let windows = mirrored.map(\.info)
         if windows != self.windows {
             self.windows = windows
             let ids = Set(windows.map(\.id))
@@ -598,8 +779,15 @@ public final class MirrorServer: @unchecked Sendable {
             if let read = try? await menus.bar() { bar = read }
             guard let bar else { continue }
             let open = try? await menus.openMenu()
-            let (mainID, mainFrame, click) = runtime.state.withLock { ($0.mainID, $0.mainFrame, $0.rightClick) }
-            let context = Self.contextMenu(open, mainID: mainID, mainFrame: mainFrame, rightClick: click)
+            let (mainID, frames, click, menuChanged) = runtime.state.withLock { state in
+                // The menu's own window is mirrored too (kind `menu`): a new or closed one reads the windows again.
+                let window = open.flatMap { open in open.window.flatMap { id in open.windowFrame.map { (id: id, frame: $0) } } }
+                let changed = window?.id != state.menuWindow?.id || window?.frame != state.menuWindow?.frame
+                state.menuWindow = window
+                return (state.mainID, state.frames, state.rightClick, changed)
+            }
+            if menuChanged { runtime.requestRefresh() }
+            let context = Self.contextMenu(open, mainID: mainID, frames: frames, rightClick: click)
             if context != nil { runtime.state.withLock { $0.menuWatchUntil = nil } } // it showed
             // Compared as values: JSON key order isn't stable from one encoding to the next.
             let menu = MirrorProtocol.Menu(bar: bar, context: context)
@@ -615,13 +803,15 @@ public final class MirrorServer: @unchecked Sendable {
         }
     }
 
-    /// The protocol's context menu for a popped-up menu: placed relative to the main window, at the
-    /// menu's own top-left (or the right click when the menu has no frame).
-    static func contextMenu(_ open: MenuBridge.OpenMenu?, mainID: MirrorProtocol.WindowID?, mainFrame: CGRect?,
+    /// The protocol's context menu for a popped-up menu: placed relative to the window it was opened
+    /// in (the right-clicked one while it is mirrored, else the main window), at the menu's own
+    /// top-left (or the right click when the menu has no frame).
+    static func contextMenu(_ open: MenuBridge.OpenMenu?, mainID: MirrorProtocol.WindowID?, frames: [MirrorProtocol.WindowID: CGRect],
                             rightClick: (window: MirrorProtocol.WindowID, point: CGPoint)?) -> MirrorProtocol.ContextMenu? {
-        guard let open, !open.items.isEmpty, let window = mainID ?? rightClick?.window else { return nil }
-        if let mainFrame, open.frame.width > 0, open.frame.height > 0 {
-            return .init(window: window, x: (open.frame.minX - mainFrame.minX).rounded(), y: (open.frame.minY - mainFrame.minY).rounded(),
+        let clicked = rightClick.flatMap { frames[$0.window] != nil ? $0.window : nil }
+        guard let open, !open.items.isEmpty, let window = clicked ?? mainID ?? rightClick?.window else { return nil }
+        if let frame = frames[window], open.frame.width > 0, open.frame.height > 0 {
+            return .init(window: window, x: (open.frame.minX - frame.minX).rounded(), y: (open.frame.minY - frame.minY).rounded(),
                          items: open.items)
         }
         let point = rightClick?.point ?? .zero
@@ -911,33 +1101,50 @@ public final class MirrorServer: @unchecked Sendable {
             runtime.requestMenuRefresh()
             runtime.requestRefresh()
             // A menu command often changes the app a moment later, and not every change is announced.
-            runtime.add(Task { [weak runtime] in
-                for delay in Self.menuActionRefreshes {
-                    try? await Task.sleep(for: delay)
-                    runtime?.requestRefresh()
-                }
-            })
+            runtime.refresh(after: Self.menuActionRefreshes)
             return
         }
         guard let window = message.window else { return } // viewport, requestControl: events only (reserved)
-        guard let snapshot = try? await loop.submit({ self.snapshots[window] }).get() else { return } // not a mirrored window
-        let target = InputSynthesizer.Window(id: window, frame: snapshot.frame)
+        // Not a mirrored window: ignored.
+        guard let (mirroredWindow, latest) = try? await loop.submit({ () -> (MirroredWindow, AXSnapshot?)? in
+            guard let mirrored = self.mirrored[window] else { return nil }
+            return (mirrored, self.snapshots[window])
+        }).get() else { return }
+        let root = mirroredWindow.root
+        let target = InputSynthesizer.Window(id: window, frame: latest?.frame ?? mirroredWindow.frame)
+        /// The node with this (viewer) key in the latest snapshot, else in a fresh read of the window.
+        func node(_ key: String) async throws -> MirrorProtocol.AXNode? {
+            if let node = latest?.node(key) { return node }
+            return Self.rebased(try await app.accessibility.snapshot(window: .number(window)), root: root).node(key)
+        }
         do {
             switch message {
+            case .windowAction(let action):
+                switch (action.action, mirroredWindow.info.kind) {
+                case (.focus, .menu): return
+                case (.focus, _): try await app.accessibility.raise(window: window)
+                case (.close, .main): return // the share's own window stays
+                case (.close, .menu): try await app.menus?.closeOpen()
+                case (.close, _): try await app.accessibility.close(window: window)
+                }
+                runtime.refresh(after: Self.pressRefreshes)
+            case .act where latest == nil, .setText where latest == nil:
+                return // a window without a tree (a menu): no keys to act on
             case .act(let act) where act.action == .showMenu && app.menus != nil:
                 // AXShowMenu answers only when the menu closes; MenuBridge doesn't wait for that.
-                var node = snapshot.node(act.key)
-                if node == nil { node = try await app.accessibility.snapshot(window: .number(window)).node(act.key) }
-                guard let node, node.w > 0, node.h > 0 else { return }
+                guard let node = try await node(act.key), node.w > 0, node.h > 0 else { return }
                 let center = CGPoint(x: node.x + node.w / 2, y: node.y + node.h / 2)
                 runtime.state.withLock { $0.rightClick = (window, center) }
-                try await app.menus?.showMenu(at: CGPoint(x: snapshot.frame.minX + center.x, y: snapshot.frame.minY + center.y))
+                try await app.menus?.showMenu(at: target.global(center))
                 runtime.watchMenus()
             case .act(let act):
-                try await app.accessibility.perform(key: act.key, action: act.action, window: window)
+                guard let key = MirrorProtocol.NodeKey.unrebase(act.key, from: root) else { return }
+                try await app.accessibility.perform(key: key, action: act.action, window: window)
+                runtime.refresh(after: Self.pressRefreshes)
             case .pointer(let pointer):
                 try app.input.send(pointer, in: target)
                 if pointer.kind == .move { return }
+                if pointer.kind == .up { runtime.refresh(after: Self.pressRefreshes) }
                 if pointer.kind == .rightup, app.menus != nil {
                     // The app may pop up a context menu: read the menus often until it shows.
                     runtime.state.withLock { $0.rightClick = (window, CGPoint(x: pointer.x, y: pointer.y)) }
@@ -948,9 +1155,7 @@ public final class MirrorServer: @unchecked Sendable {
             case .key(let key):
                 try app.input.send(key)
             case .setText(let setText):
-                var node = snapshot.node(setText.key)
-                if node == nil { node = try await app.accessibility.snapshot(window: .number(window)).node(setText.key) }
-                guard let node else { return }
+                guard let node = try await node(setText.key) else { return }
                 try await app.input.replaceText(in: target, field: CGRect(x: node.x, y: node.y, width: node.w, height: node.h),
                                                 with: setText.value, timeout: Self.setTextTimeout)
             case .viewport, .menuAction, .requestControl:

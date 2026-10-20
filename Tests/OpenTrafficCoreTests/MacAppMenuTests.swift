@@ -106,16 +106,21 @@ private typealias Item = MirrorProtocol.MenuItem
         #expect(action.contains(#""context":true"#) && action.contains(#""t":"menuAction""#))
     }
 
-    @Test func aPoppedUpMenuIsPlacedRelativeToTheMainWindow() {
+    @Test func aPoppedUpMenuIsPlacedRelativeToTheWindowItWasOpenedIn() {
         let open = MenuBridge.OpenMenu(items: [Item(title: "Duplicate")], frame: CGRect(x: 1802, y: 1303, width: 134, height: 93))
         let main = CGRect(x: 1750, y: 1172, width: 1440, height: 988)
-        #expect(MirrorServer.contextMenu(open, mainID: 9, mainFrame: main, rightClick: nil) == .init(window: 9, x: 52, y: 131, items: open.items))
+        let second = CGRect(x: 1790, y: 1212, width: 360, height: 260)
+        let frames: [Proto.WindowID: CGRect] = [9: main, 11: second]
+        #expect(MirrorServer.contextMenu(open, mainID: 9, frames: frames, rightClick: nil) == .init(window: 9, x: 52, y: 131, items: open.items))
+        // Right-clicked in the second window: relative to that one.
+        #expect(MirrorServer.contextMenu(open, mainID: 9, frames: frames, rightClick: (11, CGPoint(x: 10, y: 90)))
+            == .init(window: 11, x: 12, y: 91, items: open.items))
         // Without a frame: at the right click.
         let frameless = MenuBridge.OpenMenu(items: open.items, frame: .zero)
-        #expect(MirrorServer.contextMenu(frameless, mainID: 9, mainFrame: main, rightClick: (9, CGPoint(x: 40, y: 50)))
+        #expect(MirrorServer.contextMenu(frameless, mainID: 9, frames: frames, rightClick: (9, CGPoint(x: 40, y: 50)))
             == .init(window: 9, x: 40, y: 50, items: open.items))
-        #expect(MirrorServer.contextMenu(nil, mainID: 9, mainFrame: main, rightClick: nil) == nil)
-        #expect(MirrorServer.contextMenu(.init(items: [], frame: open.frame), mainID: 9, mainFrame: main, rightClick: nil) == nil)
+        #expect(MirrorServer.contextMenu(nil, mainID: 9, frames: frames, rightClick: nil) == nil)
+        #expect(MirrorServer.contextMenu(.init(items: [], frame: open.frame), mainID: 9, frames: frames, rightClick: nil) == nil)
     }
 }
 

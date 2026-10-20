@@ -372,6 +372,8 @@ public struct MacAppAgentContext: Equatable, Sendable {
             if menu.context, menu.path.isEmpty { return "closed the context menu" }
             let path = menu.path.map { oneLine($0, limit: 60) }.joined(separator: " › ")
             return menu.context ? "chose “\(path)” in the context menu" : "chose the menu item \(path)"
+        case .windowAction(let action):
+            return action.action == .close ? "closed window \(action.window)" : "brought window \(action.window) to the front"
         case .viewport, .requestControl:
             return nil
         }

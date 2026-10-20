@@ -646,6 +646,151 @@ async function compactMenu() {
   assert(!(await received()).some((x) => x.t === "act" || x.t === "pointer"), "the click went through the menu to the app");
 }
 
+// ---- extra windows: sheets, alerts, popovers, second windows and menus as surfaces of their own
+
+const winSel = (id) => `document.querySelector('.otm-window[data-window="${id}"]')`;
+// Where a window's surface is once its entrance animation (a sheet sliding in, an alert popping in) is over.
+const rectOf = (id) => evaluate(`(async () => { const el = ${winSel(id)}; if (!el) return null;
+  await Promise.all(el.getAnimations().map((a) => a.finished.catch(() => null)));
+  const r = el.getBoundingClientRect(); const cs = getComputedStyle(el);
+  return { l: r.left, t: r.top, w: r.width, h: r.height, r: r.right, b: r.bottom, z: Number(cs.zIndex), shown: cs.display !== 'none' && cs.visibility !== 'hidden',
+    role: el.getAttribute('role'), modal: el.getAttribute('aria-modal'), label: el.getAttribute('aria-label'), kind: el.dataset.kind }; })()`);
+const factor = () => evaluate(`(() => { const r = ${winSel(1)}.getBoundingClientRect(); return r.width / ${fixture.hello.windows[0].w}; })()`);
+const near = (a, b, tol = 1.5) => Math.abs(a - b) <= tol;
+const allIdsUnique = () => evaluate(`(() => { const ids = [...document.querySelectorAll('[id^="ax-"]')].map((e) => e.id); return ids.length === new Set(ids).size; })()`);
+const SHEET = "/Window:/Sheet:";
+
+await check("a sheet is a surface of its own over its window: a dialog with its own layer and ids, taking input, gone when it closes", async () => {
+  await received(true);
+  for (const m of fixture.named.sheetOpen) await stubSend(m);
+  await waitFor(`!!${winSel(2)} && !!${byKey(SHEET + "/Group:/Button:Cancel")}`, "the sheet's surface and layer");
+  const main = await rectOf(1), sheet = await rectOf(2), f = await factor();
+  assert(sheet.kind === "sheet" && sheet.role === "dialog" && sheet.modal === "true", "sheet semantics " + JSON.stringify(sheet));
+  assert(near(sheet.l, main.l + 240 * f) && near(sheet.t, main.t + 28 * f) && near(sheet.w, 380 * f), "sheet at " + JSON.stringify(sheet) + " over " + JSON.stringify(main));
+  assert(sheet.z > main.z, "the sheet is under its window");
+  // Keys (and so ids) never collide across windows: the main window has its own Cancel.
+  const ids = await evaluate(`[${byKey(SHEET + "/Group:/Button:Cancel")}.id, ${byKey(G + "/Button:Cancel")}.id]`);
+  assert(ids[0] === domId(SHEET + "/Group:/Button:Cancel") && ids[1] === domId(G + "/Button:Cancel") && ids[0] !== ids[1], "ids " + ids);
+  assert(await allIdsUnique(), "two elements share an ax- id");
+  assert(await evaluate(`${byKey(SHEET + "/Group:/Button:Cancel")}.closest('.otm-window').dataset.window`) === "2", "the sheet's element isn't in its own layer");
+  const end = Date.now() + 3000;
+  let painted = false;
+  while (!painted && Date.now() < end) {
+    painted = await evaluate(`(() => { const c = ${winSel(2)}.querySelector('canvas'); return c.width === ${380 * 2} && c.getContext('2d').getImageData(20, 20, 1, 1).data[3] > 0; })()`);
+    if (!painted) await sleep(50);
+  }
+  assert(painted, "the sheet's frame didn't paint its canvas");
+  // The comment picker finds the sheet's own button and labels it.
+  const c = await nodeCenter(SHEET + "/Group:/Button:Cancel");
+  const picked = await evaluate(`(() => { ${collabLabelSource()} const el = document.elementFromPoint(${c.x}, ${c.y}); return el.dataset.key + '|' + labelFor(el); })()`);
+  assert(picked === SHEET + "/Group:/Button:Cancel|Cancel", "picker over the sheet: " + picked);
+  await shot("13-sheet");
+  await received(true);
+  await click(c.x, c.y);
+  const acts = await waitReceived((m) => m.t === "act", "act press on the sheet's Cancel");
+  assert(acts[0].window === 2 && acts[0].key === SHEET + "/Group:/Button:Cancel" && acts[0].action === "press", JSON.stringify(acts));
+  assert(!(await received()).some((m) => m.t === "windowAction"), "a press in a sheet asked to focus a window");
+  await stubSend("onlyMain");
+  await waitFor(`!${winSel(2)} && !${byKey(SHEET + "/Group:/Button:Cancel")}`, "the sheet to go");
+  assert(await evaluate(`!!${byKey(ADD)} && ${byKey(ADD)}.id === 'ax-3tt01y'`), "the main window's layer suffered");
+});
+
+await check("an alert is centred over its window and its buttons act on it", async () => {
+  for (const m of fixture.named.alertOpen) await stubSend(m);
+  const DELETE = "/Window:/Sheet:alert/Button:Delete";
+  await waitFor(`!!${winSel(3)} && !!${byKey(DELETE)}`, "the alert");
+  const main = await rectOf(1), alert = await rectOf(3), f = await factor();
+  assert(alert.role === "dialog" && alert.kind === "alert", "alert semantics " + JSON.stringify(alert));
+  assert(near(alert.l + alert.w / 2, main.l + main.w / 2) && near(alert.t, main.t + 28 * f), "alert at " + JSON.stringify(alert));
+  await received(true);
+  await clickOn(byKey(DELETE));
+  const acts = await waitReceived((m) => m.t === "act", "act press on Delete");
+  assert(acts[0].window === 3 && acts[0].key === DELETE, JSON.stringify(acts));
+  await stubSend("onlyMain");
+  await waitFor(`!${winSel(3)}`, "the alert to go");
+});
+
+await check("a popover shows at its frame, overhanging its window without rescaling the desk; clicks in it go to it", async () => {
+  const before = await evaluate(`document.getElementById('otm-stage').style.transform + '|' + document.getElementById('otm-fit').style.width`);
+  for (const m of fixture.named.popoverOpen) await stubSend(m);
+  await waitFor(`!!${winSel(4)}`, "the popover");
+  const main = await rectOf(1), pop = await rectOf(4), f = await factor();
+  assert(near(pop.l, main.l + 600 * f) && near(pop.t, main.t + 520 * f) && pop.b > main.b, "popover at " + JSON.stringify(pop) + " over " + JSON.stringify(main));
+  const after = await evaluate(`document.getElementById('otm-stage').style.transform + '|' + document.getElementById('otm-fit').style.width`);
+  assert(after === before, "the desk rescaled for a popover: " + before + " -> " + after);
+  await received(true);
+  const p = { x: pop.l + 200 * f, y: pop.t + 90 * f };
+  await click(p.x, p.y);
+  const downs = await waitReceived((m) => m.t === "pointer" && m.kind === "down", "a click in the popover");
+  assert(downs[0].window === 4 && near(downs[0].x, 200, 2) && near(downs[0].y, 90, 2), JSON.stringify(downs));
+  await stubSend("onlyMain");
+  await waitFor(`!${winSel(4)}`, "the popover to go");
+});
+
+await check("a second window sits beside the main one with its own surface; a press in another window focuses it first", async () => {
+  for (const m of fixture.named.secondWindow) await stubSend(m);
+  const STATS = "/Window:Statistics/Group:/Button:Cancel";
+  await waitFor(`!!${winSel(5)} && !!${byKey(STATS)}`, "the Statistics window");
+  const main = await rectOf(1), stats = await rectOf(5), f = await factor();
+  assert(near(stats.l, main.r + 32 * f, 2) && near(stats.t, main.t) && near(stats.w, 360 * f) && stats.shown, "second window at " + JSON.stringify(stats) + ", main " + JSON.stringify(main));
+  assert(await evaluate(`document.querySelector('.otm-tabs').hidden`), "tabs show while the windows fit side by side");
+  assert(await allIdsUnique(), "ids collide across windows");
+  await shot("14-second-window");
+  await received(true);
+  await clickOn(byKey(STATS));
+  let got = await waitReceived((m) => m.t === "act", "act in the second window");
+  assert(got[0].window === 5 && got[0].key === STATS, JSON.stringify(got));
+  // The app's key window is Statistics (focused in the list): a press in the main window focuses that first.
+  await received(true);
+  const p = await windowPoint(600, 420);
+  await click(p.x, p.y);
+  got = await waitReceived((m) => m.t === "pointer" && m.kind === "down", "a click in the main window");
+  const list = await received();
+  const focus = list.findIndex((m) => m.t === "windowAction");
+  const down = list.findIndex((m) => m.t === "pointer" && m.kind === "down");
+  assert(focus >= 0 && focus < down && list[focus].window === 1 && list[focus].action === "focus", "no focus before the click: " + JSON.stringify(list));
+});
+
+await check("when side by side would be too small the windows become tabs: a tab shows its window and focuses it, × closes it", async () => {
+  try {
+    await cdp("Emulation.setDeviceMetricsOverride", { width: 1000, height: 800, deviceScaleFactor: 2, mobile: false });
+    await waitFor(`!document.querySelector('.otm-tabs').hidden && document.querySelectorAll('.otm-tab').length === 2`, "two tabs");
+    let main = await rectOf(1), stats = await rectOf(5);
+    assert(!main.shown && stats.shown, "the focused new window isn't the tab that shows: " + JSON.stringify([main.shown, stats.shown]));
+    const tabs = await evaluate(`[...document.querySelectorAll('.otm-tab')].map((t) => t.querySelector('.otm-tab-title').textContent + (t.querySelector('.otm-tab-close') ? '×' : ''))`);
+    assert(same(tabs, ["Orbit", "Statistics×"]), "tabs " + JSON.stringify(tabs));
+    const r = await evaluate(`(() => { const t = document.querySelector('.otm-tabs').getBoundingClientRect(); const w = ${winSel(5)}.getBoundingClientRect(); return { tb: t.bottom, wt: w.top }; })()`);
+    assert(r.tb <= r.wt, "the tabs cover the window: " + JSON.stringify(r));
+    await shot("15-tabs-1000");
+    await received(true);
+    await clickOn(`document.querySelector('.otm-tab[data-window="1"] .otm-tab-title')`);
+    await waitReceived((m) => m.t === "windowAction" && m.window === 1 && m.action === "focus", "focus from the tab");
+    main = await rectOf(1);
+    stats = await rectOf(5);
+    assert(main.shown && !stats.shown, "the tab didn't switch windows");
+    await clickOn(`document.querySelector('.otm-tab[data-window="5"] .otm-tab-close')`);
+    await waitReceived((m) => m.t === "windowAction" && m.window === 5 && m.action === "close", "close from the tab");
+    await stubSend("onlyMain");
+    await waitFor(`!${winSel(5)} && document.querySelector('.otm-tabs').hidden`, "the second window and the tabs to go");
+  } finally {
+    await cdp("Emulation.clearDeviceMetricsOverride");
+  }
+  await waitFor(`(() => { const r = ${winSel(1)}.getBoundingClientRect(); return r.width > 0 && getComputedStyle(${winSel(1)}).display !== 'none'; })()`, "the main window back");
+});
+
+await check("a popped-up menu's own window gives way to the web context menu", async () => {
+  await stubSend("menuWindowOpen");
+  await waitFor(`!!${winSel(6)}`, "the menu's window");
+  assert((await rectOf(6)).shown, "the menu's pixels hide while there is no web menu");
+  await stubSend("contextMenu");
+  await waitFor(`!!document.querySelector('.otm-menu-context')`, "the web context menu");
+  assert(!(await rectOf(6)).shown, "the menu's pixels show under the web menu");
+  await press("Escape", "Escape", 27);
+  await stubSend("noContext");
+  await stubSend("onlyMain");
+  await waitFor(`!${winSel(6)}`, "the menu's window to go");
+});
+
 // ---- the Simple view: below 700 px the tree as a page of real text and controls
 
 function collabAnchorSource() {

@@ -2,7 +2,9 @@
  * OpenTraffic Mac app viewer, served at /__opentraffic/macapp/viewer.js by the mirror server.
  * Draws a shared Mac app's windows from frame tiles, lays real web elements over the pixels from the
  * app's accessibility tree (so the collaboration overlay picks, labels and pins them like any page),
- * and sends the viewer's clicks, scrolling and typing back, showing their effect at once. On small
+ * and sends the viewer's clicks, scrolling and typing back, showing their effect at once. Every window
+ * the app opens is a surface of its own: sheets, alerts, popovers and menus over their window, second
+ * windows beside the main one (or as tabs when side by side would make everything too small). On small
  * screens (or when chosen in the bar) a Simple view shows the same trees as a page of real text and
  * web controls instead of the scaled window.
  * The whole contract is docs/macapp-mirror-protocol.md.
@@ -22,6 +24,11 @@
   const FOCUS_QUIET_MS = 500; // the app's focus moves ours only when the viewer hasn't just clicked or typed
   const BACKOFF = [500, 1000, 2000, 4000, 8000];
   const PAD = 24; // desk margin around the windows, CSS pixels
+  const GAP = 32; // between windows side by side, in points
+  const TABS_H = 40; // room for the window tabs above the windows, CSS pixels
+  const TAB_BELOW = 0.8; // tabs when side by side would scale the windows below this share of one at a time
+  // Kinds drawn over the window they belong to (`parent`); the others are windows of their own.
+  const ATTACHED = new Set(["sheet", "alert", "popover", "menu"]);
   const SIMPLE_BELOW = 700; // viewports narrower than this get the Simple view unless the viewer chose
   const VIEW_PREF = "opentraffic.macapp.view"; // localStorage: "simple" or "window", the viewer's choice
   const SET_TEXT_INTERVAL = 120; // Simple view fields: at most this often a setText while typing
@@ -83,6 +90,8 @@
     bounds: { x: 0, y: 0, w: 1, h: 1 },
     socket: null, attempt: 0, retry: null, status: "running", statusMessage: null,
     activeWindow: null, // the window keys go to when no field has focus
+    tabbed: false, // the top-level windows show one at a time, as tabs
+    tab: null, // the top-level window shown while tabbed
     lastLocal: 0, // when the viewer last clicked or typed
     simple: false, // the Simple view is showing (its elements carry the ids, not the layer's)
     viewPref: null, // "simple", "window" or null (by width)
@@ -153,6 +162,7 @@
       case "cursor": return setCursor(m.shape);
       case "status": return setStatus(m.state, m.message);
       case "menu": return applyMenu(m);
+      // (windowAction is client to server only.)
       default: return; // unknown and reserved messages are ignored
     }
   }
@@ -192,12 +202,15 @@
     state.windows.clear();
     state.order = [];
     state.activeWindow = null;
+    state.tab = null;
+    layout();
   }
 
   function applyWindows(list) {
     if (!Array.isArray(list)) return;
     const seen = new Set();
     const order = [];
+    const added = [];
     for (const info of list) {
       if (!info || typeof info !== "object" || !Number.isInteger(info.id) || seen.has(info.id)) continue;
       const w = Math.max(1, Number(info.w) || 0), h = Math.max(1, Number(info.h) || 0);
@@ -207,13 +220,22 @@
       if (!win) {
         win = makeWindow(info.id);
         state.windows.set(info.id, win);
+        added.push(win);
       }
       win.info = { id: info.id, title: String(info.title || ""), w, h, x: Number(info.x) || 0, y: Number(info.y) || 0,
-        kind: typeof info.kind === "string" ? info.kind : "main", parent: Number.isInteger(info.parent) ? info.parent : null };
+        kind: typeof info.kind === "string" ? info.kind : "main", parent: Number.isInteger(info.parent) ? info.parent : null,
+        focused: info.focused === true };
       win.el.dataset.kind = win.info.kind;
+      if (win.info.focused) win.el.dataset.focused = "";
+      else delete win.el.dataset.focused;
       // What the comment picker calls a spot in the window that has no element of its own.
       win.label = (win.info.title || state.appName) + (win.info.kind === "main" ? " window" : " " + win.info.kind);
       win.layer.setAttribute("aria-label", win.label);
+      // Sheets and alerts hold their window until answered, like a modal dialog.
+      const dialog = win.info.kind === "sheet" || win.info.kind === "alert";
+      setAttr(win.el, "role", dialog ? "dialog" : null);
+      setAttr(win.el, "aria-modal", dialog ? "true" : null);
+      setAttr(win.el, "aria-label", dialog || win.info.kind === "popover" ? win.label : null);
       sizeCanvas(win, false);
     }
     for (const [id, win] of state.windows) {
@@ -223,6 +245,8 @@
       if (state.activeWindow === id) state.activeWindow = null;
     }
     state.order = order;
+    // A window that just opened comes to the front, as on a Mac: its tab shows when they are tabs.
+    for (const win of added) if (win.info.focused && !parentOf(win)) state.tab = win.id;
     layout();
     scheduleSimple();
   }
@@ -274,36 +298,169 @@
     if (keep) win.ctx.drawImage(keep, 0, 0, keep.width * (force ? pw / keep.width : 1), keep.height * (force ? ph / keep.height : 1));
   }
 
-  // Places the windows (relative to the main window), then scales the whole desk down to fit.
+  // The window a surface is drawn over (its parent while that is shown), or null for a window of its own.
+  function parentOf(win) {
+    const p = win && win.info && ATTACHED.has(win.info.kind) && win.info.parent !== null ? state.windows.get(win.info.parent) : null;
+    return p && p !== win && p.info ? p : null;
+  }
+  // The window of its own a surface belongs to (itself for one).
+  function topOf(win) {
+    for (let i = 0; win && i < 8; i++) {
+      const p = parentOf(win);
+      if (!p) return win;
+      win = p;
+    }
+    return win;
+  }
+  const tops = () => state.order.map((id) => state.windows.get(id)).filter((w) => w && w.info && !parentOf(w));
+  const focusedTop = () => {
+    for (const w of state.windows.values()) if (w.info && w.info.focused) return topOf(w);
+    return null;
+  };
+
+  // How much fit-to-viewport would scale a w by h desk, with room for the tabs when they show.
+  function fitFactor(w, h, tabbed) {
+    const availW = Math.max(1, desk.clientWidth - PAD * 2), availH = Math.max(1, desk.clientHeight - PAD * 2 - (tabbed ? TABS_H : 0));
+    return Math.min(1, availW / w, availH / h);
+  }
+
+  // Places the windows: the main one and second windows side by side (or one at a time, as tabs, when
+  // side by side would make them much smaller), sheets, popovers and menus where the app has them over
+  // their window, alerts centred on it. Then scales the whole desk down to fit.
   function layout() {
+    const top = tops();
+    const side = new Map();
+    let x = 0, sideH = 1, maxW = 1, maxH = 1;
+    for (const w of top) {
+      side.set(w.id, x);
+      x += w.info.w + GAP;
+      sideH = Math.max(sideH, w.info.h);
+      maxW = Math.max(maxW, w.info.w);
+      maxH = Math.max(maxH, w.info.h);
+    }
+    const sideW = Math.max(1, x - GAP);
+    const wasTabbed = state.tabbed;
+    state.tabbed = top.length > 1 && !state.simple && fitFactor(sideW, sideH, false) < fitFactor(maxW, maxH, true) * TAB_BELOW;
+    if (state.tabbed && !top.some((w) => w.id === state.tab)) state.tab = (focusedTop() || top[0]).id;
+    if (!state.tabbed) state.tab = null;
+
+    const placed = new Map(); // id -> { x, y, shown }
+    function place(win, depth) {
+      if (placed.has(win.id)) return placed.get(win.id);
+      const p = depth < 8 ? parentOf(win) : null;
+      let at;
+      if (!p) {
+        at = state.tabbed ? { x: 0, y: 0, shown: win.id === state.tab } : { x: side.has(win.id) ? side.get(win.id) : 0, y: 0, shown: true };
+      } else {
+        const pa = place(p, depth + 1);
+        const i = win.info, pi = p.info;
+        if (i.kind === "alert") {
+          // Centred over its window; an alert sheet stays where the app put it, under the title bar.
+          const dy = i.y - pi.y;
+          at = { x: pa.x + (pi.w - i.w) / 2, y: pa.y + (dy >= 0 && dy + i.h <= pi.h ? dy : Math.max(0, (pi.h - i.h) / 3)), shown: pa.shown };
+        } else {
+          at = { x: pa.x + i.x - pi.x, y: pa.y + i.y - pi.y, shown: pa.shown };
+        }
+      }
+      placed.set(win.id, at);
+      return at;
+    }
     let minX = 0, minY = 0, maxX = 1, maxY = 1, first = true;
-    state.order.forEach((id, i) => {
+    state.order.forEach((id, index) => {
       const win = state.windows.get(id);
-      const { x, y, w, h } = win.info;
-      if (first) { minX = x; minY = y; maxX = x + w; maxY = y + h; first = false; }
-      minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
-      win.el.style.zIndex = String(i + 1);
+      if (!win || !win.info) return;
+      const at = place(win, 0);
+      win.el.style.zIndex = String(index + 1);
+      win.el.classList.toggle("otm-hidden", !at.shown);
+      if (!at.shown || parentOf(win)) return; // the windows of their own decide the desk's size; surfaces may overhang
+      const { w, h } = win.info;
+      if (first) { minX = at.x; minY = at.y; maxX = at.x + w; maxY = at.y + h; first = false; }
+      minX = Math.min(minX, at.x); minY = Math.min(minY, at.y); maxX = Math.max(maxX, at.x + w); maxY = Math.max(maxY, at.y + h);
     });
     state.bounds = { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
     for (const id of state.order) {
       const win = state.windows.get(id);
-      const { x, y, w, h } = win.info;
-      Object.assign(win.el.style, { left: x - minX + "px", top: y - minY + "px", width: w + "px", height: h + "px" });
+      if (!win || !win.info) continue;
+      const at = placed.get(id);
+      const { w, h } = win.info;
+      Object.assign(win.el.style, { left: at.x - minX + "px", top: at.y - minY + "px", width: w + "px", height: h + "px" });
     }
+    syncMenuSurfaces();
+    renderTabs(top);
+    if (wasTabbed !== state.tabbed) desk.classList.toggle("otm-desk-tabbed", state.tabbed);
     fit();
+  }
+
+  // A menu the app popped up shows as a web menu (with real, choosable items) where the app put it;
+  // its pixels only show while there is no web menu for it.
+  function syncMenuSurfaces() {
+    for (const win of state.windows.values()) {
+      if (win.info && win.info.kind === "menu") win.el.classList.toggle("otm-covered", !!contextBox);
+    }
+  }
+
+  // The window tabs, while the windows show one at a time.
+  const tabsEl = document.createElement("div");
+  tabsEl.className = "otm-tabs";
+  tabsEl.setAttribute("role", "tablist");
+  tabsEl.setAttribute("aria-label", "Windows");
+  tabsEl.setAttribute("data-opentraffic-ui", "");
+  tabsEl.hidden = true;
+  desk.prepend(tabsEl);
+
+  function renderTabs(top) {
+    tabsEl.hidden = !state.tabbed;
+    if (!state.tabbed) {
+      if (tabsEl.childElementCount) tabsEl.textContent = "";
+      return;
+    }
+    const want = top.map((w) => w.id).join(",") + "|" + state.tab + "|" + top.map((w) => w.info.title).join("\u0000");
+    if (tabsEl.dataset.want === want) return;
+    tabsEl.dataset.want = want;
+    tabsEl.textContent = "";
+    for (const w of top) {
+      const tab = document.createElement("span");
+      tab.className = "otm-tab";
+      tab.dataset.window = String(w.id);
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "otm-tab-title";
+      b.setAttribute("role", "tab");
+      b.setAttribute("aria-selected", String(w.id === state.tab));
+      b.textContent = w.info.title || (w.info.kind === "main" ? state.appName : "Window");
+      b.addEventListener("click", () => showTab(w.id));
+      tab.appendChild(b);
+      if (w.info.kind !== "main") {
+        const x = document.createElement("button");
+        x.type = "button";
+        x.className = "otm-tab-close";
+        x.setAttribute("aria-label", "Close " + (w.info.title || "window"));
+        x.textContent = "×";
+        x.addEventListener("click", () => send({ t: "windowAction", window: w.id, action: "close" }));
+        tab.appendChild(x);
+      }
+      tabsEl.appendChild(tab);
+    }
+  }
+
+  // Shows a window's tab and makes it the app's key window, so typing goes there.
+  function showTab(id) {
+    state.tab = id;
+    state.activeWindow = id;
+    send({ t: "windowAction", window: id, action: "focus" });
+    layout();
   }
 
   function fit() {
     const { w, h } = state.bounds;
-    const availW = Math.max(1, desk.clientWidth - PAD * 2), availH = Math.max(1, desk.clientHeight - PAD * 2);
-    const f = Math.min(1, availW / w, availH / h);
+    const f = fitFactor(w, h, state.tabbed);
     stage.style.width = w + "px";
     stage.style.height = h + "px";
     stage.style.transform = f === 1 ? "" : "scale(" + f + ")";
     fitBox.style.width = w * f + "px";
     fitBox.style.height = h * f + "px";
   }
-  window.addEventListener("resize", fit);
+  window.addEventListener("resize", () => layout());
 
   // ---------------------------------------------------------------- frames
 
@@ -551,6 +708,9 @@
     if (!hit) return;
     state.lastLocal = Date.now();
     state.activeWindow = hit.win.id;
+    // A press in another window of its own makes that one the app's key window first, as a click would.
+    const top = topOf(hit.win), focused = focusedTop();
+    if (top && focused && top !== focused) send({ t: "windowAction", window: top.id, action: "focus" });
     if (e.button === 2) {
       dragging = { win: hit.win, pointerId: e.pointerId, right: true };
       pointer(hit.win, "rightdown", hit.x, hit.y, e);
@@ -1068,7 +1228,7 @@
     const els = [];
     for (const id of state.order) {
       const win = state.windows.get(id);
-      if (!win || !win.info) continue;
+      if (!win || !win.info || win.info.kind === "menu") continue; // a menu shows as the web context menu
       renderSimpleWindow(win);
       els.push(win.s);
     }
@@ -1271,7 +1431,7 @@
     if (simple) {
       renderSimple();
       window.scrollTo(0, 0);
-    } else fit();
+    } else layout();
   }
 
   function chooseView(view) {
@@ -1619,6 +1779,7 @@
     if (!box.childElementCount) return;
     document.body.appendChild(box);
     contextBox = box;
+    syncMenuSurfaces();
     const win = state.windows.get(ctx.window);
     const r = win && win.el && !state.simple ? win.el.getBoundingClientRect() : null;
     if (r && r.width) {
@@ -1632,6 +1793,7 @@
   function hideContext() {
     if (contextBox) contextBox.remove();
     contextBox = null;
+    syncMenuSurfaces();
   }
 
   // Closes the app's context menu without choosing (as a click elsewhere or Escape does on a Mac).

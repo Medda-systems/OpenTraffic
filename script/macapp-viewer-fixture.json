@@ -1,5 +1,5 @@
 {
- "about": "Recorded replay for script/macapp-viewer-stub.mjs: a mock Orbit order form, with the real Orbit menu bar (`menu`, as the mirror server sends it). Messages follow docs/macapp-mirror-protocol.md; `images` are base64 JPEG tiles (scale 2) that frames name by key.",
+ "about": "Recorded replay for script/macapp-viewer-stub.mjs: a mock Orbit order form, with the real Orbit menu bar (`menu`, as the mirror server sends it) and its extra windows as named messages (a sheet, an alert sheet, a popover, the Statistics window, a popped-up menu's window; keys as the server sends them). Messages follow docs/macapp-mirror-protocol.md; `images` are base64 JPEG tiles (scale 2) that frames name by key (a tile is drawn at its own size, so one image serves any size).",
  "hello": {
   "t": "hello",
   "boot": "6F1C7D0E-2D7B-4E55-9C59-0B5A3C1D2E3F",
@@ -17,7 +17,8 @@
     "x": 0,
     "y": 0,
     "kind": "main",
-    "parent": null
+    "parent": null,
+    "focused": true
    }
   ]
  },
@@ -2710,6 +2711,567 @@
     }
    ],
    "context": null
+  },
+  "sheetOpen": [
+   {
+    "t": "windows",
+    "windows": [
+     {
+      "id": 1,
+      "title": "Orbit",
+      "w": 860,
+      "h": 572,
+      "x": 0,
+      "y": 0,
+      "kind": "main",
+      "parent": null,
+      "focused": false
+     },
+     {
+      "id": 2,
+      "title": "",
+      "w": 380,
+      "h": 154,
+      "x": 240,
+      "y": 28,
+      "kind": "sheet",
+      "parent": 1,
+      "focused": true
+     }
+    ]
+   },
+   {
+    "t": "tree",
+    "window": 2,
+    "v": "sheet-1",
+    "nodes": [
+     {
+      "key": "/Window:/Sheet:",
+      "role": "AXSheet",
+      "label": "",
+      "value": null,
+      "x": 0,
+      "y": 0,
+      "w": 380,
+      "h": 154,
+      "depth": 0,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": []
+     },
+     {
+      "key": "/Window:/Sheet:/Group:",
+      "role": "AXGroup",
+      "label": "",
+      "value": null,
+      "x": 0,
+      "y": 0,
+      "w": 380,
+      "h": 154,
+      "depth": 1,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": []
+     },
+     {
+      "key": "/Window:/Sheet:/Group:/StaticText:Shipping address for Ada Lovelace",
+      "role": "AXStaticText",
+      "label": "Shipping address for Ada Lovelace",
+      "value": null,
+      "x": 20,
+      "y": 20,
+      "w": 240,
+      "h": 16,
+      "depth": 2,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": []
+     },
+     {
+      "key": "/Window:/Sheet:/Group:/StaticText:Street",
+      "role": "AXStaticText",
+      "label": "Street",
+      "value": null,
+      "x": 20,
+      "y": 56,
+      "w": 50,
+      "h": 16,
+      "depth": 2,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": []
+     },
+     {
+      "key": "/Window:/Sheet:/Group:/TextField:",
+      "role": "AXTextField",
+      "label": "",
+      "value": "1 Analytical Way",
+      "x": 80,
+      "y": 53,
+      "w": 280,
+      "h": 22,
+      "depth": 2,
+      "enabled": true,
+      "focused": true,
+      "selected": false,
+      "actions": []
+     },
+     {
+      "key": "/Window:/Sheet:/Group:/Button:Cancel",
+      "role": "AXButton",
+      "label": "Cancel",
+      "value": null,
+      "x": 214,
+      "y": 112,
+      "w": 70,
+      "h": 24,
+      "depth": 2,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": [
+       "press"
+      ]
+     },
+     {
+      "key": "/Window:/Sheet:/Group:/Button:Save",
+      "role": "AXButton",
+      "label": "Save",
+      "value": null,
+      "x": 292,
+      "y": 112,
+      "w": 70,
+      "h": 24,
+      "depth": 2,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": [
+       "press"
+      ]
+     }
+    ]
+   },
+   {
+    "t": "frame",
+    "window": 2,
+    "full": true,
+    "tiles": [
+     {
+      "x": 0,
+      "y": 0,
+      "w": 380,
+      "h": 154,
+      "image": "customerAda",
+      "format": 0
+     }
+    ]
+   }
+  ],
+  "alertOpen": [
+   {
+    "t": "windows",
+    "windows": [
+     {
+      "id": 1,
+      "title": "Orbit",
+      "w": 860,
+      "h": 572,
+      "x": 0,
+      "y": 0,
+      "kind": "main",
+      "parent": null,
+      "focused": false
+     },
+     {
+      "id": 3,
+      "title": "",
+      "w": 260,
+      "h": 138,
+      "x": 300,
+      "y": 28,
+      "kind": "alert",
+      "parent": 1,
+      "focused": true
+     }
+    ]
+   },
+   {
+    "t": "tree",
+    "window": 3,
+    "v": "alert-1",
+    "nodes": [
+     {
+      "key": "/Window:/Sheet:alert",
+      "role": "AXSheet",
+      "label": "alert",
+      "value": null,
+      "x": 0,
+      "y": 0,
+      "w": 260,
+      "h": 138,
+      "depth": 0,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": []
+     },
+     {
+      "key": "/Window:/Sheet:alert/StaticText:Delete the order for Ada Lovelace?",
+      "role": "AXStaticText",
+      "label": "Delete the order for Ada Lovelace?",
+      "value": null,
+      "x": 20,
+      "y": 20,
+      "w": 220,
+      "h": 32,
+      "depth": 1,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": []
+     },
+     {
+      "key": "/Window:/Sheet:alert/Button:Cancel",
+      "role": "AXButton",
+      "label": "Cancel",
+      "value": null,
+      "x": 20,
+      "y": 96,
+      "w": 104,
+      "h": 24,
+      "depth": 1,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": [
+       "press"
+      ]
+     },
+     {
+      "key": "/Window:/Sheet:alert/Button:Delete",
+      "role": "AXButton",
+      "label": "Delete",
+      "value": null,
+      "x": 136,
+      "y": 96,
+      "w": 104,
+      "h": 24,
+      "depth": 1,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": [
+       "press"
+      ]
+     }
+    ]
+   },
+   {
+    "t": "frame",
+    "window": 3,
+    "full": true,
+    "tiles": [
+     {
+      "x": 0,
+      "y": 0,
+      "w": 260,
+      "h": 138,
+      "image": "addedBanner",
+      "format": 0
+     }
+    ]
+   }
+  ],
+  "popoverOpen": [
+   {
+    "t": "windows",
+    "windows": [
+     {
+      "id": 1,
+      "title": "Orbit",
+      "w": 860,
+      "h": 572,
+      "x": 0,
+      "y": 0,
+      "kind": "main",
+      "parent": null,
+      "focused": true
+     },
+     {
+      "id": 4,
+      "title": "",
+      "w": 246,
+      "h": 115,
+      "x": 600,
+      "y": 520,
+      "kind": "popover",
+      "parent": 1,
+      "focused": false
+     }
+    ]
+   },
+   {
+    "t": "tree",
+    "window": 4,
+    "v": "popover-1",
+    "nodes": [
+     {
+      "key": "/Window:/Group:/Button:Tracking/Popover:",
+      "role": "AXPopover",
+      "label": "",
+      "value": null,
+      "x": 0,
+      "y": 0,
+      "w": 246,
+      "h": 115,
+      "depth": 0,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": [
+       "cancel"
+      ]
+     },
+     {
+      "key": "/Window:/Group:/Button:Tracking/Popover:/Group:",
+      "role": "AXGroup",
+      "label": "",
+      "value": null,
+      "x": 13,
+      "y": 13,
+      "w": 220,
+      "h": 89,
+      "depth": 1,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": []
+     },
+     {
+      "key": "/Window:/Group:/Button:Tracking/Popover:/Group:/StaticText:Tracking",
+      "role": "AXStaticText",
+      "label": "Tracking",
+      "value": null,
+      "x": 27,
+      "y": 27,
+      "w": 60,
+      "h": 16,
+      "depth": 2,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": []
+     },
+     {
+      "key": "/Window:/Group:/Button:Tracking/Popover:/Group:/StaticText:1Z 999 AA1 0123 4567",
+      "role": "AXStaticText",
+      "label": "1Z 999 AA1 0123 4567",
+      "value": null,
+      "x": 27,
+      "y": 51,
+      "w": 160,
+      "h": 16,
+      "depth": 2,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": [
+       "showMenu"
+      ]
+     }
+    ]
+   },
+   {
+    "t": "frame",
+    "window": 4,
+    "full": true,
+    "tiles": [
+     {
+      "x": 0,
+      "y": 0,
+      "w": 246,
+      "h": 115,
+      "image": "addedRow",
+      "format": 0
+     }
+    ]
+   }
+  ],
+  "secondWindow": [
+   {
+    "t": "windows",
+    "windows": [
+     {
+      "id": 1,
+      "title": "Orbit",
+      "w": 860,
+      "h": 572,
+      "x": 0,
+      "y": 0,
+      "kind": "main",
+      "parent": null,
+      "focused": false
+     },
+     {
+      "id": 5,
+      "title": "Statistics",
+      "w": 360,
+      "h": 260,
+      "x": 0,
+      "y": 0,
+      "kind": "window",
+      "parent": null,
+      "focused": true
+     }
+    ]
+   },
+   {
+    "t": "tree",
+    "window": 5,
+    "v": "stats-1",
+    "nodes": [
+     {
+      "key": "/Window:Statistics",
+      "role": "AXWindow",
+      "label": "Statistics",
+      "value": null,
+      "x": 0,
+      "y": 0,
+      "w": 360,
+      "h": 260,
+      "depth": 0,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": []
+     },
+     {
+      "key": "/Window:Statistics/Group:",
+      "role": "AXGroup",
+      "label": "",
+      "value": null,
+      "x": 0,
+      "y": 28,
+      "w": 360,
+      "h": 232,
+      "depth": 1,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": []
+     },
+     {
+      "key": "/Window:Statistics/Group:/StaticText:Orders",
+      "role": "AXStaticText",
+      "label": "Orders",
+      "value": null,
+      "x": 24,
+      "y": 52,
+      "w": 60,
+      "h": 16,
+      "depth": 2,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": []
+     },
+     {
+      "key": "/Window:Statistics/Group:/StaticText:3",
+      "role": "AXStaticText",
+      "label": "3",
+      "value": null,
+      "x": 300,
+      "y": 52,
+      "w": 20,
+      "h": 16,
+      "depth": 2,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": []
+     },
+     {
+      "key": "/Window:Statistics/Group:/Button:Cancel",
+      "role": "AXButton",
+      "label": "Cancel",
+      "value": null,
+      "x": 24,
+      "y": 220,
+      "w": 70,
+      "h": 24,
+      "depth": 2,
+      "enabled": true,
+      "focused": false,
+      "selected": false,
+      "actions": [
+       "press"
+      ]
+     }
+    ]
+   },
+   {
+    "t": "frame",
+    "window": 5,
+    "full": true,
+    "tiles": [
+     {
+      "x": 0,
+      "y": 0,
+      "w": 360,
+      "h": 260,
+      "image": "window",
+      "format": 0
+     }
+    ]
+   }
+  ],
+  "menuWindowOpen": {
+   "t": "windows",
+   "windows": [
+    {
+     "id": 1,
+     "title": "Orbit",
+     "w": 860,
+     "h": 572,
+     "x": 0,
+     "y": 0,
+     "kind": "main",
+     "parent": null,
+     "focused": true
+    },
+    {
+     "id": 6,
+     "title": "",
+     "w": 180,
+     "h": 96,
+     "x": 120,
+     "y": 160,
+     "kind": "menu",
+     "parent": 1,
+     "focused": false
+    }
+   ]
+  },
+  "onlyMain": {
+   "t": "windows",
+   "windows": [
+    {
+     "id": 1,
+     "title": "Orbit",
+     "w": 860,
+     "h": 572,
+     "x": 0,
+     "y": 0,
+     "kind": "main",
+     "parent": null,
+     "focused": true
+    }
+   ]
   }
  },
  "timeline": [
