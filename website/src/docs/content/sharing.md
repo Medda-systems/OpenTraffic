@@ -1,6 +1,6 @@
 ## Local server discovery
 
-The menu bar lists web servers detected on this Mac under **Localhost**, with their names, ports, and uptime, and Electron apps you're building under **Electron Apps**. Each list shows the first 5; **Show More** reveals the rest. Click a localhost entry to open that service directly in your browser. Click **Share** to publish it, or use the adjacent provider menu to select a different provider.
+The menu bar lists web servers detected on this Mac under **Localhost**, with their names, ports, and uptime, Electron apps you're building under **Electron Apps**, and native Mac apps you're building under **Mac Apps** (see [Electron apps](/docs/electron-apps) and [Mac apps](/docs/mac-apps)). Each list shows the first 5; **Show More** reveals the rest. Click a localhost entry to open that service directly in your browser. Click **Share** to publish it, or use the adjacent provider menu to select a different provider.
 
 The list refreshes every few seconds while visible and about once a minute in the background. Servers that stop responding disappear, and detected downtime resets uptime. Detection is sampled, so a stop/restart entirely between scans may not be observed.
 

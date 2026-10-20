@@ -478,6 +478,33 @@ only); a protected OpenTunnel share likewise.
   comment, reply, resolve, confirm, or delete; the hub refuses those messages. Automatic agent runs only
   start for comments by trusted people (or the host). Roles follow a browser, not a verified identity.
 
+### 3.10 Mac apps
+
+A native Mac app (SwiftUI, AppKit, Catalyst) has no page to proxy, so a Mac app share puts a page in front of it.
+The user docs are `website/src/docs/content/mac-apps.md`; the wire format is `docs/macapp-mirror-protocol.md`, and how
+the windows stay off screen (one virtual display per process, deadlines on window-server calls) is
+`docs/macapp-window-hiding.md`.
+
+* **Upstream**: `MacAppSession` runs an isolated copy of the app (its own bundle id `<id>.opentraffic`, home folder
+  and preferences domain, copied or empty data) and a `MirrorServer` on `127.0.0.1:<port>`; that address is the
+  share's CollabProxy upstream, with the Host header rewritten, and the public origin allowed once it's known. The
+  definition saves `macApp` (the .app path) and `macAppData` (`copy`/`empty`); `localURL` stays `http://127.0.0.1/`.
+  Collaboration is always on; only `quick` and `opentunnel` shares are offered.
+* **Proxy**: `/__opentraffic/macapp/*` (HTTP and WebSocket) passes through to the mirror server behind the password
+  gate and the Origin rule; the viewer page gets `bridge.js` and `collab.js` like any page.
+* **Overlay**: the viewer's invisible accessibility layer is made of real elements (`ax-<hash>` ids), so pins,
+  pointing and drawing work unchanged. `collab.js` labels them like `Button “Add Order”` and sends the element's
+  accessibility path as `context.selector` (styles empty).
+* **Agents**: a run for a comment on a Mac app share gets `AgentRunRequest.macApp` (the element looked up live in
+  the copy, its windows, the last 20 viewer actions, up to 40 lines of the app's output around the comment, all
+  between visitor-content markers). It runs in the share's `agentDirectory` or the app's project directory; with
+  neither the comment is held (`AgentHold.noProjectFolder`).
+* **API and MCP**: `POST /v1/shares` takes `macApp` and `macAppData`; `POST /v1/shares/{ref}/restart-app` and
+  `/reset-data` restart the app on the same address (502 `restart_failed` when it doesn't come back);
+  `GET /v1/services` lists Mac apps under `apps` (`kind: "macapp"`); a share without Accessibility and Screen
+  Recording is refused with 409 `missing_permissions`. MCP: `share` takes `mac_app`/`mac_app_data`, and
+  `restart_mac_app` is a tool of its own.
+
 ### Planned: following anyone (groups instead of one leader)
 
 Today only the host leads and every visitor follows them. Planned: anyone can be followed. You follow a

@@ -9,6 +9,8 @@ Two kinds of app can be shared:
 
 From the terminal: `opentraffic share 5173` (the app's dev server port) or `opentraffic share dist/mac-arm64/Orbit.app`.
 
+A native Mac app (SwiftUI, AppKit, Catalyst) has its own list, **Mac Apps**: see [Mac apps](/docs/mac-apps).
+
 ## How it works
 
 An Electron app has two halves: its windows (web pages) and its main process (Node.js code that runs on the computer). OpenTraffic sends the windows to viewers' browsers through the share, and runs **a second copy of the main process** on your Mac to answer them. Your own app window and its data are never touched.

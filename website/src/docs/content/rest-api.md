@@ -34,14 +34,14 @@ Shares are named by id or by name (case-insensitive); percent-encode names with 
 | Method | Path | Body / query | Returns |
 | --- | --- | --- | --- |
 | GET | `/v1/status` | | `{version, shares, running, providers: [{name, ready, detail, warning?}], publishesWithoutAsking}` |
-| GET | `/v1/services` | | `{services: [{port, url, title, process, statusCode, upSince, sharedAs}], apps: [{kind: "macapp", name, bundle, bundleIdentifier, projectDirectory, running, builtAt, sharedAs}]}`: web servers, and the Mac apps being built on this Mac |
+| GET | `/v1/services` | | `{services: [{port, url, title, process, statusCode, upSince, sharedAs}], apps: [{kind: "macapp", name, bundle, bundleIdentifier, projectDirectory, running, builtAt, sharedAs, device?}]}`: web servers, and the Mac apps being built on this Mac (`device`, like `iPhone 17 Simulator`, for an iPhone app in a booted Simulator, which can't be shared yet) |
 | GET | `/v1/shares` | | `{shares: [Share]}` |
 | POST | `/v1/shares` | see below | `Share` (waits ≤ 30 s for the URL) |
 | GET | `/v1/shares/{ref}` | | `Share` |
 | PATCH | `/v1/shares/{ref}` | `{name?, url?, collaboration?, captureErrors?, branch?, autoStart?, project?, rewriteHostHeader?, autoStop?}` | `Share` |
 | DELETE | `/v1/shares/{ref}` | | `{deleted: true}` |
 | POST | `/v1/shares/{ref}/start`, `/stop`, `/restart` | | `Share` (`/stop` waits ≤ 10 s until it has stopped) |
-| POST | `/v1/shares/{ref}/restart-app`, `/reset-data` | | `Share`, once the Mac app is back: `/restart-app` starts a Mac app share's app again from its latest build on the same address, `/reset-data` starts it over from the data it started with (409 when the share isn't running) |
+| POST | `/v1/shares/{ref}/restart-app`, `/reset-data` | | `Share`, once the Mac app is back: `/restart-app` starts a Mac app share's app again from its latest build on the same address, `/reset-data` starts it over from the data it started with (409 when the share isn't running, 502 `restart_failed` with the reason when the app doesn't come back) |
 | GET, PUT | `/v1/shares/{ref}/protection` | PUT: `{mode, username?, emails?}` | `{mode, username, password, emails, link}`; `link` (temporary and OpenTunnel shares, once they have an address) has the password built in, and `username` is null there since any works |
 | POST | `/v1/shares/{ref}/password` | | a new password: `{mode, username, password, emails}` |
 | GET | `/v1/shares/{ref}/comments` | `?status=open\|resolved\|all` (default `open`) | `{comments: [Comment]}` |
@@ -80,7 +80,7 @@ Dates are ISO 8601. Errors are `{"error": {"code": "...", "message": "..."}}` wi
 | `replaceDNS` | boolean | `domain`: take over a hostname that already has a DNS record. An existing CNAME is pointed at the new tunnel and A/AAAA records are replaced; other records are never removed. |
 | `funnel` | boolean | `tailscale`: public on the internet through Funnel instead of tailnet only. |
 | `start` | boolean | `false` saves the share without starting it. |
-| `macApp` | string | A Mac app you're building, instead of `port` or `url`: its full .app path, or its name as `GET /v1/services` lists it. Shared with `quick` or `opentunnel`, always with live collaboration; sharing an app that's already shared that way returns that share. A `url` that is an .app path shares a running Electron app of yours, or else the Mac app. |
+| `macApp` | string | A Mac app you're building, instead of `port` or `url`: its full .app path, or its name as `GET /v1/services` lists it. Shared with `quick` or `opentunnel`, always with live collaboration; sharing an app that's already shared that way returns that share. A `url` that is an .app path shares a running Electron app of yours, or else the Mac app. See [Mac apps](/docs/mac-apps). |
 | `macAppData` | string | With `macApp`: `copy` (default) starts its isolated copy with a copy of the app's data, `empty` with none. |
 
 A share for a way of sharing that isn't set up yet (including `funnel` when Funnel isn't allowed for this Mac) is refused with 409 (`not_ready`) and the reason, before anything is asked or created; `GET /v1/status` lists what's ready, and a `warning` when a way that's ready is likely to fail anyway (for example, a network whose DNS filter blocks temporary Cloudflare tunnels). A `domain` hostname that already has a DNS record is refused with 409 (`dns_record_exists`) unless `replaceDNS` is set. Creating a custom-domain share always asks for confirmation, because it creates a tunnel and a DNS record in your Cloudflare account. A Mac app share (created, started, or restarted) is refused with 409 (`missing_permissions`) while OpenTraffic doesn't have Accessibility and Screen Recording, and with 409 while another share runs the same app.

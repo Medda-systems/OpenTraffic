@@ -78,6 +78,12 @@
     "description": "Share an Electron app you're building, or one you built, with its main process sandboxed on your Mac."
   },
   {
+    "slug": "mac-apps",
+    "title": "Mac apps",
+    "group": "Using OpenTraffic",
+    "description": "Share a SwiftUI or AppKit app you're building: viewers use the real app in their browser, with comments pinned to its controls."
+  },
+  {
     "slug": "feedback",
     "title": "Comments & feedback",
     "group": "Using OpenTraffic",

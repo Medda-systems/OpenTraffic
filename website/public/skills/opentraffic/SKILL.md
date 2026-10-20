@@ -1,6 +1,6 @@
 ---
 name: opentraffic
-description: Share a local dev server on a public URL with OpenTraffic (macOS) and act on the feedback people leave on it. Use when the user wants to show, share, preview, or demo something running on localhost; needs a public, tunnel, or phone/QR link to a local port; wants live collaboration (cursors, pinned comments) on their app; asks to read, answer, or resolve comments left on a shared page; or asks why a shared link doesn't work. Uses the `opentraffic` command.
+description: Share a local dev server, or a Mac app being built, on a public URL with OpenTraffic (macOS) and act on the feedback people leave on it. Use when the user wants to show, share, preview, or demo something running on localhost; needs a public, tunnel, or phone/QR link to a local port; wants live collaboration (cursors, pinned comments) on their app; asks to read, answer, or resolve comments left on a shared page; or asks why a shared link doesn't work. Uses the `opentraffic` command.
 ---
 
 # OpenTraffic
@@ -35,6 +35,18 @@ Every command takes `--json`. Prefer it, and read the exit status: `0` worked, `
 4. **Give the user the link.** `opentraffic qr "<share>"` shows a QR code for phones. `opentraffic copy "<share>"` puts it on the clipboard.
 
 A share puts the user's local server on the internet. The `opentraffic` command doesn't ask the user to confirm anything, so you are the check: only share what they asked you to, and tell them the link once it's live.
+
+## Share a Mac app
+
+A native Mac app the user is building (SwiftUI, AppKit, Catalyst) is listed by `opentraffic services --json` under `apps` (`name`, `bundle`, `projectDirectory`, `running`, `sharedAs`). Share it by name or by its .app path:
+
+```sh
+opentraffic share Orbit --json            # or dist/Orbit.app; --via opentunnel for a lasting address
+```
+
+OpenTraffic runs an isolated copy of the app, hidden, and people use its window in their browser with live collaboration. `--empty-data` starts the copy without the app's data. If the share is refused because Accessibility or Screen Recording is off, ask the user to switch them on for OpenTraffic in System Settings → Privacy & Security (OpenTraffic's menu bar has buttons for it), then try again.
+
+Comments on it are pinned to the app's controls: `label` reads like `Button “Add Order”`, and `context.selector` is the element's accessibility path, not a CSS selector. Find the view in the Swift code by its label text or its `accessibilityIdentifier`. After a fix, build the app the way the project does, then run `opentraffic restart "<share>" --app` so viewers see the new build on the same link. Don't open or quit the shared copy yourself.
 
 ## Act on feedback
 

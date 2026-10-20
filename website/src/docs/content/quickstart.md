@@ -4,6 +4,8 @@ Install [OpenTraffic](/docs/installation). The first time it opens, click **Inst
 
 Start your existing web app and check that its local URL opens in your browser. This guide uses `http://localhost:5173`; substitute the port your app actually uses.
 
+Building a desktop app instead? See [Electron apps](/docs/electron-apps) and [Mac apps](/docs/mac-apps).
+
 ## Share the server
 
 1. Open OpenTraffic from Applications.

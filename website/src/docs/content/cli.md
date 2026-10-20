@@ -34,7 +34,7 @@ opentraffic stop --all
 | `list` (`ls`) | Your shares, their state, public URL, people, and open comments. The default command. |
 | `status <share>` | One share in detail: public and local URL, way of sharing, who can open it, collaboration and who's there, project, schedule, health of each hop, last error. |
 | `share <port\|host:port\|url> [options]` | Share a local server. See below. |
-| `share <app name\|App.app> [--via quick\|opentunnel] [--empty-data]` | Share a Mac app you're building (SwiftUI, AppKit, Catalyst), by its name as `services` lists it or its .app path: an isolated copy runs hidden on this Mac and viewers use its window in the browser, with live collaboration. `--empty-data` starts the copy without the app's data. Needs Accessibility and Screen Recording for OpenTraffic. |
+| `share <app name\|App.app> [--via quick\|opentunnel] [--empty-data]` | Share a Mac app you're building (SwiftUI, AppKit, Catalyst), by its name as `services` lists it or its .app path: an isolated copy runs hidden on this Mac and viewers use its window in the browser, with live collaboration. `--empty-data` starts the copy without the app's data. Needs Accessibility and Screen Recording for OpenTraffic. See [Mac apps](/docs/mac-apps). |
 | `start <share>` / `stop <share>` / `stop --all` / `restart <share>` | Start, stop, restart. |
 | `restart <share> --app` / `--reset-data` | Mac app shares: start just the app again from its latest build on the same address (after rebuilding it to show a fix), or start it over from the data it started with. |
 | `remove <share> [--yes]` (`rm`) | Remove a share with its settings and comments. Asks first on a terminal; scripts pass `--yes`. |

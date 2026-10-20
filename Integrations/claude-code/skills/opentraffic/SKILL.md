@@ -1,6 +1,6 @@
 ---
 name: opentraffic
-description: Share a local dev server through OpenTraffic with live collaboration, then act on the comments people pin to the page (fix the code, reply, resolve), or turn open feedback into tickets. Use when the user wants feedback on a local site, asks what reviewers said on an OpenTraffic share, or wants to watch for feedback while you work.
+description: Share a local dev server (or a Mac app being built) through OpenTraffic with live collaboration, then act on the comments people pin to the page (fix the code, reply, resolve), or turn open feedback into tickets. Use when the user wants feedback on a local site, asks what reviewers said on an OpenTraffic share, or wants to watch for feedback while you work.
 ---
 
 # Working with OpenTraffic feedback
@@ -16,6 +16,19 @@ read those comments, and answer them.
 3. Otherwise call `share` with `port` (and a short `name`, e.g. the project name). OpenTraffic doesn't ask the
    user to confirm, so only share what they asked you to, and give them the link once it's live.
 4. Give the user the `publicURL` and say that anyone with the link can see the site and leave comments.
+
+## Share a Mac app for feedback
+
+For a native Mac app the user is building (SwiftUI, AppKit, Catalyst), call `share` with `mac_app` (the app's name
+or the full path of its .app) instead of `port`. OpenTraffic runs an isolated copy of the app, hidden, and people
+who open the link use its window in their browser. `mac_app_data: "empty"` starts the copy without the app's data.
+It needs Accessibility and Screen Recording for OpenTraffic: if `share` is refused with `missing_permissions`, ask
+the user to switch them on in System Settings → Privacy & Security (OpenTraffic's menu bar has buttons for it).
+
+Comments on a Mac app are pinned to its controls: `label` reads like `Button “Add Order”`, and `context.selector`
+is the element's accessibility path, not a CSS selector. Find the view in the Swift sources by its label text or
+its `accessibilityIdentifier`. After a fix, build the app the way the project does, then call `restart_mac_app` so
+the share shows the new build on the same link. Don't open or quit the shared copy yourself.
 
 ## Act on feedback
 

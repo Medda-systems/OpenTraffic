@@ -14,7 +14,7 @@ the background. Environment:
 | Tool | Does |
 | --- | --- |
 | `list_shares` | Shares with state, URLs, people in the session, comment counts. |
-| `share` | Publishes a local `port` or `url` (`provider`: `quick`, `tailscale`, `ngrok`, `opentunnel`; `name`; `collaboration`, default on), or a Mac app you're building (`mac_app`: its .app path or name; `mac_app_data`: `copy` or `empty`). |
+| `share` | Publishes a local `port` or `url` (`provider`: `quick`, `tailscale`, `ngrok`, `opentunnel`; `name`; `collaboration`, default on), or a Mac app you're building (`mac_app`: its .app path or name; `mac_app_data`: `copy` or `empty`; see [Mac apps](/docs/mac-apps)). |
 | `start_share`, `stop_share` | By id or name. |
 | `restart_mac_app` | Starts a shared Mac app again from its latest build on the same URL, after rebuilding it to show a fix (`reset_data`: over from its starting data). |
 | `get_feedback` | Comments (`status`: `open`, `resolved`, `all`). Each says whether it's `open`, `working` (and who's on it), `resolved`, or `confirmed`, and carries `context` (selector, styles, component, source file), suggested `edits` to apply as given, and `area` for a comment on a region. |

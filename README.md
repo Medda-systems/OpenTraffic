@@ -79,6 +79,7 @@ Claude Code, Codex, Cursor, opencode, or any MCP client can share your server, r
 - **Who can do what:** per person, trusted, can comment, or view only.
 - **Every hop checked:** your server, this Mac, the tunnel, and the public URL, with the fix when something's off.
 - **Apps made of several servers:** calls to an API on another port go through the same share.
+- **Desktop apps too:** Electron apps and native Mac apps (SwiftUI, AppKit) you're building share the same way, from their own lists in the menu bar. People use the real app in their browser and pin comments to its controls.
 - **Stays out of your way:** auto-stop timers, projects that start together, notifications, and global shortcuts.
 - **Signed and notarized:** releases come from Medda Systems and update themselves.
 
@@ -155,6 +156,7 @@ Prefer MCP, a REST API, or webhooks? See [Integrations](https://opentraffic.dev/
 ## Documentation
 
 - [Quick start](https://opentraffic.dev/docs/quickstart)
+- [Electron apps](https://opentraffic.dev/docs/electron-apps) and [Mac apps](https://opentraffic.dev/docs/mac-apps)
 - [Live collaboration](https://opentraffic.dev/docs/collaboration) and [feedback](https://opentraffic.dev/docs/feedback)
 - [Command line](https://opentraffic.dev/docs/cli), [agent skill](https://opentraffic.dev/docs/agent-skill), [MCP](https://opentraffic.dev/docs/mcp), and [REST API](https://opentraffic.dev/docs/rest-api)
 - [Privacy](https://opentraffic.dev/docs/privacy), [security](https://opentraffic.dev/docs/security), and [troubleshooting](https://opentraffic.dev/docs/troubleshooting)

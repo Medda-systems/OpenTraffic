@@ -72,7 +72,7 @@ When no agent is watching a share, OpenTraffic can start one for a comment. Choo
 - **Send to Claude Code** on a comment in the Feedback tab runs it for that comment, or
 - **Run it by itself for new comments when no agent is watching** runs it a few seconds after a visitor comments, unless an agent claims the comment first, is waiting for feedback on the share (`wait_for_feedback`, and for 90 seconds after), or is working on another of its comments.
 
-OpenTraffic runs the command in the share's project folder: the folder its local server runs from, or one you choose in the Feedback tab. It runs one comment at a time per share, and stops a run after 20 minutes. The Feedback tab shows what it's doing, what it printed, and a **Stop** button. The presets:
+OpenTraffic runs the command in the share's project folder: the folder its local server runs from (for a [Mac app](/docs/mac-apps), the project it's built from), or one you choose in the Feedback tab. It runs one comment at a time per share, and stops a run after 20 minutes. The Feedback tab shows what it's doing, what it printed, and a **Stop** button. The presets:
 
 ```sh
 claude -p "$OPENTRAFFIC_PROMPT" --permission-mode dontAsk --allowedTools "Read,Edit,Write,Glob,Grep,mcp__opentraffic,Bash(opentraffic comments *),…"

@@ -9,7 +9,9 @@ Every command takes `--json`. Exit status: `0` worked, `1` failed or refused, `2
 | `opentraffic list` (or just `opentraffic`) | Every share: state, way of sharing, public URL, people, open comments. |
 | `opentraffic status <share>` | One share in detail, including `health` for each hop and `lastError`. |
 | `opentraffic share <port\|host:port\|url> [options]` | Share a local server and wait until it's live. |
+| `opentraffic share <app name\|App.app> [--via quick\|opentunnel] [--empty-data]` | Share a Mac app the user is building: an isolated copy runs hidden and viewers use its window in the browser, with live collaboration. `--empty-data` starts it without the app's data. Needs Accessibility and Screen Recording for OpenTraffic. |
 | `opentraffic start <share>` / `stop <share>` / `stop --all` / `restart <share>` | Start, stop, restart. |
+| `opentraffic restart <share> --app` / `--reset-data` | Mac app shares: start just the app again from its latest build on the same link (after rebuilding it), or start it over from the data it started with. |
 | `opentraffic remove <share> --yes` | Remove a share with its settings and comments. |
 | `opentraffic rename <share> <new name>` | Rename. |
 | `opentraffic set <share> [options]` | `--url PORT\|URL` (stop it first), `--collab on\|off`, `--errors on\|off`, `--branch on\|off`, `--autostart on\|off`, `--project NAME`, `--no-project`, `--host-header on\|off`, `--stop-after never\|15m\|1h\|4h`. |
@@ -62,7 +64,7 @@ Every command takes `--json`. Exit status: `0` worked, `1` failed or refused, `2
 
 | Command | Does |
 | --- | --- |
-| `opentraffic services` | Web servers running on this Mac, with uptime and the share publishing each. |
+| `opentraffic services` | Web servers running on this Mac, with uptime and the share publishing each; then the Mac apps being built here (`apps` in `--json`). |
 | `opentraffic projects` / `project start\|stop <name>` | Shares grouped to start and stop together. |
 | `opentraffic domains` | Domains in the connected Cloudflare account. |
 | `opentraffic doctor` | Whether OpenTraffic, its API, and each way of sharing are ready. |
