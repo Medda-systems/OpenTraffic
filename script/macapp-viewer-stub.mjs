@@ -4,10 +4,13 @@
 // bar and frames (script/macapp-viewer-fixture.json) to every viewer that connects. Node only, no npm packages.
 // Protocol: docs/macapp-mirror-protocol.md.
 //
-//   node script/macapp-viewer-stub.mjs [--port 0] [--fixture <file.json>] [--resources <dir>] [--replay]
+//   node script/macapp-viewer-stub.mjs [--port 0] [--fixture <file.json>] [--resources <dir>] [--replay] [--react]
 //
 // Prints "MACAPP_STUB http://127.0.0.1:<port>" once listening (loopback only). --replay sends the
 // fixture's `timeline` (named messages after delays) to each viewer, so the page shows some life.
+// --react answers input the way an app would, for script/macapp-bench.mjs's self-test: `act`,
+// `setText` and `text` change the element (a checkbox flips, a field gets the text) and come back as
+// a new `tree` plus a one-tile `frame` over the element; a `pointer` wheel comes back as a tile.
 // Control endpoints for tests (and curl):
 //   GET  /__stub/received[?clear=1]  the JSON messages viewers sent, oldest first
 //   POST /__stub/send[?name=<n>]     send a message (or an array) to every viewer: the body, or the
@@ -31,6 +34,7 @@ const port = Number(opt("--port", "0"));
 const fixturePath = path.resolve(opt("--fixture", path.join(here, "macapp-viewer-fixture.json")));
 const resources = path.resolve(opt("--resources", path.join(here, "..", "Sources", "OpenTraffic", "Resources")));
 const replay = args.includes("--replay");
+const reactive = args.includes("--react");
 
 const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
 const hello = { ...fixture.hello };
@@ -96,8 +100,10 @@ function accept(req, socket) {
       const whole = Buffer.concat(client.parts);
       client.parts = [];
       if (opcode === 1 || opcode === 0) {
-        try { received.push(JSON.parse(whole.toString("utf8"))); }
-        catch { received.push({ invalid: whole.toString("utf8") }); }
+        let message;
+        try { message = JSON.parse(whole.toString("utf8")); } catch { message = { invalid: whole.toString("utf8") }; }
+        received.push(message);
+        if (reactive) react(client, message);
       }
     }
   });
@@ -141,6 +147,39 @@ function greet(client) {
     const m = named[step.send];
     if (m) for (const one of Array.isArray(m) ? m : [m]) deliver(client, one);
   }, step.after));
+}
+
+// ---- --react: the app's side of input, so a benchmark sees a tree and pixels change
+
+const live = new Map((fixture.trees || []).map((t) => [t.window, structuredClone(t)]));
+let reactions = 0;
+let focusKey = null;
+
+function react(client, m) {
+  const tree = live.get(m.window);
+  if (!tree) return;
+  const field = (key) => tree.nodes.find((n) => n.key === key);
+  let node = null;
+  let image = "addOrderPressed";
+  if (m.t === "act") {
+    node = field(m.key);
+    if (node && node.role === "AXCheckBox") node.value = node.value === "1" ? "0" : "1";
+    if (node && /TextField/.test(node.role)) focusKey = node.key;
+  } else if (m.t === "setText") {
+    node = field(m.key);
+    if (node) { node.value = String(m.value ?? ""); focusKey = node.key; image = "customerAda"; }
+  } else if (m.t === "text") {
+    node = field(focusKey) || tree.nodes.find((n) => n.role === "AXTextField");
+    if (node) { node.value = (node.value || "") + String(m.text ?? ""); focusKey = node.key; image = "customerAda"; }
+  } else if (m.t === "pointer" && m.kind === "wheel") {
+    const x = Math.max(0, Math.round(m.x) - 40), y = Math.max(0, Math.round(m.y) - 15);
+    return deliver(client, { t: "frame", window: m.window, full: false, tiles: [{ x, y, w: 80, h: 30, image: "addedRow" }] });
+  }
+  if (!node) return;
+  tree.v = "react-" + ++reactions;
+  deliver(client, tree);
+  const { x, y, w, h } = node;
+  deliver(client, { t: "frame", window: m.window, full: false, tiles: [{ x, y, w: Math.max(w, 1), h: Math.max(h, 1), image }] });
 }
 
 function clearTimers(client) {
