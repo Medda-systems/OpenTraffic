@@ -716,14 +716,14 @@ struct Context {
         var table = Table(header: ["NAME", "STATE", "PROJECT", "SHARED AS"])
         for app in apps {
             table.rows.append([
-                style.bold(app.name),
+                style.bold(app.name) + (app.device.map { style.dim(" · \($0)") } ?? ""),
                 app.running ? style.green("running") : app.builtAt.map { "built \(Format.ago($0))" } ?? "built",
                 ((app.projectDirectory ?? app.bundle) as NSString).abbreviatingWithTildeInPath,
                 app.sharedAs.map { style.cyan($0) } ?? style.dim("not shared"),
             ])
         }
         say(table.render(style: style))
-        if let app = apps.first(where: { $0.sharedAs == nil }) {
+        if let app = apps.first(where: { $0.sharedAs == nil && $0.device == nil }) {
             let name = app.name.contains(" ") ? "\"\(app.name)\"" : app.name
             say(style.dim("\nShare one with `opentraffic share \(name)`."))
         }

@@ -52,6 +52,8 @@ struct MacAppEntry: Decodable {
     let running: Bool
     let builtAt: Date?
     let sharedAs: String?
+    /// "iPhone 17 Simulator" for an app in a booted simulator.
+    let device: String?
 }
 
 struct Person: Decodable {

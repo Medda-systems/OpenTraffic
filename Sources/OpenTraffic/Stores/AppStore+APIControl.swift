@@ -224,6 +224,8 @@ extension AppStore {
     /// has shared before) by its name.
     private func apiMacApp(_ reference: APIMacAppReference) async throws -> MacApp {
         await scanMacApps() // one built a moment ago may not be listed yet
+        // Apps in the Simulator are listed (services) but can't be shared yet.
+        let detectedMacApps = detectedMacApps.filter { $0.simulator == nil || Self.sharesSimulatorApps }
         switch reference {
         case .path(let path):
             guard path.hasPrefix("/") || path.hasPrefix("~") else {

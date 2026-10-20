@@ -3,10 +3,25 @@ import Foundation
 import Security
 
 /// A native Mac app you are building (SwiftUI, AppKit, Catalyst) that OpenTraffic can share: a debug
-/// build that is running, or a recent build Xcode or SwiftPM left in a build folder.
+/// build that is running, or a recent build Xcode or SwiftPM left in a build folder. An iPhone (or
+/// iPad, watch, TV, Vision) app you've built and installed in a booted Simulator is one too, with
+/// `runtime: .simulator(device)` (see SimulatorDiscovery).
 public struct MacApp: Sendable, Equatable, Hashable, Identifiable {
-    /// The .app's path: what identifies the app across launches and rebuilds.
-    public var id: String { bundle.path }
+    /// Where the app runs.
+    public enum Runtime: Sendable, Equatable, Hashable {
+        /// On this Mac.
+        case mac
+        /// In a booted Simulator device; `bundle` is the copy installed in that device.
+        case simulator(SimulatorDevice)
+    }
+
+    /// What identifies the app across launches and rebuilds, and what a saved share keeps: the .app's
+    /// path for a Mac app, `simulator:<udid>/<bundle id>` for a simulator app (its installed copy
+    /// moves with every install).
+    public var id: String {
+        if let simulator, let bundleIdentifier { return SimulatorDiscovery.appID(udid: simulator.udid, bundleIdentifier: bundleIdentifier) }
+        return bundle.path
+    }
     /// CFBundleDisplayName, otherwise CFBundleName, otherwise the bundle's file name.
     public var name: String
     public var bundle: URL
@@ -22,10 +37,17 @@ public struct MacApp: Sendable, Equatable, Hashable, Identifiable {
     public var iconFile: URL?
     /// When the app was last built (its executable's modification date).
     public var builtAt: Date?
+    public var runtime: Runtime
+
+    /// The Simulator device the app is installed in, nil for a Mac app.
+    public var simulator: SimulatorDevice? {
+        if case .simulator(let device) = runtime { return device }
+        return nil
+    }
 
     public init(
         name: String, bundle: URL, bundleIdentifier: String?, version: String? = nil, projectDirectory: URL?,
-        isRunning: Bool, pid: Int32? = nil, iconFile: URL? = nil, builtAt: Date? = nil
+        isRunning: Bool, pid: Int32? = nil, iconFile: URL? = nil, builtAt: Date? = nil, runtime: Runtime = .mac
     ) {
         self.name = name
         self.bundle = bundle
@@ -36,6 +58,7 @@ public struct MacApp: Sendable, Equatable, Hashable, Identifiable {
         self.pid = pid
         self.iconFile = iconFile
         self.builtAt = builtAt
+        self.runtime = runtime
     }
 }
 

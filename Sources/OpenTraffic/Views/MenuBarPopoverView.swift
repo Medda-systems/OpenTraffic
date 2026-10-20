@@ -505,10 +505,13 @@ private struct MacAppRow: View {
                     .resizable()
                     .interpolation(.high)
                     .frame(width: 26, height: 26)
+                    // iPhone icons are square images that iOS rounds.
+                    .clipShape(RoundedRectangle(cornerRadius: app.simulator == nil ? 0 : 6, style: .continuous))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(app.name)
+                    title
                         .lineLimit(1)
+                        .truncationMode(.middle)
                     Text(details)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -518,7 +521,8 @@ private struct MacAppRow: View {
                 Spacer(minLength: Spacing.xs)
             }
             .contentShape(Rectangle())
-            .help("\(app.name), a Mac app\(app.isRunning ? " (running)" : "") at \(app.bundle.path)")
+            .help(app.simulator.map { "\(app.name), an app in the \($0.label) (\($0.runtimeName))\(app.isRunning ? ", running" : "")" }
+                  ?? "\(app.name), a Mac app\(app.isRunning ? " (running)" : "") at \(app.bundle.path)")
             .contextMenu {
                 Group {
                     Button("Show in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([app.bundle]) }
@@ -543,11 +547,11 @@ private struct MacAppRow: View {
                 share(defaultKind, .copy)
             }
             .menuStyle(.button)
-            .buttonStyle(isSuggested ? AnyPrimitiveButtonStyle(.borderedProminent) : AnyPrimitiveButtonStyle(.bordered))
+            .buttonStyle(isSuggested && isShareable ? AnyPrimitiveButtonStyle(.borderedProminent) : AnyPrimitiveButtonStyle(.bordered))
             .controlSize(.small)
             .fixedSize()
-            .disabled(!canShare && !canShareWithOpenTunnel)
-            .help("Share \(app.name) with live collaboration and copy the URL. A separate copy runs hidden on this Mac with a copy of its data.")
+            .disabled(!isShareable || (!canShare && !canShareWithOpenTunnel))
+            .help(shareHelp)
         }
         .padding(.vertical, Spacing.xs)
         .padding(.horizontal, Spacing.s)
@@ -555,12 +559,31 @@ private struct MacAppRow: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// `Mac app · ~/code/orbit`: where it's built from (or the app itself when that isn't known).
+    /// `Orbit`, or `Orbit · iPhone 17 Simulator` for an app in a simulator.
+    private var title: Text {
+        guard let device = app.simulator else { return Text(app.name) }
+        return Text(app.name) + Text(" · \(device.label)").foregroundStyle(.secondary)
+    }
+
+    /// `Mac app · ~/code/orbit` (`iOS 27.0 · ~/code/orbit` in a simulator): where it's built from
+    /// (or the app itself when that isn't known).
     private var details: String {
         let home = ElectronSandbox.realHomeDirectory
         var path = (app.projectDirectory ?? app.bundle).path
         if path.hasPrefix("/private/tmp/") { path.removeFirst("/private".count) }
-        return "Mac app · " + (path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path)
+        let kind = app.simulator?.runtimeName ?? "Mac app"
+        return kind + " · " + (path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path)
+    }
+
+    /// Simulator apps are listed before they can be shared (until the Simulator window is mirrored).
+    private var isShareable: Bool { app.simulator == nil || AppStore.sharesSimulatorApps }
+
+    private var shareHelp: String {
+        guard let device = app.simulator else {
+            return "Share \(app.name) with live collaboration and copy the URL. A separate copy runs hidden on this Mac with a copy of its data."
+        }
+        guard isShareable else { return "Sharing apps from the Simulator isn't available yet." }
+        return "Share \(app.name) from the \(device.label) with live collaboration and copy the URL. It runs in your simulator with its real data; Share with Empty Data uses a separate, empty \(device.name)."
     }
 
     @ViewBuilder

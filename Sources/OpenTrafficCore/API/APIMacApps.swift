@@ -18,6 +18,8 @@ public struct APIMacApp: Codable, Equatable, Sendable {
     public let builtAt: Date?
     /// The share that publishes it right now, if one does.
     public let sharedAs: String?
+    /// For an app in a booted Simulator, the device ("iPhone 17 Simulator"); nil for a Mac app.
+    public let device: String?
 
     public init(_ app: MacApp, sharedAs: String?) {
         kind = "macapp"
@@ -28,6 +30,7 @@ public struct APIMacApp: Codable, Equatable, Sendable {
         running = app.isRunning
         builtAt = app.builtAt
         self.sharedAs = sharedAs
+        device = app.simulator?.label
     }
 }
 

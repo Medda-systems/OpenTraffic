@@ -33,9 +33,13 @@ extension AppStore {
 
     // MARK: Discovery
 
-    /// Finds the Mac apps being built on this Mac: running debug builds and recent Xcode builds.
+    /// Finds the Mac apps being built on this Mac (running debug builds and recent Xcode builds) and
+    /// your apps in booted simulators. Running ones come first, Mac apps before simulator apps.
     func scanMacApps() async {
-        var apps = await Task.detached(priority: .utility) { await MacAppDiscovery.scan() }.value
+        async let macApps = Task.detached(priority: .utility) { await MacAppDiscovery.scan() }.value
+        async let simulatorApps = Task.detached(priority: .utility) { SimulatorDiscovery.scan() }.value
+        let found = await macApps + simulatorApps
+        var apps = found.filter(\.isRunning) + found.filter { !$0.isRunning }
         // Captures for the website list only the apps they name (OPENTRAFFIC_DEMO_MAC_APPS=Orbit),
         // never the projects on this Mac.
         if DemoCapture.demoPorts != nil {
@@ -50,6 +54,10 @@ extension AppStore {
         let shared = Set(definitions.filter { isActive($0.id) || runtime(for: $0.id).state == .stopping }.compactMap(\.macApp))
         return detectedMacApps.filter { !shared.contains($0.id) }
     }
+
+    /// Whether a simulator app can be shared yet. Discovery lists them; mirroring the Simulator's
+    /// window (a SimulatorSession started with SimulatorLauncher) is still to come.
+    static let sharesSimulatorApps = false
 
     // MARK: Permissions
 
@@ -100,6 +108,10 @@ extension AppStore {
     /// Accessibility and Screen Recording it waits for them (the menu bar shows how to turn them on).
     func share(_ app: MacApp, kind: TunnelKind = .quick, data: MacAppSession.DataSource = .copy) {
         let kind: TunnelKind = kind == .opentunnel ? .opentunnel : .quick
+        if let device = app.simulator, !Self.sharesSimulatorApps {
+            notice = AppNotice(.warning, "Sharing \(app.name) from the \(device.label) isn't available yet.")
+            return
+        }
         guard Self.macAppViewer != nil, Self.collaborationScript != nil else {
             notice = AppNotice(.error, "OpenTraffic's Mac app support is missing from the app. Reinstall OpenTraffic.")
             return
@@ -158,8 +170,13 @@ extension AppStore {
         let app: MacApp
         if let found = detectedMacApps.first(where: { $0.id == path }) {
             app = found
+        } else if SimulatorDiscovery.parseAppID(path) != nil {
+            app = try await Task.detached { try SimulatorDiscovery.resolve(id: path) }.value
         } else {
             app = try await Task.detached { try MacAppDiscovery.resolve(path: path) }.value
+        }
+        if let device = app.simulator, !Self.sharesSimulatorApps {
+            throw OpenTrafficError.process("Sharing \(app.name) from the \(device.label) isn't available yet.")
         }
         refreshMacAppPermissions()
         if let missing = missingMacAppPermissions.first { throw MacAppSessionError.permission(missing) }

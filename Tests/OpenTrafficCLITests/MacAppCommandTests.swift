@@ -72,3 +72,13 @@ import Testing
     #expect(decoded.macApp?.viewers == 2)
     #expect(decoded.macApp?.warning == nil)
 }
+
+@Test func readsAppsInTheSimulatorWithTheirDevice() throws {
+    let services = Data(#"""
+    {"services":[],
+     "apps":[{"kind":"macapp","name":"Orbit","bundle":"/Users/me/Library/Developer/CoreSimulator/Devices/A1B2/data/Containers/Bundle/Application/5F6E/Orbit.app","projectDirectory":"/Users/me/code/Orbit","running":false,"sharedAs":null,"device":"iPhone 17 Simulator"},
+             {"kind":"macapp","name":"Orbit","bundle":"/Users/me/code/Orbit/build/Orbit.app","running":true}]}
+    """#.utf8)
+    let apps = try #require(try JSON.decoder.decode(ServicesBody.self, from: services).apps)
+    #expect(apps.map(\.device) == ["iPhone 17 Simulator", nil])
+}
