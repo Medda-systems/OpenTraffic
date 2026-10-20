@@ -81,7 +81,7 @@ extension AppStore {
             // OpenTunnel passes the visitor's bytes straight to the local server, so live collaboration,
             // a password, and the Host header fix all need OpenTraffic's proxy in between.
             let collaboration = usesCollaboration(definition)
-            if collaboration || definition.rewriteHostHeader || definition.protection.isProtected {
+            if collaboration || definition.rewriteHostHeader || definition.protection.isProtected || definition.macApp != nil {
                 guard let proxyURL = try await startShareProxy(for: definition, generation: generation, collaboration: collaboration),
                       let proxyTarget = OpenTunnel.target(for: proxyURL) else { return }
                 target = proxyTarget

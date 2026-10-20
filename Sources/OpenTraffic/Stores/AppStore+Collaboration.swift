@@ -64,7 +64,7 @@ extension AppStore {
 
     /// Quick Tunnels go through OpenTraffic's proxy for live collaboration or a password.
     func quickNeedsProxy(_ definition: TunnelDefinition) -> Bool {
-        if usesCollaboration(definition) || definition.electronApp != nil { return true }
+        if usesCollaboration(definition) || definition.electronApp != nil || definition.macApp != nil { return true }
         if case .password = definition.protection { return true }
         return false
     }
@@ -78,6 +78,11 @@ extension AppStore {
             // The connector didn't launch: nothing will reach the proxy.
             if runtime(for: definition.id).state == .failed { stopCollaboration(definition.id) }
         } catch {
+            // A Mac app's own messages say what's wrong (a permission, the app not opening).
+            if definition.macApp != nil {
+                setFailure(error.localizedDescription, for: definition.id, generation: generation)
+                return
+            }
             let what = collaboration ? "live collaboration" : "this share"
             setFailure("OpenTraffic couldn't start \(what): \(error.localizedDescription)", for: definition.id, generation: generation)
         }
@@ -91,8 +96,9 @@ extension AppStore {
         guard let url = URL(string: definition.localURL), var upstreamHost = url.host else {
             throw OpenTrafficError.invalidLocalURL
         }
-        // An Electron app's pages need the overlay's injection (its preload goes in with it).
-        let collaboration = collaboration || definition.electronApp != nil
+        // An Electron app's pages need the overlay's injection (its preload goes in with it); a Mac
+        // app's viewer page needs it to pin comments to the app's elements.
+        let collaboration = collaboration || definition.electronApp != nil || definition.macApp != nil
         guard !collaboration || Self.collaborationScript != nil else { throw OpenTrafficError.invalidLocalURL }
         let access = try shareAccess(for: definition)
         stopCollaboration(definition.id)
@@ -112,6 +118,21 @@ extension AppStore {
                 return nil
             }
         }
+        // A Mac app: its isolated copy's mirror server is the local server, on IPv4 loopback.
+        var macAppPort: Int?
+        if definition.macApp != nil {
+            do {
+                let port = try await startMacAppSession(for: definition)
+                (upstreamHost, upstreamPort, macAppPort) = ("127.0.0.1", port, port)
+            } catch {
+                stopMacAppSession(id)
+                throw error
+            }
+            guard runtime(for: id).generation == generation else {
+                stopMacAppSession(id)
+                return nil
+            }
+        }
         let proxy = CollabProxy(
             configuration: .init(
                 upstreamHost: upstreamHost,
@@ -121,11 +142,13 @@ extension AppStore {
                 bridgeScript: Self.bridgeScript,
                 attachmentsDirectory: collaboration ? feedbackPersistence.attachmentsDirectory(id) : nil,
                 injectsOverlay: collaboration,
-                // An Electron app's dev server expects to be on localhost (Vite turns other hosts away).
-                rewritesHostHeader: (definition.kind != .quick && definition.rewriteHostHeader) || electronHostPort != nil,
+                // An Electron app's dev server expects to be on localhost (Vite turns other hosts away);
+                // a Mac app's mirror server only ever sees its own address (pages' origins are checked).
+                rewritesHostHeader: (definition.kind != .quick && definition.rewriteHostHeader) || electronHostPort != nil || macAppPort != nil,
                 // Only Cloudflare says who each visitor is.
                 limitsConnectionsPerAddress: definition.kind.provider == .cloudflare,
-                electronHostPort: electronHostPort
+                electronHostPort: electronHostPort,
+                mirrorsMacApp: macAppPort != nil
             ),
             comments: collaboration ? comments(for: id) : []
         )
@@ -164,6 +187,7 @@ extension AppStore {
         guard runtime(for: id).generation == generation, let proxyURL = proxy.localURL else {
             await proxy.stop()
             if electronHostPort != nil { stopElectronSession(id) }
+            if macAppPort != nil { stopMacAppSession(id) }
             return nil
         }
         collabProxies[id] = proxy
@@ -523,6 +547,7 @@ extension AppStore {
         }
         projectWatchers.removeValue(forKey: id)?.stop()
         stopElectronSession(id)
+        stopMacAppSession(id)
         guard let proxy = collabProxies.removeValue(forKey: id) else { return }
         Task { await proxy.stop() }
         updateReservedPorts()
@@ -563,6 +588,7 @@ extension AppStore {
     /// The public hostname lets pages served through the tunnel open the hub's WebSocket.
     func collaborationReceived(publicURL: String, for id: UUID) {
         collabProxies[id]?.setPublicHost(URL(string: publicURL)?.host)
+        macAppReceived(publicURL: publicURL, for: id)
     }
 
     /// The connector reports the proxy as its origin; show the dev server instead.

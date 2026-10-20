@@ -54,6 +54,11 @@ private final class UpstreamHandler: ChannelInboundHandler, RemovableChannelHand
             headers.add(name: "location", value: "http://localhost:\(context.channel.localAddress?.port ?? 0)/after?x=1")
             headers.add(name: "set-cookie", value: "sid=1; Path=/; Domain=localhost; HttpOnly")
             chunks = [""]
+        case MirrorProtocol.viewerScriptPath:
+            // A Mac app's mirror server, answering for its own files.
+            headers.add(name: "content-type", value: "application/javascript")
+            headers.add(name: "x-seen-host", value: head.headers.first(name: "host") ?? "")
+            chunks = ["viewer()"]
         case "/strict":
             headers.add(name: "content-type", value: "text/html")
             headers.add(name: "content-security-policy", value: "script-src 'nonce-app' 'strict-dynamic'; connect-src 'self' ws://localhost:7880")
@@ -87,7 +92,7 @@ private func startUpstream() async throws -> Channel {
         .childChannelInitializer { channel in
             channel.eventLoop.makeCompletedFuture {
                 let upgrader = NIOWebSocketServerUpgrader(
-                    shouldUpgrade: { channel, head in channel.eventLoop.makeSucceededFuture(head.uri == "/hmr" ? HTTPHeaders() : nil) },
+                    shouldUpgrade: { channel, head in channel.eventLoop.makeSucceededFuture(head.uri == "/hmr" || head.uri == MirrorProtocol.webSocketPath ? HTTPHeaders() : nil) },
                     upgradePipelineHandler: { channel, _ in
                         channel.eventLoop.makeCompletedFuture {
                             let sync = channel.pipeline.syncOperations
@@ -118,12 +123,15 @@ private struct Harness {
     let port: Int
     let session = URLSession(configuration: .ephemeral, delegate: NoRedirects(), delegateQueue: nil)
 
-    static func start() async throws -> Harness {
+    static func start(mirrorsMacApp: Bool = false) async throws -> Harness {
         let upstream = try await startUpstream()
         let proxy = CollabProxy(configuration: .init(
             upstreamHost: "127.0.0.1",
             upstreamPort: upstream.localAddress!.port!,
-            overlayScript: Data("console.log('overlay')".utf8)
+            overlayScript: Data("console.log('overlay')".utf8),
+            // As a Mac app share sets it up: the mirror server only ever sees its own address.
+            rewritesHostHeader: mirrorsMacApp,
+            mirrorsMacApp: mirrorsMacApp
         ))
         let port = try await proxy.start()
         return Harness(upstream: upstream, proxy: proxy, port: port)
@@ -725,4 +733,189 @@ private let page = ["Accept": "text/html", "Sec-Fetch-Mode": "navigate"]
     let task = harness.socket(CollabProxy.socketPath)
     await #expect(throws: (any Error).self) { _ = try await task.receive() }
     #expect((task.response as? HTTPURLResponse)?.statusCode == 401)
+}
+
+// MARK: A shared Mac app
+
+@Test func aMacAppsMirrorRoutesPassThroughToItsServer() async throws {
+    let harness = try await Harness.start(mirrorsMacApp: true)
+    defer { Task { await harness.stop() } }
+    let upstreamPort = harness.upstream.localAddress!.port!
+
+    // The viewer page is a page like any other: the bridge first, the overlay last.
+    let (page, _) = try await harness.get("/")
+    #expect(page == "<html><head>\(CollabProxy.bridgeTag(nonce: nil))<title>t</title>\(CollabProxy.scriptTag)</head><body>hello</body></html>")
+
+    // Its files under /__opentraffic/macapp/ come from the mirror server, which sees its own address.
+    let (script, response) = try await harness.send(MirrorProtocol.viewerScriptPath, headers: ["Host": "orbit.example.dev"])
+    #expect(response.statusCode == 200)
+    #expect(script == "viewer()")
+    #expect(response.value(forHTTPHeaderField: "x-seen-host") == "127.0.0.1:\(upstreamPort)")
+    let (_, unknown) = try await harness.get(MirrorProtocol.snapshotPath)
+    #expect(unknown.statusCode == 404)
+    // OpenTraffic's own routes are still its own.
+    let (overlay, _) = try await harness.get(CollabProxy.scriptPath)
+    #expect(overlay == "console.log('overlay')")
+
+    // The app's WebSocket is relayed to the mirror server.
+    let socket = harness.socket(MirrorProtocol.webSocketPath)
+    try await socket.send(.string(#"{"t":"act"}"#))
+    guard case .string(let echoed) = try await socket.receive() else {
+        Issue.record("expected a text frame")
+        return
+    }
+    #expect(echoed == #"{"t":"act"}"#)
+    socket.cancel(with: .goingAway, reason: nil)
+
+    // Pages from other sites can't drive the app.
+    let stranger = harness.socket(MirrorProtocol.webSocketPath, origin: "https://evil.example")
+    await #expect(throws: (any Error).self) { _ = try await stranger.receive() }
+    #expect((stranger.response as? HTTPURLResponse)?.statusCode == 403)
+
+    // The share's public pages can, once the public address is known.
+    harness.proxy.setPublicHost("orbit.example.dev")
+    let visitor = harness.socket(MirrorProtocol.webSocketPath, origin: "https://orbit.example.dev")
+    try await visitor.send(.string("ping"))
+    guard case .string(let pong) = try await visitor.receive() else {
+        Issue.record("expected a text frame")
+        return
+    }
+    #expect(pong == "ping")
+    visitor.cancel(with: .goingAway, reason: nil)
+}
+
+@Test func withoutAMacAppTheMirrorPathsStayOpenTrafficsOwn() async throws {
+    let harness = try await Harness.start()
+    defer { Task { await harness.stop() } }
+    // The local server would answer 200; the proxy keeps /__opentraffic/ to itself.
+    let (_, response) = try await harness.get(MirrorProtocol.viewerScriptPath)
+    #expect(response.statusCode == 404)
+    let socket = harness.socket(MirrorProtocol.webSocketPath)
+    await #expect(throws: (any Error).self) { _ = try await socket.receive() }
+}
+
+@Test func aMacAppsMirrorNeedsThePasswordToo() async throws {
+    let harness = try await Harness.start(mirrorsMacApp: true)
+    defer { Task { await harness.stop() } }
+    let access = ShareAccess(password: "p4ss", shareKey: "k", shareName: "Orbit")
+    harness.proxy.setAccess(access)
+    let (_, refused) = try await harness.send(MirrorProtocol.viewerScriptPath)
+    #expect(refused.statusCode == 401)
+    let socket = harness.socket(MirrorProtocol.webSocketPath)
+    await #expect(throws: (any Error).self) { _ = try await socket.receive() }
+    #expect((socket.response as? HTTPURLResponse)?.statusCode == 401)
+    let (script, signedIn) = try await harness.send(MirrorProtocol.viewerScriptPath, headers: ["Cookie": "\(ShareAccess.cookieName)=\(access.cookieValue)"])
+    #expect(signedIn.statusCode == 200)
+    #expect(script == "viewer()")
+}
+
+// MARK: A shared Mac app for real (the Orbit fixture)
+
+/// What OpenTraffic sets up for a Mac app share, minus the tunnel: the isolated copy's mirror server
+/// behind a proxy configured as the app configures it, opened as a visitor from the public address.
+@MainActor
+@Suite("A Mac app share through the proxy on the Orbit fixture", .serialized,
+       .enabled(if: AccessibilityTree.isTrusted, "needs Accessibility permission"),
+       .enabled(if: WindowCapture.isPermitted, "needs Screen Recording permission"),
+       .macAppFixtureTurn, .timeLimit(.minutes(10)))
+struct MacAppShareProxyFixtureTests {
+    @Test func visitorsGetTheViewerWithTheOverlayAndDriveTheAppThroughTheProxy() async throws {
+        try OrbitFixture.buildIfNeeded()
+        let sessions = OrbitFixture.repository.appendingPathComponent(".build/macapp-share-tests", isDirectory: true)
+        await MacAppSession.removeLeftovers(in: sessions)
+        let app = MacApp(name: "Orbit", bundle: OrbitFixture.app, bundleIdentifier: OrbitFixture.bundleIdentifier,
+                         projectDirectory: OrbitFixture.folder, isRunning: false)
+        let page = Data(#"<!doctype html><html><head><title>Orbit</title></head><body><main id="desktop"></main></body></html>"#.utf8)
+        let session = MacAppSession(options: .init(
+            app: app, data: .empty, assets: .init(page: page, script: Data("/* viewer */".utf8), style: Data()),
+            sessionDirectory: sessions.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        ))
+        let port = try await session.start()
+        let proxy = CollabProxy(configuration: .init(
+            upstreamHost: "127.0.0.1", upstreamPort: port, overlayScript: Data("overlay".utf8),
+            rewritesHostHeader: true, mirrorsMacApp: true
+        ))
+        do {
+            let proxyPort = try await proxy.start()
+            // The tunnel is up: its address is the share's public origin.
+            proxy.setPublicHost("orbit.example.dev")
+            session.server?.setAllowedOrigins(["https://orbit.example.dev"])
+            let urls = URLSession(configuration: .ephemeral)
+            func visitor(_ path: String) -> URLRequest {
+                var request = URLRequest(url: URL(string: "http://127.0.0.1:\(proxyPort)\(path)")!)
+                request.setValue("orbit.example.dev", forHTTPHeaderField: "Host")
+                request.setValue("https", forHTTPHeaderField: "X-Forwarded-Proto")
+                return request
+            }
+
+            // The viewer page with the overlay; the viewer's own files from the mirror server.
+            let (html, _) = try await urls.data(for: visitor("/"))
+            let text = String(decoding: html, as: UTF8.self)
+            #expect(text.contains(CollabProxy.scriptTag) && text.contains(#"<main id="desktop">"#))
+            let (script, scriptResponse) = try await urls.data(for: visitor(MirrorProtocol.viewerScriptPath))
+            #expect((scriptResponse as? HTTPURLResponse)?.statusCode == 200)
+            #expect(String(decoding: script, as: UTF8.self) == "/* viewer */")
+
+            // The app's WebSocket, from the public page: hello with Orbit's window, then its tree.
+            var request = URLRequest(url: URL(string: "ws://127.0.0.1:\(proxyPort)\(MirrorProtocol.webSocketPath)")!)
+            request.setValue("orbit.example.dev", forHTTPHeaderField: "Host")
+            request.setValue("https://orbit.example.dev", forHTTPHeaderField: "Origin")
+            let socket = urls.webSocketTask(with: request)
+            socket.resume()
+            defer { socket.cancel(with: .goingAway, reason: nil) }
+            let hello = try await nextMessage(socket, type: "hello")
+            #expect((hello["app"] as? [String: Any])?["name"] as? String == "Orbit")
+            let boot = try #require(hello["boot"] as? String)
+            #expect((hello["windows"] as? [Any])?.isEmpty == false)
+            _ = try await nextMessage(socket, type: "tree")
+            #expect(session.viewerCount == 1)
+
+            // Reset Data, as the card's button does: same port, the visitor stays connected and gets a new launch.
+            try await session.resetData()
+            let again = try await nextMessage(socket, type: "hello")
+            #expect(again["boot"] as? String != boot)
+            #expect(session.port == port)
+
+            // Another site's page can't drive the app.
+            var foreign = request
+            foreign.setValue("https://evil.example", forHTTPHeaderField: "Origin")
+            let evil = urls.webSocketTask(with: foreign)
+            evil.resume()
+            await #expect(throws: (any Error).self) { _ = try await evil.receive() }
+        } catch {
+            await proxy.stop()
+            await session.stop()
+            await removeLateOrbitPreferences()
+            throw error
+        }
+        await proxy.stop()
+        await session.stop()
+        await removeLateOrbitPreferences()
+        #expect(!FileManager.default.fileExists(atPath: session.sessionDirectory.path))
+    }
+
+    /// The next text message of this type (`{"t":"hello"}`), skipping the others and binary tiles.
+    private func nextMessage(_ socket: URLSessionWebSocketTask, type: String) async throws -> [String: Any] {
+        let deadline = ContinuousClock.now + .seconds(30)
+        while ContinuousClock.now < deadline {
+            guard case .string(let text) = try await socket.receive(),
+                  let message = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { continue }
+            if message["t"] as? String == type { return message }
+        }
+        throw FixtureError("no \(type) message within 30 seconds")
+    }
+
+    /// cfprefsd writes the copy's emptied preferences back a few seconds after the session deletes
+    /// them; delete that write too (the session's own follow-up runs later than a test process lives).
+    private func removeLateOrbitPreferences() async {
+        let file = ElectronSandbox.realHomeDirectory + "/Library/Preferences/se.medda.orbit.opentraffic.plist"
+        let deadline = ContinuousClock.now + .seconds(15)
+        while ContinuousClock.now < deadline {
+            if FileManager.default.fileExists(atPath: file) {
+                try? FileManager.default.removeItem(atPath: file)
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+    }
 }

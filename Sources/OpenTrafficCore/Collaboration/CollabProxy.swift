@@ -35,6 +35,10 @@ public final class CollabProxy: @unchecked Sendable {
         /// The Electron host serving this share's app (electron-host.js): `/__opentraffic/electron/*`
         /// goes there, and pages get its preload script first thing in <head>.
         public var electronHostPort: Int?
+        /// The upstream is a shared Mac app's mirror server (MirrorServer): `/__opentraffic/macapp/*`
+        /// (its viewer script, styles, icon, snapshots and WebSocket) goes to it untouched instead of
+        /// being answered here. Its WebSocket only takes this share's pages.
+        public var mirrorsMacApp: Bool
 
         public init(
             upstreamHost: String,
@@ -46,7 +50,8 @@ public final class CollabProxy: @unchecked Sendable {
             injectsOverlay: Bool = true,
             rewritesHostHeader: Bool = false,
             limitsConnectionsPerAddress: Bool = true,
-            electronHostPort: Int? = nil
+            electronHostPort: Int? = nil,
+            mirrorsMacApp: Bool = false
         ) {
             self.upstreamHost = upstreamHost
             self.upstreamPort = upstreamPort
@@ -58,6 +63,7 @@ public final class CollabProxy: @unchecked Sendable {
             self.rewritesHostHeader = rewritesHostHeader
             self.limitsConnectionsPerAddress = limitsConnectionsPerAddress
             self.electronHostPort = electronHostPort
+            self.mirrorsMacApp = mirrorsMacApp
         }
 
         /// Where requests from the host's own browser say they're going, as the local server expects.
@@ -724,6 +730,11 @@ private final class ProxyHandler: ChannelInboundHandler, RemovableChannelHandler
                 bridgedPort = electronPort
                 targetPort = electronPort
                 forwarded.headers.replaceOrAdd(name: "host", value: "127.0.0.1:\(electronPort)")
+            } else if proxy.configuration.mirrorsMacApp, path.hasPrefix(MirrorProtocol.pathPrefix) {
+                // The Mac app's mirror server is the upstream itself: its files and its WebSocket pass
+                // through as they are. The socket drives the app, so only this share's pages may open it.
+                if isUpgrade, !proxy.acceptsOrigin(head) { return }
+                localRoute = false
             } else if let target = CollabProxy.bridgedTarget(head.uri) {
                 guard proxy.allowsBridgedPort(target.port) else {
                     proxy.reportBridgeCandidate(target.port)
@@ -1012,6 +1023,11 @@ private final class ProxyHandler: ChannelInboundHandler, RemovableChannelHandler
         if let target = CollabProxy.bridgedTarget(request.uri) {
             let message = "OpenTraffic hasn't been allowed to reach localhost:\(target.port) for this share. Allow it in OpenTraffic's Live Collaboration card.\n"
             respond(context: context, status: .forbidden, headers: HTTPHeaders(), body: ByteBuffer(string: message))
+            return
+        }
+        if proxy.configuration.mirrorsMacApp, path.hasPrefix(MirrorProtocol.pathPrefix) {
+            // Only a refused WebSocket ends up here.
+            respond(context: context, status: .forbidden, headers: HTTPHeaders(), body: ByteBuffer(string: "Only this share's pages can connect to the app.\n"))
             return
         }
         if request.method == .GET, path.hasPrefix(CollabProxy.attachmentsPrefix) {

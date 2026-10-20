@@ -54,8 +54,9 @@ struct CollaborationCard: View {
             }
             .toggleStyle(.switch)
             .accessibilityLabel("Show who's here")
-            // A shared Electron app always runs with it: its preload goes in with the overlay.
-            .disabled(blocker != nil || applying || tunnel.electronApp != nil)
+            // A shared Electron app always runs with it: its preload goes in with the overlay. So does
+            // a Mac app: its viewer page is how people see it.
+            .disabled(blocker != nil || applying || tunnel.electronApp != nil || tunnel.macApp != nil)
 
             if let blocker {
                 InlineMessage(severity: .info, message: blocker)
@@ -85,6 +86,7 @@ struct CollaborationCard: View {
                         .foregroundStyle(.secondary)
                 }
                 if tunnel.electronApp != nil { electronSection }
+                if tunnel.macApp != nil { macAppSection }
                 bridgeSection
                 Toggle("Collect browser errors from visitors", isOn: Binding(
                     get: { tunnel.captureErrors },
@@ -202,6 +204,60 @@ struct CollaborationCard: View {
                 .disabled(!store.isActive(tunnel.id))
         }
         .font(.callout)
+    }
+
+    /// A shared Mac app: an isolated copy runs hidden on this Mac, with its own data.
+    @ViewBuilder
+    private var macAppSection: some View {
+        let status = store.macAppStatus[tunnel.id]
+        let canAct = store.isActive(tunnel.id) && status.map { $0.state == .running || $0.state.isProblem } == true
+        HStack(spacing: Spacing.s) {
+            Image(systemName: "macwindow")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Mac app, isolated copy")
+                Text(macAppCaption(status))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Button("Reset Data") { store.resetMacAppData(tunnel.id) }
+                .help("Quit the app and start it over from the data it started with. Viewers stay connected.")
+                .disabled(!canAct)
+            Button("Restart App") { store.restartMacApp(tunnel.id) }
+                .help("Quit the app and open it again with the same data; a new build is copied first. Viewers stay connected.")
+                .disabled(!canAct)
+        }
+        .font(.callout)
+        .onAppear { store.refreshMacAppPermissions() }
+        if let warning = status?.warning {
+            InlineMessage(severity: .info, message: warning)
+        }
+        if store.missingMacAppPermissions.isEmpty {
+            Label("Accessibility and Screen Recording are on for OpenTraffic.", systemImage: "checkmark.shield")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            MacAppPermissionsMessage(store: store)
+        }
+    }
+
+    private func macAppCaption(_ status: MacAppShareStatus?) -> String {
+        let name = tunnel.macApp.map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent } ?? tunnel.name
+        let data = tunnel.macAppData == .empty ? "empty data" : "a copy of its data"
+        let about = "\(name) runs hidden on this Mac as a separate copy with \(data); your own copy and its data aren't touched."
+        guard store.isActive(tunnel.id), let status else { return about }
+        let state = switch status.state {
+        case .idle, .starting: "Starting…"
+        case .running: status.viewers == 1 ? "Running, 1 viewer." : "Running, \(status.viewers) viewers."
+        case .restarting: "Restarting…"
+        case .crashed(let message): message
+        case .failed(let message): message
+        case .stopped: "Stopped."
+        }
+        return "\(about) \(state)"
     }
 
     private var blocker: String? {
@@ -378,5 +434,52 @@ extension Color {
             green: Double((value >> 8) & 0xFF) / 255,
             blue: Double(value & 0xFF) / 255
         )
+    }
+}
+
+extension MacAppSession.State {
+    /// It quit or failed: Restart and Reset may bring it back.
+    var isProblem: Bool {
+        switch self {
+        case .crashed, .failed: true
+        default: false
+        }
+    }
+}
+
+/// What sharing a Mac app needs from System Settings, with buttons that ask macOS for it (its prompt
+/// lists OpenTraffic there) and open the pane where it's turned on.
+struct MacAppPermissionsMessage: View {
+    let store: AppStore
+    /// The app a share is waiting to start, if any.
+    var waitingApp: String?
+    var onCancel: (() -> Void)?
+
+    var body: some View {
+        let missing = store.missingMacAppPermissions
+        InlineMessage(severity: .warning, message: message(missing), title: missing.count == 1 ? "One permission needed" : "Two permissions needed") {
+            ForEach(missing, id: \.self) { permission in
+                Button("\(Self.shortTitle(permission))…") { store.requestMacAppPermission(permission) }
+                    .help("Ask macOS for \(permission.title) and open System Settings > Privacy & Security > \(permission.title)")
+            }
+            if let onCancel { Button("Cancel", action: onCancel) }
+        }
+    }
+
+    static func shortTitle(_ permission: MacAppSession.Permission) -> String {
+        switch permission {
+        case .accessibility: "Accessibility"
+        case .screenRecording: "Screen Recording"
+        }
+    }
+
+    private func message(_ missing: [MacAppSession.Permission]) -> String {
+        let names = missing.map(Self.shortTitle).joined(separator: " and ")
+        var parts = ["To share \(waitingApp ?? "Mac apps"), switch OpenTraffic on for \(names) in System Settings > Privacy & Security."]
+        if missing.contains(.accessibility) { parts.append("Accessibility lets it read and press the app's controls.") }
+        if missing.contains(.screenRecording) { parts.append("Screen Recording lets it show the app's window, and only that window.") }
+        if waitingApp != nil { parts.append("The share starts once \(missing.count == 1 ? "it's" : "both are") on.") }
+        if missing.contains(.screenRecording) { parts.append("If Screen Recording stays off, quit and reopen OpenTraffic.") }
+        return parts.joined(separator: " ")
     }
 }

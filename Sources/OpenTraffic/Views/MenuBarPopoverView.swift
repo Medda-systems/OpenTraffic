@@ -9,6 +9,7 @@ struct MenuBarPopoverView: View {
     @Bindable var store: AppStore
     @State private var showingAllServices = false
     @State private var showingAllApps = false
+    @State private var showingAllMacApps = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -45,6 +46,8 @@ struct MenuBarPopoverView: View {
         .frame(width: 360)
         .onChange(of: popoverVisible, initial: true) { _, visible in
             store.setLocalServicesWatched(visible, by: "menu bar")
+            // Turned on in System Settings since the last look?
+            if visible { store.refreshMacAppPermissions() }
         }
     }
 
@@ -136,6 +139,7 @@ struct MenuBarPopoverView: View {
     private var readyToShareSection: some View {
         let services = store.shareableLocalServices
         let apps = store.shareableElectronApps
+        let macApps = store.shareableMacApps
         HStack {
             sectionTitle("Localhost")
             Spacer()
@@ -162,7 +166,7 @@ struct MenuBarPopoverView: View {
                 // Services are sorted newest first; the newest is almost always the one you just started.
                 ShareableServiceRow(
                     service: service,
-                    isSuggested: index == 0 && apps.isEmpty,
+                    isSuggested: index == 0 && apps.isEmpty && macApps.isEmpty,
                     canShare: store.cloudflaredPath != nil,
                     canShareOnTailnet: store.tailscaleBlocker == nil,
                     canShareWithNgrok: store.ngrokBlocker == nil,
@@ -193,6 +197,31 @@ struct MenuBarPopoverView: View {
                 }
             }
             showMoreButton(total: apps.count, expanded: $showingAllApps)
+        }
+        if !macApps.isEmpty || store.pendingMacAppShare != nil {
+            sectionTitle("Mac Apps")
+                .padding(.top, Spacing.s)
+            if let pending = store.pendingMacAppShare, !store.missingMacAppPermissions.isEmpty {
+                MacAppPermissionsMessage(store: store, waitingApp: pending.app.name) {
+                    withAnimation(.snappy) { store.cancelPendingMacAppShare() }
+                }
+                .padding(Spacing.s)
+                .background(Color.yellow.opacity(0.10), in: RoundedRectangle(cornerRadius: Radius.medium))
+                .padding(.bottom, Spacing.xs)
+            }
+            let visible = showingAllMacApps ? macApps : Array(macApps.prefix(Self.collapsedCount))
+            ForEach(visible) { app in
+                MacAppRow(
+                    app: app,
+                    isSuggested: apps.isEmpty && app.id == macApps.first?.id,
+                    canShare: store.cloudflaredPath != nil,
+                    canShareWithOpenTunnel: store.openTunnelBlocker == nil,
+                    defaultKind: store.effectiveDefaultShareKind == .opentunnel ? .opentunnel : .quick
+                ) { kind, data in
+                    withAnimation(.snappy) { store.share(app, kind: kind, data: data) }
+                }
+            }
+            showMoreButton(total: macApps.count, expanded: $showingAllMacApps)
         }
     }
 
@@ -451,6 +480,87 @@ private struct ElectronAppRow: View {
         if path.hasPrefix("/private/tmp/") { path.removeFirst("/private".count) } // as it's usually typed
         parts.append(path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path)
         return parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private func shareItem(_ title: String, provider: TunnelProvider, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Label { Text(title) } icon: { Image(nsImage: BrandAssets.logo(provider, style: .menu)).renderingMode(.template) } }
+    }
+}
+
+/// A Mac app being developed, shared like a web server: an isolated copy runs hidden on this Mac
+/// with a copy of its data, and its window opens in viewers' browsers.
+private struct MacAppRow: View {
+    let app: MacApp
+    var isSuggested = false
+    let canShare: Bool
+    var canShareWithOpenTunnel = false
+    var defaultKind: TunnelKind = .quick
+    let share: (TunnelKind, MacAppSession.DataSource) -> Void
+
+    var body: some View {
+        HStack(spacing: Spacing.s) {
+            HStack(spacing: Spacing.s) {
+                Image(nsImage: AppStore.icon(for: app))
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 26, height: 26)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(app.name)
+                        .lineLimit(1)
+                    Text(details)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: Spacing.xs)
+            }
+            .contentShape(Rectangle())
+            .help("\(app.name), a Mac app\(app.isRunning ? " (running)" : "") at \(app.bundle.path)")
+            .contextMenu {
+                Group {
+                    Button("Show in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([app.bundle]) }
+                    Button("Copy Path", systemImage: "doc.on.doc") { Pasteboard.copy(app.bundle.path) }
+                }
+                .untintedMenuItems()
+            }
+            Menu {
+                Group {
+                    shareItem("Temporary Public URL", provider: .cloudflare) { share(.quick, .copy) }
+                        .disabled(!canShare)
+                    shareItem("Lasting Address with OpenTunnel", provider: .opentunnel) { share(.opentunnel, .copy) }
+                        .disabled(!canShareWithOpenTunnel)
+                    Divider()
+                    Button("Share with Empty Data", systemImage: "tray") { share(defaultKind, .empty) }
+                        .disabled(defaultKind == .quick ? !canShare : !canShareWithOpenTunnel)
+                }
+                .untintedMenuItems()
+            } label: {
+                Text(Vocabulary.share)
+            } primaryAction: {
+                share(defaultKind, .copy)
+            }
+            .menuStyle(.button)
+            .buttonStyle(isSuggested ? AnyPrimitiveButtonStyle(.borderedProminent) : AnyPrimitiveButtonStyle(.bordered))
+            .controlSize(.small)
+            .fixedSize()
+            .disabled(!canShare && !canShareWithOpenTunnel)
+            .help("Share \(app.name) with live collaboration and copy the URL. A separate copy runs hidden on this Mac with a copy of its data.")
+        }
+        .padding(.vertical, Spacing.xs)
+        .padding(.horizontal, Spacing.s)
+        .hoverHighlight()
+        .accessibilityElement(children: .combine)
+    }
+
+    /// `Mac app · ~/code/orbit`: where it's built from (or the app itself when that isn't known).
+    private var details: String {
+        let home = ElectronSandbox.realHomeDirectory
+        var path = (app.projectDirectory ?? app.bundle).path
+        if path.hasPrefix("/private/tmp/") { path.removeFirst("/private".count) }
+        return "Mac app · " + (path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path)
     }
 
     @ViewBuilder

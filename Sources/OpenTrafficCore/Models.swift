@@ -179,6 +179,11 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
     public var electronApp: String?
     /// Where that sandboxed copy's data starts from.
     public var electronData: ElectronHostSession.DataSource?
+    /// A native Mac app's .app path: the share mirrors its window from an isolated copy running
+    /// hidden on this Mac (see MacAppSession).
+    public var macApp: String?
+    /// Where that copy's data starts from.
+    public var macAppData: MacAppSession.DataSource?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -208,6 +213,8 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         case collabDefaultRole
         case electronApp
         case electronData
+        case macApp
+        case macAppData
     }
 
     public init(
@@ -237,7 +244,9 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         collabMembers: [String: CollabMember] = [:],
         collabDefaultRole: CollabRole = .commenter,
         electronApp: String? = nil,
-        electronData: ElectronHostSession.DataSource? = nil
+        electronData: ElectronHostSession.DataSource? = nil,
+        macApp: String? = nil,
+        macAppData: MacAppSession.DataSource? = nil
     ) {
         self.id = id
         self.name = name
@@ -266,6 +275,8 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         self.collabDefaultRole = collabDefaultRole
         self.electronApp = electronApp?.nilIfBlank
         self.electronData = electronData
+        self.macApp = macApp?.nilIfBlank
+        self.macAppData = macAppData
     }
 
     public init(from decoder: Decoder) throws {
@@ -297,6 +308,8 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         collabDefaultRole = (try? container.decodeIfPresent(CollabRole.self, forKey: .collabDefaultRole)) ?? .commenter
         electronApp = try container.decodeIfPresent(String.self, forKey: .electronApp)?.nilIfBlank
         electronData = try? container.decodeIfPresent(ElectronHostSession.DataSource.self, forKey: .electronData)
+        macApp = try container.decodeIfPresent(String.self, forKey: .macApp)?.nilIfBlank
+        macAppData = try? container.decodeIfPresent(MacAppSession.DataSource.self, forKey: .macAppData)
     }
 
     /// What the person with this browser may do.

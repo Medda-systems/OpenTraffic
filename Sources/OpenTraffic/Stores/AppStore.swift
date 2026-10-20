@@ -227,6 +227,24 @@ final class AppStore {
     @ObservationIgnored var electronCrashes: [UUID: [Date]] = [:]
     /// People viewing each shared Electron app right now.
     var electronViewers: [UUID: Int] = [:]
+    /// Mac apps being built on this Mac, ready to share (running debug builds, recent Xcode builds).
+    var detectedMacApps: [MacApp] = []
+    /// Shared Mac apps' isolated copies, the tasks reading their logs and events, and copies still
+    /// quitting (OpenTraffic waits for those before it quits, and before it starts another copy).
+    @ObservationIgnored var macAppSessions: [UUID: MacAppSession] = [:]
+    @ObservationIgnored var macAppReaders: [UUID: [Task<Void, Never>]] = [:]
+    @ObservationIgnored var macAppStops: [UUID: Task<Void, Never>] = [:]
+    /// The processes of copies still stopping, quit right away if OpenTraffic can't wait for them.
+    @ObservationIgnored var macAppStoppingPIDs: [UUID: pid_t] = [:]
+    /// Quitting copies a previous run left behind (it crashed or was killed), once at launch.
+    @ObservationIgnored var macAppLeftovers: Task<Void, Never>?
+    /// What each shared Mac app is doing, for its Live Collaboration card.
+    var macAppStatus: [UUID: MacAppShareStatus] = [:]
+    /// Permissions sharing a Mac app needs that OpenTraffic doesn't have (checked without asking).
+    var missingMacAppPermissions: [MacAppSession.Permission] = []
+    /// A Mac app share waiting for those permissions.
+    var pendingMacAppShare: PendingMacAppShare?
+    @ObservationIgnored var macAppPermissionPolling: Task<Void, Never>?
     /// Runs the agent command started by itself recently, against the budget.
     @ObservationIgnored var agentRunBudget = AgentRunBudget()
     /// Shares working on a branch: their repositories (by root), what was already changed when the
@@ -436,6 +454,8 @@ final class AppStore {
             runtimes[definition.id] = TunnelRuntime()
             logs[definition.id] = BoundedLogBuffer()
         }
+        // Shared Mac apps' copies a previous run left running would show up on the screen: quit them.
+        macAppLeftovers = Task { await MacAppSession.removeLeftovers() }
         statusPollingTask = Task { [weak self] in
             // Clean up what a previous run left behind (crash, force quit) before anything else.
             self?.terminateOrphanedConnectors()
@@ -544,6 +564,7 @@ final class AppStore {
         lastLocalServiceScan = Date()
         if services != detectedLocalServices { detectedLocalServices = services }
         await scanElectronApps()
+        await scanMacApps()
     }
 
     /// Marks a view as showing local services (or not anymore). Becoming visible refreshes right away.
@@ -1002,6 +1023,7 @@ final class AppStore {
         // Tailscale shares and OpenTunnel routes live in their own services, not in a child
         // process, so remove them explicitly.
         Task { [weak self] in
+            await self?.waitForMacAppSessionsToStop()
             await self?.removeAllTailscaleShares()
             await self?.removeAllOpenTunnelRoutes()
             self?.processSupervisor.shutdown(completion: completion ?? {})
@@ -1089,7 +1111,9 @@ final class AppStore {
         // While a share is starting, its provider takes a moment to answer; that's not a failure yet.
         let isNew = runtime.startedAt.map { Date().timeIntervalSince($0) < Self.newHostnameGracePeriod } ?? false
         var localStatus: Int?
-        switch await originReachabilityChecker.check(effectiveOrigin(for: definition).url) {
+        // A shared Mac app's local address is its mirror server's, which changes with every start.
+        let origin = macAppSessions[id]?.url?.absoluteString ?? effectiveOrigin(for: definition).url
+        switch await originReachabilityChecker.check(origin) {
         case .reachable(let statusCode):
             localStatus = statusCode
             checks.append(TunnelHealthCheck(kind: .localOrigin, state: .ok, detail: "Local service responded with HTTP \(statusCode)."))
