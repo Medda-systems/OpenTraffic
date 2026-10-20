@@ -346,6 +346,20 @@ struct SimulatorDiscoveryTests {
         #expect(SimulatorDiscovery.parseAppID("simulator:\(iPhone17)/") == nil)
     }
 
+    @Test func outputWrittenAsTheToolExitsIsStillRead() {
+        let pipe = Pipe()
+        var asked = 0
+        let data = Simctl.collect([pipe.fileHandleForReading.fileDescriptor], until: Date().addingTimeInterval(5)) {
+            asked += 1
+            // The tool answers and exits between a poll that saw nothing and this question.
+            pipe.fileHandleForWriting.write(Data("late answer".utf8))
+            try? pipe.fileHandleForWriting.close()
+            return true
+        }
+        #expect(String(decoding: data[0], as: UTF8.self) == "late answer")
+        #expect(asked == 1)
+    }
+
     @Test func aSavedShareFindsItsAppOnItsDeviceOrAnotherBootedOne() throws {
         let bench = try Bench()
         defer { bench.remove() }

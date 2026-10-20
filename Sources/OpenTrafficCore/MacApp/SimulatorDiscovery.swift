@@ -444,15 +444,20 @@ public struct Simctl: Sendable {
         var data = descriptors.map { _ in Data() }
         var open = Set(descriptors.indices)
         var buffer = [UInt8](repeating: 0, count: 65536)
+        // The tool has exited: what it wrote on its way out is in the pipes, nothing more is coming.
+        var lastLook = false
         while !open.isEmpty, Date() < deadline {
             var requests = open.sorted().map { pollfd(fd: descriptors[$0], events: Int16(POLLIN), revents: 0) }
-            let ready = poll(&requests, nfds_t(requests.count), 50)
+            let ready = poll(&requests, nfds_t(requests.count), lastLook ? 0 : 50)
             if ready < 0 {
                 if errno == EINTR { continue }
                 break
             }
             if ready == 0 {
-                if finished() { break }
+                if lastLook { break }
+                // The tool can exit between a poll that saw nothing and this check, its output written
+                // just before: one more look (seen as lost simctl output on a loaded Mac).
+                if finished() { lastLook = true }
                 continue
             }
             for request in requests where request.revents != 0 {
