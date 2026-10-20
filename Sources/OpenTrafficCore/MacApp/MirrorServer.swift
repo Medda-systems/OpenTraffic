@@ -170,10 +170,14 @@ public final class MirrorServer: @unchecked Sendable {
         public var makeCapture: @Sendable (CGWindowID) -> any MirrorCapture
         /// The app's menus; nil sends no `menu` message and ignores `menuAction`.
         public var menus: (any MirrorMenus)?
+        /// The simulated device an iPhone app runs on (sent in `hello`); nil for a Mac app.
+        public var device: MirrorProtocol.Device?
 
         public init(name: String, boot: String = UUID().uuidString, accessibility: any MirrorAccessibility, input: any MirrorInput,
-                    menus: (any MirrorMenus)? = nil, makeCapture: @escaping @Sendable (CGWindowID) -> any MirrorCapture) {
+                    menus: (any MirrorMenus)? = nil, device: MirrorProtocol.Device? = nil,
+                    makeCapture: @escaping @Sendable (CGWindowID) -> any MirrorCapture) {
             self.name = name; self.boot = boot; self.accessibility = accessibility; self.input = input; self.menus = menus
+            self.device = device
             self.makeCapture = makeCapture
         }
 
@@ -1340,7 +1344,7 @@ public final class MirrorServer: @unchecked Sendable {
 
     private func helloText() -> String? {
         let hello = MirrorProtocol.Hello(boot: app.boot, scale: scale ?? configuration.scale ?? 2, appearance: appearance,
-                                         app: .init(name: app.name), windows: windows)
+                                         app: .init(name: app.name, device: app.device), windows: windows)
         return try? MirrorProtocol.ServerMessage.hello(hello).jsonString()
     }
 

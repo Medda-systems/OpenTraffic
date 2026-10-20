@@ -23,6 +23,10 @@ import Security
 ///
 /// When the app quits by itself, viewers see `crashed` and it is started again once (again after
 /// it has run `stableRun` since). Start, restart, reset and stop run one after another, in call order.
+///
+/// An iPhone app in the Simulator (`app.simulator`) runs the same way, with the differences
+/// SimulatorSession describes: no copy of the app (simctl starts it in your device, or in OpenTraffic's
+/// own erased one for `.empty`), and the Simulator's window for its device is what viewers see.
 @MainActor
 public final class MacAppSession {
     public enum DataSource: String, Sendable, Codable {
@@ -231,6 +235,8 @@ public final class MacAppSession {
     public private(set) var lastReplay: ReplayReport?
 
     private let hider: MacAppWindowHider
+    /// The simulator side, for an iPhone app.
+    private let simulator: SimulatorSession?
     private let logSink: AsyncStream<LogLine>.Continuation
     private let eventSink: AsyncStream<Event>.Continuation
     private let actions = Ring<RecordedAction>(limit: MacAppSession.actionLimit)
@@ -267,10 +273,11 @@ public final class MacAppSession {
     private var buildAgain = false
     private var buildCount = 0
 
-    public init(options: Options, hider: MacAppWindowHider = MacAppWindowHider()) {
+    public init(options: Options, hider: MacAppWindowHider = MacAppWindowHider(), simulator environment: SimulatorEnvironment = .live()) {
         self.options = options
         self.viewerOptions = options.viewerOptions
         self.hider = hider
+        simulator = options.app.simulator == nil ? nil : SimulatorSession(app: options.app, data: options.data, environment: environment, hider: hider)
         bundleIdentifier = Self.copyIdentifier(for: options.app)
         (log, logSink) = AsyncStream.makeStream(of: LogLine.self, bufferingPolicy: .bufferingNewest(Self.logLimit))
         (events, eventSink) = AsyncStream.makeStream(of: Event.self, bufferingPolicy: .bufferingNewest(256))
@@ -337,15 +344,26 @@ public final class MacAppSession {
         }
         setState(.starting)
         do {
-            try Self.checkPermissions()
-            await warnAboutOtherDisplays()
+            if simulator == nil {
+                try Self.checkPermissions()
+                await warnAboutOtherDisplays()
+            }
             try FileManager.default.createDirectory(at: options.sessionDirectory, withIntermediateDirectories: true)
             try writeManifest()
-            try await prepareBundle()
-            try await prepareData()
+            if simulator == nil {
+                try await prepareBundle()
+                try await prepareData()
+            }
             let mirrored = try await launchApp(automatic: false)
+            // The Simulator's window is never resized, so it is never placed anywhere.
+            let isOnScreen: @Sendable (CGRect) -> Bool
+            if simulator == nil {
+                isOnScreen = { OffscreenDisplay.isVisible($0) }
+            } else {
+                isOnScreen = { _ in false }
+            }
             let server = MirrorServer(configuration: .init(app: mirrored, assets: options.assets, appearance: appearance,
-                                                           options: viewerOptions, isOnScreen: { OffscreenDisplay.isVisible($0) }))
+                                                           options: viewerOptions, isOnScreen: isOnScreen))
             self.server = server
             watch(server)
             let port = try await server.start()
@@ -378,13 +396,19 @@ public final class MacAppSession {
         replayPath = []
         await quitApp()
         do {
-            if resetting {
-                try clearHome()
-                dataPrepared = false
+            if let simulator {
+                if resetting, simulator.usesRealData {
+                    note("\(name) runs on your simulator's own data, which OpenTraffic can't put back; starting it again as it is.")
+                }
+            } else {
+                if resetting {
+                    try clearHome()
+                    dataPrepared = false
+                }
+                try await prepareBundle()
+                try await prepareData()
             }
-            try await prepareBundle()
-            try await prepareData()
-            let mirrored = try await launchApp(automatic: automatic)
+            let mirrored = try await launchApp(automatic: automatic, fresh: resetting)
             server.setAppearance(appearance)
             try await server.replace(app: mirrored)
             if !automatic { lastAutomaticRestart = nil }
@@ -427,7 +451,11 @@ public final class MacAppSession {
             await server.stop()
         }
         await quitApp()
-        Self.removePreferences(bundleIdentifier, realHome: options.realHomeDirectory, followUp: true)
+        if let simulator {
+            await simulator.stop()
+        } else {
+            Self.removePreferences(bundleIdentifier, realHome: options.realHomeDirectory, followUp: true)
+        }
         try? FileManager.default.removeItem(at: options.sessionDirectory)
     }
 
@@ -440,7 +468,7 @@ public final class MacAppSession {
 
     /// Launches the copy hidden with its log going to a file of this launch, and returns the
     /// bridges for the mirror server.
-    private func launchApp(automatic: Bool) async throws -> MirrorServer.App {
+    private func launchApp(automatic: Bool, fresh: Bool = false) async throws -> MirrorServer.App {
         generation += 1
         let generation = generation
         let logs = options.sessionDirectory.appendingPathComponent("logs", isDirectory: true)
@@ -451,6 +479,9 @@ public final class MacAppSession {
             let line = LogLine(source: .app, text: text)
             logLines.append(line)
             logSink.yield(line)
+        }
+        if let simulator {
+            return try await launchInSimulator(simulator, automatic: automatic, fresh: fresh, generation: generation, logFile: logFile, tail: tail)
         }
         let environment = [
             "CFFIXED_USER_HOME": homeDirectory.path,
@@ -495,6 +526,41 @@ public final class MacAppSession {
         return try MirrorServer.App.live(pid: pid, name: name, boot: boot)
     }
 
+    /// Starts the iPhone app in the Simulator (see SimulatorSession) and watches its process like a
+    /// Mac app's; returns the bridges for its device's window.
+    private func launchInSimulator(_ simulator: SimulatorSession, automatic: Bool, fresh: Bool, generation: Int,
+                                   logFile: URL, tail: LogTail) async throws -> MirrorServer.App {
+        let boot = UUID().uuidString
+        let launched: SimulatorSession.Launched
+        do {
+            launched = try await simulator.start(fresh: fresh, appearance: wantedAppearance(), output: logFile, boot: boot)
+        } catch {
+            tail.finish()
+            throw error
+        }
+        let pid = launched.pid
+        let exit = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .main)
+        exit.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.exited(pid: pid, generation: generation) }
+        }
+        exit.resume()
+        launch = Launch(pid: pid, generation: generation, boot: boot, started: .now, automatic: automatic, tail: tail, exit: exit)
+        guard Self.isAlive(pid) else {
+            throw MacAppSessionError.failed("\(name) quit while starting.\(lastAppLines())")
+        }
+        let device = simulator.launch?.device.label ?? "Simulator"
+        note("Launched \(name) (pid \(pid)) in the \(device)\(simulator.usesRealData ? " with its own data" : ", empty")"
+             + (launched.openedSimulator ? "; the Simulator runs hidden." : "; the Simulator window stays where it is."))
+        if launched.app.device?.screen == nil {
+            warn("OpenTraffic couldn't find \(device)'s screen in its window, so viewers see the whole Simulator window.")
+        }
+        if launched.appearance != appearance {
+            appearance = launched.appearance
+            eventSink.yield(.appearance(launched.appearance))
+        }
+        return launched.app
+    }
+
     /// The app's last few log lines, for an error message.
     private func lastAppLines(_ count: Int = 5) -> String {
         let lines = recentLog.filter { $0.source == .app }.suffix(count).map(\.text)
@@ -508,6 +574,16 @@ public final class MacAppSession {
         generation += 1
         launch.exit.cancel()
         let pid = launch.pid
+        if let simulator {
+            if Self.isAlive(pid) {
+                await simulator.terminate()
+                let deadline = ContinuousClock.now + Self.stopGrace
+                while Self.isAlive(pid), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(50)) }
+                if Self.isAlive(pid) { kill(pid, SIGKILL) }
+            }
+            launch.tail.finish()
+            return
+        }
         if Self.isAlive(pid) {
             NSRunningApplication(processIdentifier: pid)?.terminate()
             let deadline = ContinuousClock.now + Self.stopGrace
@@ -751,7 +827,11 @@ public final class MacAppSession {
 
     /// The appearance the copy can have: the requested one, except that dark needs this Mac in Dark.
     func wantedAppearance() -> MirrorProtocol.Appearance {
-        Self.achievableAppearance(requestedAppearance(), host: MirrorServer.hostAppearance())
+        if let simulator {
+            // OpenTraffic's own device takes either (`simctl ui`); your own simulator keeps its own.
+            return simulator.usesRealData ? appearance : requestedAppearance()
+        }
+        return Self.achievableAppearance(requestedAppearance(), host: MirrorServer.hostAppearance())
     }
 
     /// An app can be made light whatever the Mac uses (`NSRequiresAquaSystemAppearance`), but no
@@ -766,6 +846,22 @@ public final class MacAppSession {
     /// read at launch). Queued behind other lifecycle work, and checked again when its turn comes.
     private func followAppearance() {
         guard state == .running, wantedAppearance() != appearance else { return }
+        if let simulator {
+            // A simulated device switches while the app runs: no restart.
+            Task { @MainActor [weak self] in
+                try? await self?.serially {
+                    guard let self, self.state == .running, let device = simulator.launch?.device else { return }
+                    let wanted = self.wantedAppearance()
+                    guard wanted != self.appearance else { return }
+                    await simulator.environment.setAppearance(device, wanted)
+                    self.note("Switched \(device.name) to the \(wanted.rawValue) appearance.")
+                    self.appearance = wanted
+                    self.server?.setAppearance(wanted)
+                    self.eventSink.yield(.appearance(wanted))
+                }
+            }
+            return
+        }
         Task { @MainActor [weak self] in
             try? await self?.serially {
                 guard let self, self.state == .running else { return }

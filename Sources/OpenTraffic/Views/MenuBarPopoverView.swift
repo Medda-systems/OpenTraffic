@@ -575,7 +575,7 @@ private struct MacAppRow: View {
         return kind + " · " + (path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path)
     }
 
-    /// Simulator apps are listed before they can be shared (until the Simulator window is mirrored).
+    /// Simulator apps can be shared once `AppStore.sharesSimulatorApps` is on.
     private var isShareable: Bool { app.simulator == nil || AppStore.sharesSimulatorApps }
 
     private var shareHelp: String {

@@ -162,6 +162,42 @@ public struct InputSynthesizer: Sendable {
     /// A protocol `key` message.
     public func send(_ key: MirrorProtocol.Key) throws { try press(key: key.code, modifiers: key.modifiers) }
 
+    /// Presses one key by its virtual key code with these flags, leaving the characters to the key
+    /// code (the system fills them in from the keyboard layout). The iOS Simulator's hardware keyboard
+    /// reads the key code, not the characters, so text for it is typed key by key (`keystroke(for:)`).
+    public func press(virtualKey: CGKeyCode, flags: CGEventFlags = []) throws {
+        for keyDown in [true, false] {
+            guard let event = CGEvent(keyboardEventSource: nil, virtualKey: virtualKey, keyDown: keyDown) else { throw Failure.eventUnavailable }
+            event.flags = flags
+            event.postToPid(pid)
+        }
+    }
+
+    /// The key (US ANSI layout) and whether Shift is held for a character a keyboard can type, nil for
+    /// anything else (accented letters, emoji, other scripts).
+    public static func keystroke(for character: Character) -> (key: CGKeyCode, shift: Bool)? {
+        if let key = unshifted[character] { return (key, false) }
+        if let key = shifted[character] { return (key, true) }
+        if character.isLetter, character.isUppercase, let lower = character.lowercased().first, let key = unshifted[lower],
+           lower.isASCII { return (key, true) }
+        return nil
+    }
+
+    /// Carbon `kVK_ANSI_…` codes of the characters typed without Shift on a US keyboard.
+    private static let unshifted: [Character: CGKeyCode] = [
+        "a": 0x00, "s": 0x01, "d": 0x02, "f": 0x03, "h": 0x04, "g": 0x05, "z": 0x06, "x": 0x07, "c": 0x08, "v": 0x09,
+        "b": 0x0B, "q": 0x0C, "w": 0x0D, "e": 0x0E, "r": 0x0F, "y": 0x10, "t": 0x11, "1": 0x12, "2": 0x13, "3": 0x14,
+        "4": 0x15, "6": 0x16, "5": 0x17, "=": 0x18, "9": 0x19, "7": 0x1A, "-": 0x1B, "8": 0x1C, "0": 0x1D, "]": 0x1E,
+        "o": 0x1F, "u": 0x20, "[": 0x21, "i": 0x22, "p": 0x23, "l": 0x25, "j": 0x26, "'": 0x27, "k": 0x28, ";": 0x29,
+        "\\": 0x2A, ",": 0x2B, "/": 0x2C, "n": 0x2D, "m": 0x2E, ".": 0x2F, "`": 0x32, " ": 0x31, "\n": 0x24, "\t": 0x30,
+    ]
+
+    /// The characters typed with Shift on a US keyboard, by the key they're on.
+    private static let shifted: [Character: CGKeyCode] = [
+        "!": 0x12, "@": 0x13, "#": 0x14, "$": 0x15, "%": 0x17, "^": 0x16, "&": 0x1A, "*": 0x1C, "(": 0x19, ")": 0x1D,
+        "_": 0x1B, "+": 0x18, "{": 0x21, "}": 0x1E, "|": 0x2A, ":": 0x29, "\"": 0x27, "<": 0x2B, ">": 0x2F, "?": 0x2C, "~": 0x32,
+    ]
+
     /// Replaces a text field's whole value: clicks the field (window-relative frame), waits until the
     /// app reports a focused element, selects all of its text through Accessibility, then types the
     /// new text. This is how the protocol's `setText` works: SwiftUI bindings ignore AXValue writes,

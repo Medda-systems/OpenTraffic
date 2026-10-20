@@ -334,14 +334,15 @@ public struct SimulatorLaunch: Sendable, Equatable {
 ///   the app from your device and launches it: a first launch, and your simulator is left alone.
 ///   (`simctl clone` would copy your device's data, and it needs the device shut down.)
 public enum SimulatorLauncher {
-    public static func launch(_ app: MacApp, data: MacAppSession.DataSource, simctl: Simctl = Simctl()) throws -> SimulatorLaunch {
+    /// With `output`, the app's standard output and error are appended to that file.
+    public static func launch(_ app: MacApp, data: MacAppSession.DataSource, simctl: Simctl = Simctl(), output: URL? = nil) throws -> SimulatorLaunch {
         guard let device = app.simulator, let bundleIdentifier = app.bundleIdentifier else {
             throw MacAppRefusal("\(app.name) is not an app in the Simulator.")
         }
         switch data {
         case .copy:
-            let output = try simctl.run(["launch", "--terminate-running-process", device.udid, bundleIdentifier], timeout: 60)
-            return SimulatorLaunch(device: device, bundleIdentifier: bundleIdentifier, pid: launchedPID(output), usesRealData: true)
+            let printed = try simctl.run(["launch", "--terminate-running-process"] + outputArguments(output) + [device.udid, bundleIdentifier], timeout: 60)
+            return SimulatorLaunch(device: device, bundleIdentifier: bundleIdentifier, pid: launchedPID(printed), usesRealData: true)
         case .empty:
             let own = try dedicatedDevice(for: device, simctl: simctl)
             if own.state != "Shutdown" { try simctl.run(["shutdown", own.device.udid], timeout: 60) }
@@ -349,8 +350,8 @@ public enum SimulatorLauncher {
             // Boots it and waits until it can take an install.
             try simctl.run(["bootstatus", own.device.udid, "-b"], timeout: 300)
             try simctl.run(["install", own.device.udid, app.bundle.path], timeout: 180)
-            let output = try simctl.run(["launch", own.device.udid, bundleIdentifier], timeout: 60)
-            return SimulatorLaunch(device: own.device, bundleIdentifier: bundleIdentifier, pid: launchedPID(output), usesRealData: false)
+            let printed = try simctl.run(["launch"] + outputArguments(output) + [own.device.udid, bundleIdentifier], timeout: 60)
+            return SimulatorLaunch(device: own.device, bundleIdentifier: bundleIdentifier, pid: launchedPID(printed), usesRealData: false)
         }
     }
 
@@ -375,6 +376,12 @@ public enum SimulatorLauncher {
         return .init(device: SimulatorDevice(udid: udid, name: name, runtimeIdentifier: device.runtimeIdentifier, deviceTypeIdentifier: type), state: "Shutdown")
     }
 
+    /// `--stdout=<file> --stderr=<file>`: simctl appends the app's output there.
+    static func outputArguments(_ output: URL?) -> [String] {
+        guard let output else { return [] }
+        return ["--stdout=\(output.path)", "--stderr=\(output.path)"]
+    }
+
     /// `se.medda.orbit: 12345` → 12345.
     static func launchedPID(_ output: String) -> Int32? {
         output.split(whereSeparator: \.isNewline).last.flatMap { line in
@@ -392,7 +399,7 @@ public struct Simctl: Sendable {
 
     /// The command's output; throws with simctl's own message when it fails or takes longer than `timeout`.
     @discardableResult
-    public func run(_ arguments: [String], timeout: TimeInterval) throws -> String {
+    public func run(_ arguments: [String], timeout: TimeInterval, input: Data? = nil) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: xcrun)
         process.arguments = ["simctl"] + arguments
@@ -402,9 +409,15 @@ public struct Simctl: Sendable {
         let output = Pipe(), errors = Pipe()
         process.standardOutput = output
         process.standardError = errors
-        process.standardInput = FileHandle.nullDevice
+        let stdin = input.map { _ in Pipe() }
+        process.standardInput = stdin ?? FileHandle.nullDevice
         let command = "simctl \(arguments.first ?? "")"
         do { try process.run() } catch { throw MacAppRefusal("\(command) can't run: Xcode isn't installed (\(error.localizedDescription)).") }
+        if let stdin, let input {
+            // Small (a pasteboard's text): written whole, then closed so the tool sees its end.
+            try? stdin.fileHandleForWriting.write(contentsOf: input)
+            try? stdin.fileHandleForWriting.close()
+        }
         // Both pipes are read here, on this thread, so a full pipe can't block the tool and nothing
         // waits for a thread pool. Reading stops at the pipes' end, or once the tool has exited and
         // nothing more is waiting: a process started at the same moment elsewhere in OpenTraffic can

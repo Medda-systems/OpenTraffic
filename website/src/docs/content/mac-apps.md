@@ -7,7 +7,7 @@ The list has two kinds of app:
 - **Debug builds that are running:** built by Xcode, built into a project's `.build` or `dist` folder, or any app that isn't signed or is signed ad hoc, as long as it isn't in Applications.
 - **Recent Xcode builds:** the newest debug build of each app from the last 30 days, while its project still exists. It doesn't have to be running.
 
-iPhone apps you built in Xcode and installed in a booted Simulator are listed too, as `Orbit · iPhone 17 Simulator`, but can't be shared yet: their **Share** stays off.
+iPhone apps you built in Xcode and installed in a booted Simulator are listed too, as `Orbit · iPhone 17 Simulator`, and share the same way: see [iPhone apps in the Simulator](/docs/mac-apps#iphone-apps-in-the-simulator).
 
 Apps you only installed, apps that come with macOS, and apps signed by someone else's team aren't listed. Electron apps have their own list: see [Electron apps](/docs/electron-apps). Like the other lists, it shows the first 5; **Show More** reveals the rest.
 
@@ -107,6 +107,17 @@ opentraffic stop Orbit
 - [REST API](/docs/rest-api): `POST /v1/shares` with `macApp` (the path or name) and `macAppData` (`copy` or `empty`); `POST /v1/shares/{ref}/restart-app` and `/reset-data`; `GET /v1/services` lists the apps under `apps`. A share without the permissions is refused with 409 `missing_permissions`; a restart whose app doesn't come back fails with 502 `restart_failed`.
 - [MCP](/docs/mcp): the `share` tool takes `mac_app` and `mac_app_data`, and `restart_mac_app` restarts the app (`reset_data` to start over).
 
+## iPhone apps in the Simulator
+
+Sharing an iPhone app shows viewers the Simulator's window for its device, cut to the phone's screen in a phone frame. They tap, swipe, scroll, and type as on a phone, and comments are pinned to the app's elements, which the Simulator exposes through Accessibility. On a phone, the **Simple view** works as it does for a Mac app.
+
+- **Share** starts the app in your booted simulator, with its **real data**: what viewers do is what you'll find there afterwards. **Reset Data** can't undo that; it only starts the app again.
+- **Share with Empty Data** uses a simulator of OpenTraffic's own, `OpenTraffic · iPhone 17`, of the same kind and iOS version. It's erased before every share, the app is installed from your simulator, and it shuts down when the share stops. Your own simulator is left alone.
+- If the Simulator app isn't open, OpenTraffic opens it out of sight on the off-screen display and quits it when the share stops. If it's already open, the device's window stays where it is and you see what viewers do in it. Keep that window open (it can be behind other windows, not minimized).
+- Typing goes through the Simulator's hardware keyboard (**I/O → Keyboard → Connect Hardware Keyboard**, on by default), key by key on a US layout; characters no key types are pasted.
+- The empty simulator shows light or dark as you or the first viewer choose; your own simulator keeps its own appearance.
+- The app isn't rebuilt when its code changes: build and run it in Xcode, then use **Restart App** (with Empty Data, **Reset Data**, which installs the new build).
+
 ## Limits
 
 - One share per app at a time. Stop the other share first.
@@ -126,4 +137,6 @@ opentraffic stop Orbit
 - **The share waits:** a permission is missing, and the Mac Apps list says which. See [Permissions](/docs/mac-apps#permissions).
 - **"… is already shared by …":** that app is running in another share. Stop that one first.
 - **"The window server isn't answering", or the share takes long to start:** macOS's display system is slow to answer. It happens more while another OpenTraffic or a test run has its own off-screen display; the card warns about that. Wait a moment and try again. If it keeps happening, log out and back in, or restart the Mac.
+- **"The Simulator didn't show iPhone 17":** the Simulator app is open but has no window for that device. Open it with **File → Open Simulator**, then share again.
+- **Viewers see the whole Simulator window, not just the phone:** OpenTraffic didn't find the screen in the window (the card warns about it). Taps still land where viewers click.
 - **Something works in your copy but not in the shared one:** look at the card's warnings and the share's **Logs**.

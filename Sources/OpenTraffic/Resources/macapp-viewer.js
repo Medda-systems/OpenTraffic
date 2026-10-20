@@ -28,6 +28,7 @@
   const PAD = 24; // desk margin around the windows, CSS pixels
   const GAP = 32; // between windows side by side, in points
   const TABS_H = 40; // room for the window tabs above the windows, CSS pixels
+  const BEZEL = 14; // the phone frame around a simulated device's screen, in points
   const TAB_BELOW = 0.8; // tabs when side by side would scale the windows below this share of one at a time
   // Kinds drawn over the window they belong to (`parent`); the others are windows of their own.
   const ATTACHED = new Set(["sheet", "alert", "popover", "menu"]);
@@ -105,6 +106,7 @@
     control: { mode: "everyone", you: true, requested: false, holder: null }, // the host's control mode, for this viewer
     asked: false, // this page asked for control (so "Give Back" makes sense; the host's page never asks)
     viewportSent: null, // the last viewport message, as JSON
+    device: null, // { name, screen: { x, y, w, h, r } | null } for an iPhone app in the Simulator
   };
 
   // ---------------------------------------------------------------- connection
@@ -194,6 +196,7 @@
     document.body.dataset.appearance = state.appearance;
     const name = m.app && typeof m.app.name === "string" && m.app.name.trim() ? m.app.name.trim() : "the app";
     state.appName = name;
+    state.device = readDevice(m.app && m.app.device);
     if (nameEl) nameEl.textContent = name === "the app" ? "Mac app" : name;
     if (simpleTitle) simpleTitle.textContent = name === "the app" ? "Mac app" : name;
     document.title = (name === "the app" ? "Mac app" : name) + " · OpenTraffic";
@@ -209,6 +212,15 @@
     sendViewport();
     renderControl();
     if (readSession(HAD_CONTROL) === "1") requestControl(); // the host gave this page control before a drop or reload
+  }
+
+  // An iPhone app's device (`app.device`): its name and where its screen is in the Simulator's window.
+  function readDevice(d) {
+    if (!d || typeof d !== "object") return null;
+    const s = d.screen && typeof d.screen === "object" ? d.screen : null;
+    const ok = s && ["x", "y", "w", "h"].every((k) => Number.isFinite(Number(s[k]))) && Number(s.w) > 0 && Number(s.h) > 0;
+    const screen = ok ? { x: Number(s.x), y: Number(s.y), w: Number(s.w), h: Number(s.h), r: Math.max(0, Number(s.radius) || 0) } : null;
+    return { name: typeof d.name === "string" ? d.name : "", screen };
   }
 
   function clearAll() {
@@ -395,6 +407,13 @@
       minX = Math.min(minX, at.x); minY = Math.min(minY, at.y); maxX = Math.max(maxX, at.x + w); maxY = Math.max(maxY, at.y + h);
     });
     state.bounds = { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+    // A simulated device: only its screen shows, in a phone frame, and the desk is the phone's size.
+    const phone = phoneFrame(top, placed);
+    if (phone) {
+      minX = phone.x;
+      minY = phone.y;
+      state.bounds = { x: phone.x, y: phone.y, w: phone.w, h: phone.h };
+    }
     for (const id of state.order) {
       const win = state.windows.get(id);
       if (!win || !win.info) continue;
@@ -402,10 +421,45 @@
       const { w, h } = win.info;
       Object.assign(win.el.style, { left: at.x - minX + "px", top: at.y - minY + "px", width: w + "px", height: h + "px" });
     }
+    applyPhone(phone);
     syncMenuSurfaces();
     renderTabs(top);
     if (wasTabbed !== state.tabbed) desk.classList.toggle("otm-desk-tabbed", state.tabbed);
     fit();
+  }
+
+  // The phone around a simulated device's screen: its window (the Simulator's) is the only one, and
+  // the screen was found in it. Desk coordinates of the frame, its screen and its window.
+  function phoneFrame(top, placed) {
+    const screen = state.device && state.device.screen;
+    if (!screen || top.length !== 1 || state.tabbed) return null;
+    const win = top[0], at = placed.get(win.id);
+    if (!at || !at.shown) return null;
+    return { win, s: screen, x: at.x + screen.x - BEZEL, y: at.y + screen.y - BEZEL, w: screen.w + 2 * BEZEL, h: screen.h + 2 * BEZEL };
+  }
+
+  // Clips the device's window to its screen (rounded like the device's) and puts the frame behind it.
+  // The window keeps its size and points, so taps, the layer and comments stay where they are.
+  const bezel = document.createElement("div");
+  bezel.className = "otm-bezel";
+  bezel.setAttribute("aria-hidden", "true");
+  bezel.hidden = true;
+  stage.prepend(bezel);
+
+  function applyPhone(phone) {
+    for (const win of state.windows.values()) {
+      if (phone && win === phone.win) {
+        const { s } = phone, { w, h } = win.info;
+        win.el.dataset.device = "";
+        win.el.style.clipPath = "inset(" + s.y + "px " + Math.max(0, w - s.x - s.w) + "px " + Math.max(0, h - s.y - s.h) + "px " + s.x + "px round " + s.r + "px)";
+      } else if (win.el.dataset.device !== undefined) {
+        delete win.el.dataset.device;
+        win.el.style.clipPath = "";
+      }
+    }
+    bezel.hidden = !phone;
+    if (phone) Object.assign(bezel.style, { left: "0px", top: "0px", width: phone.w + "px", height: phone.h + "px", borderRadius: phone.s.r + BEZEL + "px" });
+    document.body.classList.toggle("otm-phone", !!phone);
   }
 
   // A menu the app popped up shows as a web menu (with real, choosable items) where the app put it;

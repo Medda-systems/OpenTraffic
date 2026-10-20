@@ -61,9 +61,9 @@ extension AppStore {
         return detectedMacApps.filter { !shared.contains($0.id) }
     }
 
-    /// Whether a simulator app can be shared yet. Discovery lists them; mirroring the Simulator's
-    /// window (a SimulatorSession started with SimulatorLauncher) is still to come.
-    static let sharesSimulatorApps = false
+    /// Whether simulator apps can be shared: MacAppSession runs them in the Simulator and mirrors the
+    /// device's window (see SimulatorSession).
+    static let sharesSimulatorApps = true
 
     // MARK: Permissions
 
@@ -209,7 +209,12 @@ extension AppStore {
                 }
             },
         ]
-        appendMacAppLog("Starting an isolated copy of \(app.name) with \(data == .empty ? "empty data" : "a copy of its data").", for: id)
+        if let device = app.simulator {
+            appendMacAppLog(data == .empty ? "Starting \(app.name) in an empty \(device.name) of OpenTraffic's own."
+                                           : "Starting \(app.name) in the \(device.label) with its real data.", for: id)
+        } else {
+            appendMacAppLog("Starting an isolated copy of \(app.name) with \(data == .empty ? "empty data" : "a copy of its data").", for: id)
+        }
         do {
             let port = try await session.start()
             if macAppSessions[id] === session { macAppStatus[id, default: MacAppShareStatus()].appearance = session.appearance }

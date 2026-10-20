@@ -60,6 +60,13 @@ window, then live updates.
   `h*scale` pixels. Draw canvases at CSS size `w`×`h` with a backing store `scale` times larger.
 - `appearance`: `"dark"` or `"light"`, the app's current appearance.
 - `app.name`: the app's display name.
+- `app.device` (only for an iPhone app shared from the iOS Simulator): `{"name":"iPhone 17","screen":{"x":38,"y":92,"w":402,"h":874,"radius":62}}`.
+  The main window is then the Simulator's window for that device, and `screen` is where the device's
+  screen is in it (window points; `radius` its corner radius). The viewer shows only the screen, in a
+  phone frame; coordinates stay the window's, so taps, trees and comments are unchanged. `screen` is
+  absent when OpenTraffic couldn't find the screen (the viewer then shows the whole window). Trees hold
+  only the elements on the screen; `pointer` presses are touches, a run of `wheel` events is one finger
+  drag, right clicks are ignored, and `windowAction` `close` does nothing.
 - `windows`: as in `windows` below.
 
 ### `windows`

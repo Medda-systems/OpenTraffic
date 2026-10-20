@@ -94,7 +94,30 @@ public enum MirrorProtocol {
 
     public struct AppInfo: Codable, Equatable, Sendable {
         public var name: String
-        public init(name: String) { self.name = name }
+        /// The device an iPhone app runs on in the Simulator (the viewer draws a phone); absent for a Mac app.
+        public var device: Device?
+        public init(name: String, device: Device? = nil) { self.name = name; self.device = device }
+    }
+
+    /// The simulated device a shared iPhone app runs on. The main window is the Simulator's device
+    /// window; `screen` is where the device's screen is in it (window points), so the viewer can show
+    /// just the screen in a phone frame. `screen` is absent when OpenTraffic couldn't find it.
+    public struct Device: Codable, Equatable, Sendable {
+        public struct Screen: Codable, Equatable, Sendable {
+            public var x: Double
+            public var y: Double
+            public var w: Double
+            public var h: Double
+            /// The screen's corner radius, in window points.
+            public var radius: Double
+            public init(x: Double, y: Double, w: Double, h: Double, radius: Double) {
+                self.x = x; self.y = y; self.w = w; self.h = h; self.radius = radius
+            }
+        }
+        /// The device's name, as the Simulator shows it ("iPhone 17").
+        public var name: String
+        public var screen: Screen?
+        public init(name: String, screen: Screen? = nil) { self.name = name; self.screen = screen }
     }
 
     /// One window of the app. Geometry in points; `x`/`y` place it relative to the main window's
