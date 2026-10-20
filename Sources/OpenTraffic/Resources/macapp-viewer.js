@@ -152,6 +152,7 @@
       case "frame": return onFrame(m);
       case "cursor": return setCursor(m.shape);
       case "status": return setStatus(m.state, m.message);
+      case "menu": return applyMenu(m);
       default: return; // unknown and reserved messages are ignored
     }
   }
@@ -184,6 +185,9 @@
   }
 
   function clearAll() {
+    closeMenu();
+    menus.contextJSON = menus.dismissed = null;
+    hideContext();
     for (const win of state.windows.values()) removeWindow(win);
     state.windows.clear();
     state.order = [];
@@ -1280,6 +1284,423 @@
     applyView();
     if (state.simple) scheduleThumbs();
   });
+
+  // ---------------------------------------------------------------- menus
+  //
+  // The app's menu bar sits in the desktop bar (the app's name opens its own menu, as on a Mac); a
+  // menu opens as a web menu in the style of the Electron preview's, and choosing an item sends
+  // `menuAction` with its titles. When the titles don't fit, one "Menu" button lists every menu.
+  // A menu the app pops up (a right click's context menu) shows as a web menu where the app put it.
+  // Cmd shortcuts that belong to a menu item are sent as that item's `menuAction`: Cmd keys posted as
+  // events never reach an app that isn't frontmost, but a menu item can always be chosen.
+
+  const MODS = { "⌃": "ctrl", "⌥": "alt", "⇧": "shift", "⌘": "cmd" };
+  const KEY_NAMES = { "↩": "Enter", "⌤": "Enter", "⎋": "Escape", "⌫": "Backspace", "⌦": "Delete", "⇥": "Tab", "←": "ArrowLeft",
+    "→": "ArrowRight", "↑": "ArrowUp", "↓": "ArrowDown", "↖": "Home", "↘": "End", "⇞": "PageUp", "⇟": "PageDown", Space: " " };
+  const EDIT_KEYS = new Set(["KeyA", "KeyC", "KeyV", "KeyX", "KeyZ"]); // a focused field's own editing keys
+  const CLIPBOARD_KEYS = new Set(["KeyC", "KeyV", "KeyX"]); // the host's clipboard is no use to a viewer
+
+  const menus = { bar: [], barJSON: null, contextJSON: null, dismissed: null, open: null };
+  const bar = $("otm-bar");
+  const menusEl = document.createElement("span");
+  menusEl.className = "otm-menus";
+  menusEl.setAttribute("role", "menubar");
+  menusEl.setAttribute("data-opentraffic-ui", "");
+  const allButton = document.createElement("button");
+  allButton.type = "button";
+  allButton.className = "otm-menu-all";
+  allButton.textContent = "Menu";
+  allButton.setAttribute("data-opentraffic-ui", "");
+  allButton.setAttribute("aria-haspopup", "menu");
+  allButton.setAttribute("aria-expanded", "false");
+  if (bar && nameEl) {
+    nameEl.after(menusEl);
+    menusEl.after(allButton);
+  }
+
+  // A shortcut as the server writes it ("⇧⌘S", "fn⌃F", "⌘↩") as modifiers and a key.
+  function parseShortcut(text) {
+    if (typeof text !== "string" || !text) return null;
+    let s = text;
+    const m = { fn: false, ctrl: false, alt: false, shift: false, cmd: false };
+    if (s.startsWith("fn")) { m.fn = true; s = s.slice(2); }
+    while (s && MODS[s[0]] && s.length > 1) { m[MODS[s[0]]] = true; s = s.slice(1); }
+    return s ? { ...m, key: s } : null;
+  }
+
+  function shortcutMatches(sc, e) {
+    if (!sc || sc.fn || e.ctrlKey !== sc.ctrl || e.altKey !== sc.alt || e.metaKey !== sc.cmd) return false;
+    const named = KEY_NAMES[sc.key] || (/^F\d{1,2}$/.test(sc.key) ? sc.key : null);
+    if (named) return e.key === named && e.shiftKey === sc.shift;
+    if (/^[A-Z]$/.test(sc.key)) return e.code === "Key" + sc.key && e.shiftKey === sc.shift;
+    if (/^[0-9]$/.test(sc.key)) return e.code === "Digit" + sc.key && e.shiftKey === sc.shift;
+    // Punctuation: the character decides; Shift may be what makes it ("⌘?" is typed as ⇧⌘/).
+    return e.key === sc.key && (!sc.shift || e.shiftKey);
+  }
+
+  // The first item (depth first) whose shortcut the key event types, with its path.
+  function findShortcut(items, e, path) {
+    for (const item of items || []) {
+      if (!item || item.separator) continue;
+      const here = path.concat(String(item.title));
+      if (Array.isArray(item.items) && item.items.length) {
+        const hit = findShortcut(item.items, e, here);
+        if (hit) return hit;
+      } else if (shortcutMatches(parseShortcut(item.shortcut), e)) {
+        return { item, path: here };
+      }
+    }
+    return null;
+  }
+
+  function applyMenu(m) {
+    const list = Array.isArray(m.bar) ? m.bar.filter((x) => x && typeof x.title === "string") : [];
+    const barJSON = JSON.stringify(list) + "|" + state.appName;
+    if (barJSON !== menus.barJSON) {
+      menus.barJSON = barJSON;
+      menus.bar = list;
+      const open = menus.open;
+      renderMenuBar();
+      // A menu that was open shows its new items, under its (new) title.
+      if (open) {
+        const index = open.index === -1 ? -1 : list.findIndex((x) => x.title === open.title);
+        const anchor = index === -1 ? (open.index === -1 ? allButton : null) : titleButtons().find((b) => b !== allButton && Number(b.dataset.menu) === index);
+        if (anchor) openMenu(index, anchor);
+        else closeMenu();
+      }
+    }
+    const ctx = m.context && typeof m.context === "object" && Array.isArray(m.context.items) ? m.context : null;
+    const json = ctx ? JSON.stringify(ctx) : null;
+    if (!ctx) menus.dismissed = null;
+    if (json === menus.contextJSON) return;
+    menus.contextJSON = json;
+    if (!ctx || json === menus.dismissed) return hideContext();
+    showContext(ctx);
+  }
+
+  function renderMenuBar() {
+    if (!bar) return;
+    menusEl.textContent = "";
+    const list = menus.bar;
+    // The app's own menu (first, titled with the app's name) opens from the name, as on a Mac.
+    const appMenu = list.length && nameEl && list[0].title === state.appName;
+    if (nameEl) {
+      if (appMenu) {
+        nameEl.setAttribute("role", "button");
+        nameEl.setAttribute("tabindex", "0");
+        nameEl.setAttribute("aria-haspopup", "menu");
+        nameEl.setAttribute("aria-expanded", "false");
+        nameEl.dataset.menu = "0";
+        nameEl.classList.add("otm-menu-title");
+      } else {
+        for (const a of ["role", "tabindex", "aria-haspopup", "aria-expanded"]) nameEl.removeAttribute(a);
+        delete nameEl.dataset.menu;
+        nameEl.classList.remove("otm-menu-title");
+      }
+    }
+    list.forEach((top, i) => {
+      if (i === 0 && appMenu) return;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "otm-menu-title";
+      b.textContent = top.title;
+      b.dataset.menu = String(i);
+      b.setAttribute("role", "menuitem");
+      b.setAttribute("aria-haspopup", "menu");
+      b.setAttribute("aria-expanded", "false");
+      if (top.enabled === false) b.disabled = true;
+      menusEl.appendChild(b);
+    });
+    bar.dataset.menus = list.length ? "yes" : "no";
+    fitMenuBar();
+  }
+
+  // Titles that don't fit give way to the one "Menu" button.
+  function fitMenuBar() {
+    if (!bar) return;
+    bar.classList.remove("otm-bar-compact");
+    if (!menus.bar.length) return;
+    if (menusEl.scrollWidth > menusEl.clientWidth + 1 || bar.scrollWidth > bar.clientWidth + 1) bar.classList.add("otm-bar-compact");
+  }
+  window.addEventListener("resize", fitMenuBar);
+
+  function titleButtons() {
+    return [nameEl, ...menusEl.querySelectorAll(".otm-menu-title"), allButton].filter((b) => b && (b === allButton || b.dataset.menu !== undefined));
+  }
+
+  function setExpanded(anchor) {
+    for (const b of titleButtons()) if (b) b.setAttribute("aria-expanded", String(b === anchor));
+  }
+
+  // Builds a menu's items into `box`: separators as lines, submenus as a heading over their items.
+  function buildItems(box, items, path, choose) {
+    let lastLine = true;
+    for (const item of items || []) {
+      if (!item || typeof item !== "object") continue;
+      if (item.separator) {
+        if (!lastLine) {
+          const hr = document.createElement("hr");
+          hr.setAttribute("role", "separator");
+          box.appendChild(hr);
+        }
+        lastLine = true;
+        continue;
+      }
+      const title = String(item.title || "");
+      if (!title) continue;
+      lastLine = false;
+      const here = path.concat(title);
+      if (Array.isArray(item.items) && item.items.length) {
+        const head = document.createElement("div");
+        head.className = "otm-menu-head";
+        head.textContent = title;
+        box.appendChild(head);
+        const group = document.createElement("div");
+        group.className = "otm-menu-sub";
+        group.setAttribute("role", "group");
+        group.setAttribute("aria-label", title);
+        buildItems(group, item.items, here, choose);
+        box.appendChild(group);
+        continue;
+      }
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "otm-menu-item";
+      b.setAttribute("role", item.checked ? "menuitemcheckbox" : "menuitem");
+      if (item.checked) b.setAttribute("aria-checked", "true");
+      const check = document.createElement("span");
+      check.className = "otm-menu-check";
+      check.textContent = item.checked ? "✓" : "";
+      const label = document.createElement("span");
+      label.className = "otm-menu-label";
+      label.textContent = title;
+      b.append(check, label);
+      if (typeof item.shortcut === "string" && item.shortcut) {
+        const acc = document.createElement("span");
+        acc.className = "otm-menu-acc";
+        acc.textContent = item.shortcut;
+        b.appendChild(acc);
+      }
+      if (item.enabled === false) b.disabled = true;
+      else b.addEventListener("click", () => choose(here));
+      box.appendChild(b);
+    }
+    if (box.lastElementChild && box.lastElementChild.localName === "hr") box.lastElementChild.remove();
+  }
+
+  function makeMenuBox(kind) {
+    const box = document.createElement("div");
+    box.className = "otm-menu otm-menu-" + kind;
+    box.setAttribute("role", "menu");
+    box.setAttribute("data-opentraffic-ui", "");
+    box.addEventListener("keydown", menuKeys);
+    return box;
+  }
+
+  function placeBox(box, x, y, below) {
+    const r = box.getBoundingClientRect();
+    const left = Math.max(8, Math.min(x, innerWidth - r.width - 8));
+    let top = below === undefined ? y : below;
+    if (top + r.height > innerHeight - 8) top = Math.max(8, (below === undefined ? y : innerHeight) - r.height - 8);
+    box.style.left = Math.round(left) + "px";
+    box.style.top = Math.round(Math.max(8, top)) + "px";
+  }
+
+  // Opens menu `index` of the bar under its title (-1: every menu, under the "Menu" button).
+  function openMenu(index, anchor) {
+    if (menus.open && menus.open.box) menus.open.box.remove();
+    const box = makeMenuBox("bar");
+    const choose = (path) => {
+      closeMenu();
+      flashTitle(path[0]);
+      send({ t: "menuAction", path, context: false });
+    };
+    if (index === -1) {
+      for (const top of menus.bar) {
+        if (!Array.isArray(top.items) || !top.items.length) continue;
+        buildItems(box, [{ title: top.title, items: top.items }], [], choose);
+      }
+    } else {
+      const top = menus.bar[index];
+      if (!top) return closeMenu();
+      box.setAttribute("aria-label", top.title);
+      buildItems(box, top.items, [top.title], choose);
+    }
+    document.body.appendChild(box);
+    const r = anchor.getBoundingClientRect();
+    placeBox(box, r.left, 0, r.bottom + 6);
+    menus.open = { index, title: index >= 0 && menus.bar[index] ? menus.bar[index].title : null, anchor, box };
+    setExpanded(anchor);
+  }
+
+  function closeMenu() {
+    if (menus.open && menus.open.box) menus.open.box.remove();
+    menus.open = null;
+    setExpanded(null);
+  }
+
+  function flashTitle(title) {
+    const b = titleButtons().find((x) => x !== allButton && x.dataset.menu !== undefined && menus.bar[Number(x.dataset.menu)] &&
+      menus.bar[Number(x.dataset.menu)].title === title);
+    const el = bar && bar.classList.contains("otm-bar-compact") ? allButton : b;
+    if (!el) return;
+    el.classList.add("otm-menu-flash");
+    setTimeout(() => el.classList.remove("otm-menu-flash"), 220);
+  }
+
+  function onTitle(e) {
+    const t = e.target instanceof Element ? e.target.closest(".otm-menu-title, .otm-menu-all") : null;
+    if (!t || t.disabled) return null;
+    return t === allButton ? { index: -1, el: t } : { index: Number(t.dataset.menu), el: t };
+  }
+  if (bar) {
+    bar.addEventListener("click", (e) => {
+      const hit = onTitle(e);
+      if (!hit) return;
+      e.stopPropagation();
+      if (menus.open && menus.open.anchor === hit.el) return closeMenu();
+      openMenu(hit.index, hit.el);
+    });
+    bar.addEventListener("keydown", (e) => {
+      const hit = onTitle(e);
+      if (!hit || (e.key !== "Enter" && e.key !== " " && e.key !== "ArrowDown")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openMenu(hit.index, hit.el);
+      const first = menus.open && menus.open.box.querySelector(".otm-menu-item:not([disabled])");
+      if (first) first.focus();
+    });
+    // With a menu open, pointing at another title opens that one, as in a menu bar.
+    bar.addEventListener("pointerover", (e) => {
+      const hit = onTitle(e);
+      if (hit && menus.open && menus.open.anchor !== hit.el && menus.open.index !== -1 && hit.index !== -1) openMenu(hit.index, hit.el);
+    });
+  }
+
+  // Arrow keys move between items; Left/Right move between menus; Escape closes.
+  function menuKeys(e) {
+    const box = e.currentTarget;
+    const items = [...box.querySelectorAll(".otm-menu-item:not([disabled])")];
+    const i = items.indexOf(document.activeElement);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      const next = items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length];
+      if (next) next.focus();
+    } else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && menus.open && menus.open.index >= 0 && box === menus.open.box) {
+      const titles = titleButtons().filter((b) => b !== allButton && !b.disabled);
+      const at = titles.indexOf(menus.open.anchor);
+      const next = titles[(at + (e.key === "ArrowRight" ? 1 : -1) + titles.length) % titles.length];
+      if (next) {
+        openMenu(Number(next.dataset.menu), next);
+        const first = menus.open && menus.open.box.querySelector(".otm-menu-item:not([disabled])");
+        if (first) first.focus();
+      }
+    } else if (e.key === "Escape") {
+      if (box === menus.open?.box) {
+        const anchor = menus.open.anchor;
+        closeMenu();
+        anchor.focus();
+      } else dismissContext();
+    } else return;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  // The context menu: where the app popped it up, over the window (or near the top in the Simple view).
+  let contextBox = null;
+  function showContext(ctx) {
+    hideContext();
+    const box = makeMenuBox("context");
+    box.setAttribute("aria-label", "Context menu");
+    buildItems(box, ctx.items, [], (path) => {
+      menus.dismissed = menus.contextJSON;
+      hideContext();
+      send({ t: "menuAction", path, context: true });
+    });
+    if (!box.childElementCount) return;
+    document.body.appendChild(box);
+    contextBox = box;
+    const win = state.windows.get(ctx.window);
+    const r = win && win.el && !state.simple ? win.el.getBoundingClientRect() : null;
+    if (r && r.width) {
+      const f = r.width / win.info.w || 1;
+      placeBox(box, r.left + Number(ctx.x || 0) * f, r.top + Number(ctx.y || 0) * f);
+    } else {
+      placeBox(box, (innerWidth - box.getBoundingClientRect().width) / 2, 72);
+    }
+  }
+
+  function hideContext() {
+    if (contextBox) contextBox.remove();
+    contextBox = null;
+  }
+
+  // Closes the app's context menu without choosing (as a click elsewhere or Escape does on a Mac).
+  function dismissContext() {
+    if (!contextBox) return;
+    menus.dismissed = menus.contextJSON;
+    hideContext();
+    send({ t: "menuAction", path: [], context: true });
+  }
+
+  // A press outside an open menu closes it, and (like on a Mac) goes no further.
+  document.addEventListener("pointerdown", (e) => {
+    const t = e.target instanceof Element ? e.target : null;
+    if (menus.open && !(t && (menus.open.box.contains(t) || t.closest(".otm-menu-title, .otm-menu-all")))) closeMenu();
+    if (contextBox && !(t && contextBox.contains(t))) {
+      dismissContext();
+      if (t && stage.contains(t)) {
+        e.preventDefault();
+        e.stopPropagation();
+        swallowClick = true;
+      }
+    }
+  }, true);
+  let swallowClick = false;
+  document.addEventListener("click", (e) => {
+    if (!swallowClick) return;
+    swallowClick = false;
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+  document.addEventListener("pointerup", (e) => {
+    if (swallowClick) e.stopPropagation();
+  }, true);
+
+  // Menu shortcuts: a key combination with Cmd or Ctrl that a menu item has is that item's menuAction.
+  // Left to the browser: the comment box and other page fields, copy/cut/paste (the host's clipboard
+  // is no use here), and a focused field's own select all and undo.
+  document.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented || e.isComposing || e.keyCode === 229 || !(e.metaKey || e.ctrlKey) || !menus.bar.length) return;
+    const t = e.target;
+    const inStage = t instanceof Element && stage.contains(t);
+    const inSimple = t instanceof Element && simpleRoot && simpleRoot.contains(t);
+    const field = t instanceof HTMLElement && (t.isContentEditable || t.localName === "input" || t.localName === "textarea" || t.localName === "select");
+    if (field && !inStage && !inSimple) return;
+    if (CLIPBOARD_KEYS.has(e.code) && !e.altKey && !e.ctrlKey) return;
+    if (field && EDIT_KEYS.has(e.code) && !e.altKey && !e.ctrlKey) return;
+    if (!state.socket) return;
+    const hit = findShortcut(menus.bar, e, []);
+    if (!hit) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (hit.item.enabled === false) return;
+    closeMenu();
+    flashTitle(hit.path[0]);
+    send({ t: "menuAction", path: hit.path, context: false });
+  }, true);
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || e.defaultPrevented) return;
+    if (menus.open) {
+      closeMenu();
+      e.preventDefault();
+      e.stopPropagation();
+    } else if (contextBox) {
+      dismissContext();
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
 
   // ---------------------------------------------------------------- cursor and status
 

@@ -34,9 +34,20 @@ public protocol MirrorInput: Sendable {
     func replaceText(in window: InputSynthesizer.Window, field: CGRect, with text: String, timeout: Duration) async throws
 }
 
+/// The app's menus (`MenuBridge` in the product): the menu bar, and a menu it has popped up.
+public protocol MirrorMenus: AnyObject, Sendable {
+    func bar() async throws -> [MirrorProtocol.MenuItem]
+    func perform(path: [String]) async throws
+    func openMenu() async throws -> MenuBridge.OpenMenu?
+    func performOpen(path: [String]) async throws
+    func closeOpen() async throws
+    @discardableResult func showMenu(at point: CGPoint) async throws -> Bool
+}
+
 extension AccessibilityTree: MirrorAccessibility {}
 extension WindowCapture: MirrorCapture {}
 extension InputSynthesizer: MirrorInput {}
+extension MenuBridge: MirrorMenus {}
 
 public enum MirrorServerError: Error, Equatable, Sendable, CustomStringConvertible {
     /// The app has no window to mirror.
@@ -73,6 +84,11 @@ public enum MirrorServerError: Error, Equatable, Sendable, CustomStringConvertib
 ///
 /// v1 mirrors the app's main window (protocol kind `main`); sheets, alerts, popovers and second
 /// windows come with the extra-windows work (`mirroredWindows`).
+///
+/// Menus (when the app has `menus`): the menu bar and any popped-up menu go out as `menu`, read on
+/// connect, on menu notifications, every `treePollInterval` and often for a moment after a right
+/// click; `menuAction` chooses items through the menus bridge, so Cmd shortcuts reach an app that
+/// isn't frontmost.
 public final class MirrorServer: @unchecked Sendable {
     /// The viewer files, read from the app bundle by the caller.
     public struct Assets: Sendable {
@@ -95,18 +111,21 @@ public final class MirrorServer: @unchecked Sendable {
         public var input: any MirrorInput
         /// A capture for a window (by its window server number), made when the window is mirrored.
         public var makeCapture: @Sendable (CGWindowID) -> any MirrorCapture
+        /// The app's menus; nil sends no `menu` message and ignores `menuAction`.
+        public var menus: (any MirrorMenus)?
 
         public init(name: String, boot: String = UUID().uuidString, accessibility: any MirrorAccessibility, input: any MirrorInput,
-                    makeCapture: @escaping @Sendable (CGWindowID) -> any MirrorCapture) {
-            self.name = name; self.boot = boot; self.accessibility = accessibility; self.input = input; self.makeCapture = makeCapture
+                    menus: (any MirrorMenus)? = nil, makeCapture: @escaping @Sendable (CGWindowID) -> any MirrorCapture) {
+            self.name = name; self.boot = boot; self.accessibility = accessibility; self.input = input; self.menus = menus
+            self.makeCapture = makeCapture
         }
 
-        /// The real bridges for the process `pid`: AccessibilityTree, InputSynthesizer and a
+        /// The real bridges for the process `pid`: AccessibilityTree, InputSynthesizer, MenuBridge and a
         /// WindowCapture per window. Needs Accessibility and Screen Recording permission to work.
         public static func live(pid: pid_t, name: String, boot: String = UUID().uuidString,
                                 background: CGColor = CGColor(gray: 1, alpha: 1)) throws -> App {
             let tree = try AccessibilityTree(pid: pid)
-            return App(name: name, boot: boot, accessibility: tree, input: InputSynthesizer(pid: pid),
+            return App(name: name, boot: boot, accessibility: tree, input: InputSynthesizer(pid: pid), menus: try MenuBridge(pid: pid),
                        makeCapture: { WindowCapture(windowID: $0, background: background) })
         }
     }
@@ -137,6 +156,13 @@ public final class MirrorServer: @unchecked Sendable {
         case failed(String)
     }
 
+    /// Menu reads start at most this often (the bar is read whole, so less often than trees)...
+    public static let menuInterval: Duration = .milliseconds(100)
+    /// ...and after a right click, this often for `menuWatch`, until the app's context menu shows.
+    static let menuWatchStep: Duration = .milliseconds(100)
+    static let menuWatch: Duration = .milliseconds(1500)
+    /// Extra tree reads after a menu action (each delay counted from the one before).
+    static let menuActionRefreshes: [Duration] = [.milliseconds(150), .milliseconds(350)]
     /// Tree refreshes start at most this often...
     public static let treeInterval: Duration = .milliseconds(50)
     /// ...and, while viewers are connected, at least this often (for changes AX doesn't announce).
@@ -194,6 +220,8 @@ public final class MirrorServer: @unchecked Sendable {
     private var captures: [MirrorProtocol.WindowID: any MirrorCapture] = [:]
     private var scale: Double?
     private var status = MirrorProtocol.Status(state: .running)
+    /// The latest `menu` message, encoded once (nil until the menus were read, or without menus).
+    private var menuText: String?
 
     public init(configuration: Configuration) {
         self.configuration = configuration
@@ -316,6 +344,9 @@ public final class MirrorServer: @unchecked Sendable {
         let generation: Int
         let signals: AsyncStream<Void>
         private let signal: AsyncStream<Void>.Continuation
+        /// Requests to read the menus again (coalesced like tree refreshes).
+        let menuSignals: AsyncStream<Void>
+        private let menuSignal: AsyncStream<Void>.Continuation
 
         struct State {
             var tasks: [Task<Void, Never>] = []
@@ -323,6 +354,12 @@ public final class MirrorServer: @unchecked Sendable {
             var failedAt: [MirrorProtocol.WindowID: ContinuousClock.Instant] = [:]
             var mainID: MirrorProtocol.WindowID?
             var sentV: [MirrorProtocol.WindowID: String] = [:]
+            /// The main window's global frame, for placing a popped-up menu relative to it.
+            var mainFrame: CGRect?
+            /// Where the last right click was (window, window-relative point), for a menu without a frame.
+            var rightClick: (window: MirrorProtocol.WindowID, point: CGPoint)?
+            /// Until when menu reads are requested often (after a right click or showMenu).
+            var menuWatchUntil: ContinuousClock.Instant?
             var stopped = false
         }
         let state = OSAllocatedUnfairLock(initialState: State())
@@ -331,9 +368,28 @@ public final class MirrorServer: @unchecked Sendable {
             self.app = app
             self.generation = generation
             (signals, signal) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
+            (menuSignals, menuSignal) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
         }
 
         func requestRefresh() { signal.yield() }
+        func requestMenuRefresh() { menuSignal.yield() }
+
+        /// Reads the menus often for a while: a menu the app is about to pop up shows within it.
+        func watchMenus() {
+            let start = state.withLock { state -> Bool in
+                let watching = state.menuWatchUntil.map { $0 > .now } ?? false
+                state.menuWatchUntil = ContinuousClock.now.advanced(by: MirrorServer.menuWatch)
+                return !watching
+            }
+            requestMenuRefresh()
+            guard start else { return }
+            add(Task { [weak self] in
+                while let self, !Task.isCancelled, let until = self.state.withLock({ $0.menuWatchUntil }), until > .now {
+                    try? await Task.sleep(for: MirrorServer.menuWatchStep)
+                    self.requestMenuRefresh()
+                }
+            })
+        }
 
         func add(_ task: Task<Void, Never>) {
             let keep = state.withLock { state -> Bool in
@@ -351,6 +407,7 @@ public final class MirrorServer: @unchecked Sendable {
                 return (state.tasks, Array(state.captures.values))
             }
             signal.finish()
+            menuSignal.finish()
             for task in tasks { task.cancel() }
             // Bounded: ending a share must not wait on a capture that hangs.
             for capture in captures { _ = try? await WindowCapture.within(MirrorServer.captureStopLimit) { await capture.stop() } }
@@ -369,6 +426,7 @@ public final class MirrorServer: @unchecked Sendable {
             self.captures = [:]
             self.scale = nil
             self.status = MirrorProtocol.Status(state: .running)
+            self.menuText = nil
             for client in self.clients.values { client.resetFrames() }
             return self.generation
         }.get()
@@ -396,16 +454,29 @@ public final class MirrorServer: @unchecked Sendable {
 
         runtime.add(Task { [weak runtime] in
             guard let changes = runtime?.app.accessibility.changes() else { return }
-            for await _ in changes { runtime?.requestRefresh() }
+            for await change in changes {
+                runtime?.requestRefresh()
+                if change.kind == .menuOpened || change.kind == .menuClosed { runtime?.requestMenuRefresh() }
+            }
         })
         runtime.add(Task { [weak self, weak runtime] in
             guard let runtime else { return }
             await self?.refreshLoop(runtime)
         })
+        if app.menus != nil {
+            runtime.add(Task { [weak self, weak runtime] in
+                guard let runtime else { return }
+                await self?.menuLoop(runtime)
+            })
+            runtime.requestMenuRefresh()
+        }
         runtime.add(Task { [weak self, weak runtime] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: MirrorServer.treePollInterval)
-                if let self, self.viewerCount > 0 { runtime?.requestRefresh() }
+                if let self, self.viewerCount > 0 {
+                    runtime?.requestRefresh()
+                    runtime?.requestMenuRefresh()
+                }
             }
         })
         try await loop.submit {
@@ -461,7 +532,10 @@ public final class MirrorServer: @unchecked Sendable {
         let accessibility = runtime.app.accessibility
         let current = runtime.state.withLock { $0.mainID }
         let mirrored = Self.mirroredWindows(try await accessibility.windows(), current: current)
-        runtime.state.withLock { $0.mainID = mirrored.first?.info.id }
+        runtime.state.withLock { state in
+            state.mainID = mirrored.first?.info.id
+            state.mainFrame = mirrored.first?.frame
+        }
         var trees: [(MirrorProtocol.WindowID, AXSnapshot, String?)] = []
         for window in mirrored {
             let id = window.info.id
@@ -503,6 +577,55 @@ public final class MirrorServer: @unchecked Sendable {
             for text in texts { client.sendText(text, flush: false) }
             client.flush()
         }
+    }
+
+    // MARK: Menus
+
+    /// Reads the menus on request, at most one start per `menuInterval`, and sends viewers the
+    /// `menu` message when it changed.
+    private func menuLoop(_ runtime: Runtime) async {
+        guard let menus = runtime.app.menus else { return }
+        let clock = ContinuousClock()
+        var last = clock.now.advanced(by: .seconds(-1))
+        var bar: [MirrorProtocol.MenuItem]?
+        var sent: MirrorProtocol.Menu?
+        for await _ in runtime.menuSignals {
+            let wait = last.advanced(by: Self.menuInterval) - clock.now
+            if wait > .zero { try? await Task.sleep(for: wait) }
+            if Task.isCancelled || runtime.isStopped { return }
+            last = clock.now
+            // A failed read (the app busy or quitting) keeps what viewers have.
+            if let read = try? await menus.bar() { bar = read }
+            guard let bar else { continue }
+            let open = try? await menus.openMenu()
+            let (mainID, mainFrame, click) = runtime.state.withLock { ($0.mainID, $0.mainFrame, $0.rightClick) }
+            let context = Self.contextMenu(open, mainID: mainID, mainFrame: mainFrame, rightClick: click)
+            if context != nil { runtime.state.withLock { $0.menuWatchUntil = nil } } // it showed
+            // Compared as values: JSON key order isn't stable from one encoding to the next.
+            let menu = MirrorProtocol.Menu(bar: bar, context: context)
+            guard menu != sent, let text = try? MirrorProtocol.ServerMessage.menu(menu).jsonString() else { continue }
+            sent = menu
+            let generation = runtime.generation
+            loop.execute {
+                guard generation == self.generation else { return }
+                self.menuText = text
+                guard self.live else { return }
+                for client in self.clients.values { client.sendText(text, flush: true) }
+            }
+        }
+    }
+
+    /// The protocol's context menu for a popped-up menu: placed relative to the main window, at the
+    /// menu's own top-left (or the right click when the menu has no frame).
+    static func contextMenu(_ open: MenuBridge.OpenMenu?, mainID: MirrorProtocol.WindowID?, mainFrame: CGRect?,
+                            rightClick: (window: MirrorProtocol.WindowID, point: CGPoint)?) -> MirrorProtocol.ContextMenu? {
+        guard let open, !open.items.isEmpty, let window = mainID ?? rightClick?.window else { return nil }
+        if let mainFrame, open.frame.width > 0, open.frame.height > 0 {
+            return .init(window: window, x: (open.frame.minX - mainFrame.minX).rounded(), y: (open.frame.minY - mainFrame.minY).rounded(),
+                         items: open.items)
+        }
+        let point = rightClick?.point ?? .zero
+        return .init(window: rightClick?.window ?? window, x: point.x, y: point.y, items: open.items)
     }
 
     // MARK: Captures
@@ -697,6 +820,7 @@ public final class MirrorServer: @unchecked Sendable {
         for window in windows {
             if let text = treeTexts[window.id] { client.sendText(text, flush: false) }
         }
+        if let menuText { client.sendText(menuText, flush: false) }
         client.flush()
         for window in windows { syncFrames(client, window: window.id) }
     }
@@ -714,6 +838,7 @@ public final class MirrorServer: @unchecked Sendable {
         }
         // The cached trees are as new as the last change notification; make sure.
         runtime?.requestRefresh()
+        runtime?.requestMenuRefresh()
         eventSink.yield(.viewerConnected(id: id, viewers: count))
         return id
     }
@@ -770,16 +895,54 @@ public final class MirrorServer: @unchecked Sendable {
     private func apply(_ message: MirrorProtocol.ClientMessage, from viewer: Int) async {
         guard let runtime = shared.withLock({ $0.runtime }), !runtime.isStopped else { return }
         let app = runtime.app
-        guard let window = message.window else { return } // viewport, menuAction, requestControl: events only (reserved)
+        if case .menuAction(let action) = message {
+            guard let menus = app.menus else { return }
+            do {
+                if !action.context {
+                    try await menus.perform(path: action.path)
+                } else if action.path.isEmpty {
+                    try await menus.closeOpen()
+                } else {
+                    try await menus.performOpen(path: action.path)
+                }
+            } catch {
+                eventSink.yield(.failed("menuAction \(action.path.joined(separator: " > ")) from viewer \(viewer): \(error)"))
+            }
+            runtime.requestMenuRefresh()
+            runtime.requestRefresh()
+            // A menu command often changes the app a moment later, and not every change is announced.
+            runtime.add(Task { [weak runtime] in
+                for delay in Self.menuActionRefreshes {
+                    try? await Task.sleep(for: delay)
+                    runtime?.requestRefresh()
+                }
+            })
+            return
+        }
+        guard let window = message.window else { return } // viewport, requestControl: events only (reserved)
         guard let snapshot = try? await loop.submit({ self.snapshots[window] }).get() else { return } // not a mirrored window
         let target = InputSynthesizer.Window(id: window, frame: snapshot.frame)
         do {
             switch message {
+            case .act(let act) where act.action == .showMenu && app.menus != nil:
+                // AXShowMenu answers only when the menu closes; MenuBridge doesn't wait for that.
+                var node = snapshot.node(act.key)
+                if node == nil { node = try await app.accessibility.snapshot(window: .number(window)).node(act.key) }
+                guard let node, node.w > 0, node.h > 0 else { return }
+                let center = CGPoint(x: node.x + node.w / 2, y: node.y + node.h / 2)
+                runtime.state.withLock { $0.rightClick = (window, center) }
+                try await app.menus?.showMenu(at: CGPoint(x: snapshot.frame.minX + center.x, y: snapshot.frame.minY + center.y))
+                runtime.watchMenus()
             case .act(let act):
                 try await app.accessibility.perform(key: act.key, action: act.action, window: window)
             case .pointer(let pointer):
                 try app.input.send(pointer, in: target)
                 if pointer.kind == .move { return }
+                if pointer.kind == .rightup, app.menus != nil {
+                    // The app may pop up a context menu: read the menus often until it shows.
+                    runtime.state.withLock { $0.rightClick = (window, CGPoint(x: pointer.x, y: pointer.y)) }
+                    runtime.watchMenus()
+                }
             case .text(let text):
                 try app.input.type(text: text.text)
             case .key(let key):

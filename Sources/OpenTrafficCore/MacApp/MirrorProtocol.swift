@@ -258,7 +258,8 @@ public enum MirrorProtocol {
         }
     }
 
-    /// Reserved for the menus Task: one menu or menu item of the app's menu bar.
+    /// One menu or menu item: a top-level menu of the bar (its `items` are the menu), an item, a
+    /// submenu (an item with `items`) or a separator line (`separator`, with an empty title).
     public struct MenuItem: Codable, Equatable, Sendable {
         public var title: String
         public var enabled: Bool
@@ -267,19 +268,27 @@ public enum MirrorProtocol {
         public var shortcut: String?
         /// The submenu's items; empty for a plain item.
         public var items: [MenuItem]
+        /// A separator line between groups of items (title `""`, never enabled).
+        public var separator: Bool
 
-        public init(title: String, enabled: Bool = true, checked: Bool = false, shortcut: String? = nil, items: [MenuItem] = []) {
+        public init(title: String, enabled: Bool = true, checked: Bool = false, shortcut: String? = nil, items: [MenuItem] = [],
+                    separator: Bool = false) {
             self.title = title; self.enabled = enabled; self.checked = checked; self.shortcut = shortcut; self.items = items
+            self.separator = separator
         }
 
-        private enum CodingKeys: String, CodingKey { case title, enabled, checked, shortcut, items }
+        /// A separator line.
+        public static let separatorItem = MenuItem(title: "", enabled: false, separator: true)
+
+        private enum CodingKeys: String, CodingKey { case title, enabled, checked, shortcut, items, separator }
         public init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            title = try c.decode(String.self, forKey: .title)
+            title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
             enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
             checked = try c.decodeIfPresent(Bool.self, forKey: .checked) ?? false
             shortcut = try c.decodeIfPresent(String.self, forKey: .shortcut)
             items = try c.decodeIfPresent([MenuItem].self, forKey: .items) ?? []
+            separator = try c.decodeIfPresent(Bool.self, forKey: .separator) ?? false
         }
         public func encode(to encoder: any Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
@@ -288,17 +297,41 @@ public enum MirrorProtocol {
             try c.encode(checked, forKey: .checked)
             try c.encode(shortcut, forKey: .shortcut)
             try c.encode(items, forKey: .items)
+            try c.encode(separator, forKey: .separator)
         }
     }
 
-    /// Reserved for the menus Task: `{"t":"menu","bar":[...]}`, the app's menu bar (top-level menus,
-    /// each with its items). Context menus are added by that Task as further fields.
+    /// A menu the app has popped up (a context menu after a right click, or a pop-up button's
+    /// menu): its items, and where it is, as the top-left corner in points relative to window
+    /// `window`'s top-left.
+    public struct ContextMenu: Codable, Equatable, Sendable {
+        public var window: WindowID
+        public var x: Double
+        public var y: Double
+        public var items: [MenuItem]
+        public init(window: WindowID, x: Double, y: Double, items: [MenuItem]) {
+            self.window = window; self.x = x; self.y = y; self.items = items
+        }
+    }
+
+    /// `{"t":"menu","bar":[...],"context":null}`: the app's menu bar (top-level menus, each with its
+    /// items) and the menu it has popped up, if any. Sent on connect (once read) and whenever either
+    /// changes.
     public struct Menu: Codable, Equatable, Sendable {
         public var bar: [MenuItem]
-        public init(bar: [MenuItem]) { self.bar = bar }
-        private enum CodingKeys: String, CodingKey { case bar }
+        /// The open context (pop-up) menu, or null when none is open.
+        public var context: ContextMenu?
+        public init(bar: [MenuItem], context: ContextMenu? = nil) { self.bar = bar; self.context = context }
+        private enum CodingKeys: String, CodingKey { case bar, context }
         public init(from decoder: any Decoder) throws {
-            bar = try decoder.container(keyedBy: CodingKeys.self).decodeIfPresent([MenuItem].self, forKey: .bar) ?? []
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            bar = try c.decodeIfPresent([MenuItem].self, forKey: .bar) ?? []
+            context = try c.decodeIfPresent(ContextMenu.self, forKey: .context)
+        }
+        public func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(bar, forKey: .bar)
+            try c.encode(context, forKey: .context)
         }
     }
 
@@ -403,10 +436,20 @@ public enum MirrorProtocol {
         }
     }
 
-    /// Reserved for the menus Task: `{"t":"menuAction","path":["Orders","Mark All Shipped"]}`.
+    /// `{"t":"menuAction","path":["Orders","Mark All Shipped"],"context":false}`: choose a menu item by
+    /// its titles, from the menu bar down (`context` false) or from the open context menu down
+    /// (`context` true). An empty `path` with `context` true closes the context menu without choosing.
     public struct MenuAction: Codable, Equatable, Sendable {
         public var path: [String]
-        public init(path: [String]) { self.path = path }
+        public var context: Bool
+        public init(path: [String], context: Bool = false) { self.path = path; self.context = context }
+
+        private enum CodingKeys: String, CodingKey { case path, context }
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            path = try c.decodeIfPresent([String].self, forKey: .path) ?? []
+            context = try c.decodeIfPresent(Bool.self, forKey: .context) ?? false
+        }
     }
 
     // MARK: Messages
@@ -418,7 +461,7 @@ public enum MirrorProtocol {
         case frame(FrameHeader)
         case cursor(CursorShape)
         case status(Status)
-        /// Reserved: the menus Task.
+        /// The menu bar and the open context menu.
         case menu(Menu)
         /// Reserved: the viewer-options Task.
         case control(Control)
@@ -481,7 +524,7 @@ public enum MirrorProtocol {
         case setText(SetText)
         /// Reserved: the viewer-options Task.
         case viewport(Viewport)
-        /// Reserved: the menus Task.
+        /// Choose a menu item (menu bar or context menu), or close the context menu.
         case menuAction(MenuAction)
         /// Reserved: the viewer-options Task (`Ask to control`): `{"t":"requestControl"}`.
         case requestControl

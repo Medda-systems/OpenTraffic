@@ -1,5 +1,5 @@
 {
- "about": "Recorded replay for script/macapp-viewer-stub.mjs: a mock Orbit order form. Messages follow docs/macapp-mirror-protocol.md; `images` are base64 JPEG tiles (scale 2) that frames name by key.",
+ "about": "Recorded replay for script/macapp-viewer-stub.mjs: a mock Orbit order form, with the real Orbit menu bar (`menu`, as the mirror server sends it). Messages follow docs/macapp-mirror-protocol.md; `images` are base64 JPEG tiles (scale 2) that frames name by key.",
  "hello": {
   "t": "hello",
   "boot": "6F1C7D0E-2D7B-4E55-9C59-0B5A3C1D2E3F",
@@ -330,6 +330,389 @@
    ]
   }
  ],
+ "menu": {
+  "t": "menu",
+  "bar": [
+   {
+    "title": "Orbit",
+    "enabled": true,
+    "checked": false,
+    "shortcut": null,
+    "items": [
+     {
+      "title": "About Orbit",
+      "enabled": true,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     }
+    ],
+    "separator": false
+   },
+   {
+    "title": "File",
+    "enabled": true,
+    "checked": false,
+    "shortcut": null,
+    "items": [
+     {
+      "title": "New",
+      "enabled": true,
+      "checked": false,
+      "shortcut": null,
+      "items": [
+       {
+        "title": "New Orbit Orders Window",
+        "enabled": true,
+        "checked": false,
+        "shortcut": "⌘N",
+        "items": [],
+        "separator": false
+       },
+       {
+        "title": "New Statistics Window",
+        "enabled": true,
+        "checked": false,
+        "shortcut": null,
+        "items": [],
+        "separator": false
+       }
+      ],
+      "separator": false
+     },
+     {
+      "title": "",
+      "enabled": false,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": true
+     },
+     {
+      "title": "Close",
+      "enabled": false,
+      "checked": false,
+      "shortcut": "⌘W",
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "Close All",
+      "enabled": true,
+      "checked": false,
+      "shortcut": "⌥⌘W",
+      "items": [],
+      "separator": false
+     }
+    ],
+    "separator": false
+   },
+   {
+    "title": "Edit",
+    "enabled": true,
+    "checked": false,
+    "shortcut": null,
+    "items": [
+     {
+      "title": "Undo",
+      "enabled": false,
+      "checked": false,
+      "shortcut": "⌘Z",
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "Redo",
+      "enabled": false,
+      "checked": false,
+      "shortcut": "⇧⌘Z",
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "",
+      "enabled": false,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": true
+     },
+     {
+      "title": "Cut",
+      "enabled": false,
+      "checked": false,
+      "shortcut": "⌘X",
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "Copy",
+      "enabled": false,
+      "checked": false,
+      "shortcut": "⌘C",
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "Paste",
+      "enabled": false,
+      "checked": false,
+      "shortcut": "⌘V",
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "Delete",
+      "enabled": false,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "Select All",
+      "enabled": false,
+      "checked": false,
+      "shortcut": "⌘A",
+      "items": [],
+      "separator": false
+     }
+    ],
+    "separator": false
+   },
+   {
+    "title": "View",
+    "enabled": true,
+    "checked": false,
+    "shortcut": null,
+    "items": [
+     {
+      "title": "Show Tab Bar",
+      "enabled": false,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "Show All Tabs",
+      "enabled": false,
+      "checked": false,
+      "shortcut": "⇧⌘'",
+      "items": [],
+      "separator": false
+     }
+    ],
+    "separator": false
+   },
+   {
+    "title": "Orders",
+    "enabled": true,
+    "checked": false,
+    "shortcut": null,
+    "items": [
+     {
+      "title": "Mark All Shipped",
+      "enabled": true,
+      "checked": false,
+      "shortcut": "⇧⌘S",
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "Show Statistics",
+      "enabled": true,
+      "checked": false,
+      "shortcut": "⌥⌘I",
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "",
+      "enabled": false,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": true
+     },
+     {
+      "title": "Filter",
+      "enabled": true,
+      "checked": false,
+      "shortcut": null,
+      "items": [
+       {
+        "title": "All",
+        "enabled": true,
+        "checked": true,
+        "shortcut": null,
+        "items": [],
+        "separator": false
+       },
+       {
+        "title": "Open",
+        "enabled": true,
+        "checked": false,
+        "shortcut": null,
+        "items": [],
+        "separator": false
+       },
+       {
+        "title": "Shipped",
+        "enabled": true,
+        "checked": false,
+        "shortcut": null,
+        "items": [],
+        "separator": false
+       }
+      ],
+      "separator": false
+     }
+    ],
+    "separator": false
+   },
+   {
+    "title": "Window",
+    "enabled": true,
+    "checked": false,
+    "shortcut": null,
+    "items": [
+     {
+      "title": "Zoom",
+      "enabled": false,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "Zoom All",
+      "enabled": true,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "",
+      "enabled": false,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": true
+     },
+     {
+      "title": "Full Screen Tile",
+      "enabled": false,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "",
+      "enabled": false,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": true
+     },
+     {
+      "title": "Bring All to Front",
+      "enabled": true,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "Arrange in Front",
+      "enabled": true,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "",
+      "enabled": false,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": true
+     },
+     {
+      "title": "Orbit Orders",
+      "enabled": true,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "",
+      "enabled": false,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": true
+     },
+     {
+      "title": "Show Previous Tab",
+      "enabled": false,
+      "checked": false,
+      "shortcut": "⌃⇧⇥",
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "Show Next Tab",
+      "enabled": false,
+      "checked": false,
+      "shortcut": "⌃⇥",
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "Move Tab to New Window",
+      "enabled": false,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "Merge All Windows",
+      "enabled": false,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     }
+    ],
+    "separator": false
+   },
+   {
+    "title": "Help",
+    "enabled": true,
+    "checked": false,
+    "shortcut": null,
+    "items": [
+     {
+      "title": "Orbit Help",
+      "enabled": true,
+      "checked": false,
+      "shortcut": "⌘?",
+      "items": [],
+      "separator": false
+     }
+    ],
+    "separator": false
+   }
+  ],
+  "context": null
+ },
  "named": {
   "tree2": {
    "t": "tree",
@@ -719,6 +1102,1614 @@
    "t": "status",
    "state": "running",
    "message": null
+  },
+  "contextMenu": {
+   "t": "menu",
+   "bar": [
+    {
+     "title": "Orbit",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "About Orbit",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "File",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "New",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [
+        {
+         "title": "New Orbit Orders Window",
+         "enabled": true,
+         "checked": false,
+         "shortcut": "⌘N",
+         "items": [],
+         "separator": false
+        },
+        {
+         "title": "New Statistics Window",
+         "enabled": true,
+         "checked": false,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        }
+       ],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Close",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘W",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Close All",
+       "enabled": true,
+       "checked": false,
+       "shortcut": "⌥⌘W",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Edit",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Undo",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘Z",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Redo",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⇧⌘Z",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Cut",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘X",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Copy",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘C",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Paste",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘V",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Delete",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Select All",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘A",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "View",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Show Tab Bar",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Show All Tabs",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⇧⌘'",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Orders",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Mark All Shipped",
+       "enabled": true,
+       "checked": false,
+       "shortcut": "⇧⌘S",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Show Statistics",
+       "enabled": true,
+       "checked": false,
+       "shortcut": "⌥⌘I",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Filter",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [
+        {
+         "title": "All",
+         "enabled": true,
+         "checked": true,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        },
+        {
+         "title": "Open",
+         "enabled": true,
+         "checked": false,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        },
+        {
+         "title": "Shipped",
+         "enabled": true,
+         "checked": false,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        }
+       ],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Window",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Zoom",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Zoom All",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Full Screen Tile",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Bring All to Front",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Arrange in Front",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Orbit Orders",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Show Previous Tab",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌃⇧⇥",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Show Next Tab",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌃⇥",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Move Tab to New Window",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Merge All Windows",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Help",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Orbit Help",
+       "enabled": true,
+       "checked": false,
+       "shortcut": "⌘?",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    }
+   ],
+   "context": {
+    "window": 1,
+    "x": 120,
+    "y": 160,
+    "items": [
+     {
+      "title": "Mark as Shipped",
+      "enabled": true,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "Duplicate",
+      "enabled": true,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "",
+      "enabled": false,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": true
+     },
+     {
+      "title": "Delete",
+      "enabled": true,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     }
+    ]
+   }
+  },
+  "contextMenuAgain": {
+   "t": "menu",
+   "bar": [
+    {
+     "title": "Orbit",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "About Orbit",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "File",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "New",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [
+        {
+         "title": "New Orbit Orders Window",
+         "enabled": true,
+         "checked": false,
+         "shortcut": "⌘N",
+         "items": [],
+         "separator": false
+        },
+        {
+         "title": "New Statistics Window",
+         "enabled": true,
+         "checked": false,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        }
+       ],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Close",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘W",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Close All",
+       "enabled": true,
+       "checked": false,
+       "shortcut": "⌥⌘W",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Edit",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Undo",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘Z",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Redo",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⇧⌘Z",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Cut",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘X",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Copy",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘C",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Paste",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘V",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Delete",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Select All",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘A",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "View",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Show Tab Bar",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Show All Tabs",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⇧⌘'",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Orders",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Mark All Shipped",
+       "enabled": true,
+       "checked": false,
+       "shortcut": "⇧⌘S",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Show Statistics",
+       "enabled": true,
+       "checked": false,
+       "shortcut": "⌥⌘I",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Filter",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [
+        {
+         "title": "All",
+         "enabled": true,
+         "checked": true,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        },
+        {
+         "title": "Open",
+         "enabled": true,
+         "checked": false,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        },
+        {
+         "title": "Shipped",
+         "enabled": true,
+         "checked": false,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        }
+       ],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Window",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Zoom",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Zoom All",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Full Screen Tile",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Bring All to Front",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Arrange in Front",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Orbit Orders",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Show Previous Tab",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌃⇧⇥",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Show Next Tab",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌃⇥",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Move Tab to New Window",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Merge All Windows",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Help",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Orbit Help",
+       "enabled": true,
+       "checked": false,
+       "shortcut": "⌘?",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    }
+   ],
+   "context": {
+    "window": 1,
+    "x": 300,
+    "y": 240,
+    "items": [
+     {
+      "title": "Mark as Shipped",
+      "enabled": true,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "Duplicate",
+      "enabled": true,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     },
+     {
+      "title": "",
+      "enabled": false,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": true
+     },
+     {
+      "title": "Delete",
+      "enabled": true,
+      "checked": false,
+      "shortcut": null,
+      "items": [],
+      "separator": false
+     }
+    ]
+   }
+  },
+  "noContext": {
+   "t": "menu",
+   "bar": [
+    {
+     "title": "Orbit",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "About Orbit",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "File",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "New",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [
+        {
+         "title": "New Orbit Orders Window",
+         "enabled": true,
+         "checked": false,
+         "shortcut": "⌘N",
+         "items": [],
+         "separator": false
+        },
+        {
+         "title": "New Statistics Window",
+         "enabled": true,
+         "checked": false,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        }
+       ],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Close",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘W",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Close All",
+       "enabled": true,
+       "checked": false,
+       "shortcut": "⌥⌘W",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Edit",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Undo",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘Z",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Redo",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⇧⌘Z",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Cut",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘X",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Copy",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘C",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Paste",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘V",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Delete",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Select All",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘A",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "View",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Show Tab Bar",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Show All Tabs",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⇧⌘'",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Orders",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Mark All Shipped",
+       "enabled": true,
+       "checked": false,
+       "shortcut": "⇧⌘S",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Show Statistics",
+       "enabled": true,
+       "checked": false,
+       "shortcut": "⌥⌘I",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Filter",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [
+        {
+         "title": "All",
+         "enabled": true,
+         "checked": true,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        },
+        {
+         "title": "Open",
+         "enabled": true,
+         "checked": false,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        },
+        {
+         "title": "Shipped",
+         "enabled": true,
+         "checked": false,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        }
+       ],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Window",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Zoom",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Zoom All",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Full Screen Tile",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Bring All to Front",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Arrange in Front",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Orbit Orders",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Show Previous Tab",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌃⇧⇥",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Show Next Tab",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌃⇥",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Move Tab to New Window",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Merge All Windows",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Help",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Orbit Help",
+       "enabled": true,
+       "checked": false,
+       "shortcut": "⌘?",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    }
+   ],
+   "context": null
+  },
+  "menuShippedOff": {
+   "t": "menu",
+   "bar": [
+    {
+     "title": "Orbit",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "About Orbit",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "File",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "New",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [
+        {
+         "title": "New Orbit Orders Window",
+         "enabled": true,
+         "checked": false,
+         "shortcut": "⌘N",
+         "items": [],
+         "separator": false
+        },
+        {
+         "title": "New Statistics Window",
+         "enabled": true,
+         "checked": false,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        }
+       ],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Close",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘W",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Close All",
+       "enabled": true,
+       "checked": false,
+       "shortcut": "⌥⌘W",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Edit",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Undo",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘Z",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Redo",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⇧⌘Z",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Cut",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘X",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Copy",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘C",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Paste",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘V",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Delete",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Select All",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌘A",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "View",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Show Tab Bar",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Show All Tabs",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⇧⌘'",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Orders",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Mark All Shipped",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⇧⌘S",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Show Statistics",
+       "enabled": true,
+       "checked": false,
+       "shortcut": "⌥⌘I",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Filter",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [
+        {
+         "title": "All",
+         "enabled": true,
+         "checked": true,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        },
+        {
+         "title": "Open",
+         "enabled": true,
+         "checked": false,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        },
+        {
+         "title": "Shipped",
+         "enabled": true,
+         "checked": false,
+         "shortcut": null,
+         "items": [],
+         "separator": false
+        }
+       ],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Window",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Zoom",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Zoom All",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Full Screen Tile",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Bring All to Front",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Arrange in Front",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Orbit Orders",
+       "enabled": true,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": true
+      },
+      {
+       "title": "Show Previous Tab",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌃⇧⇥",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Show Next Tab",
+       "enabled": false,
+       "checked": false,
+       "shortcut": "⌃⇥",
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Move Tab to New Window",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      },
+      {
+       "title": "Merge All Windows",
+       "enabled": false,
+       "checked": false,
+       "shortcut": null,
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    },
+    {
+     "title": "Help",
+     "enabled": true,
+     "checked": false,
+     "shortcut": null,
+     "items": [
+      {
+       "title": "Orbit Help",
+       "enabled": true,
+       "checked": false,
+       "shortcut": "⌘?",
+       "items": [],
+       "separator": false
+      }
+     ],
+     "separator": false
+    }
+   ],
+   "context": null
   }
  },
  "timeline": [

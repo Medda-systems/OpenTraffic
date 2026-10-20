@@ -7,6 +7,7 @@
 // Checks: one layer element per node with the protocol's DOM ids, stable across trees; collab.js's
 // picker sees and labels the elements (not the canvas); clicks, typing (IME too), keys, pointer, wheel
 // map to the protocol's messages; optimistic feedback; tiles paint; cursor, status, reconnect and boot;
+// the app's menu bar in the desktop bar, its context menus and its shortcuts as menuAction;
 // fit-to-viewport; the Simple view at 390 px (real text and controls in reading order, the same ids and
 // messages, comment anchors that resolve in either view, the bar's toggle); no console errors. Exits 1 on a failure; skips (exit 0) without Google Chrome.
 import { spawn } from "node:child_process";
@@ -223,7 +224,7 @@ await check("the layer has one element per node", async () => {
   await waitFor(`${nodeCount} === ${tree1.nodes.length}`, tree1.nodes.length + " layer elements");
   const name = await evaluate(`document.getElementById('otm-name').textContent`);
   assert(name === "Orbit", "bar names " + name);
-  const tag = await evaluate(`document.getElementById('otm-bar').textContent.replace(/\\s+/g, ' ').trim()`);
+  const tag = await evaluate(`(document.getElementById('otm-name').textContent + ' ' + document.querySelector('.otm-tag').textContent).replace(/\\s+/g, ' ').trim()`);
   assert(tag === "Orbit · Mac app · running on the host's Mac", "bar says " + tag);
 });
 
@@ -459,6 +460,187 @@ await check("a different boot clears the layer", async () => {
   assert(await evaluate(nodeCount) === tree1.nodes.length, "node count after the new boot");
   assert(await evaluate(`document.querySelectorAll('.otm-window').length`) === 1, "old windows left behind");
 });
+
+// ---- menus: the app's menu bar in the desktop bar, its context menus, its shortcuts
+
+const MENU = fixture.menu;
+const CMD = 4, SHIFT = 8, ALT = 1; // CDP modifier bits
+const barTitles = `[...document.querySelectorAll('#otm-bar .otm-menus .otm-menu-title')].map((b) => b.textContent)`;
+const titleButton = (title) => `[...document.querySelectorAll('#otm-bar .otm-menus .otm-menu-title')].find((b) => b.textContent === ${JSON.stringify(title)})`;
+const menuItem = (kind, title) => `[...document.querySelectorAll('.otm-menu-${kind} .otm-menu-item')].find((b) => b.querySelector('.otm-menu-label').textContent === ${JSON.stringify(title)})`;
+const openMenuShape = (kind) => evaluate(`(() => { const box = document.querySelector('.otm-menu-${kind}'); if (!box) return null; const r = box.getBoundingClientRect();
+  return { x: r.left, y: r.top, w: r.width, h: r.height, role: box.getAttribute('role'), lines: box.querySelectorAll('hr').length,
+    heads: [...box.querySelectorAll('.otm-menu-head')].map((h) => h.textContent),
+    items: [...box.querySelectorAll('.otm-menu-item')].map((b) => ({ label: b.querySelector('.otm-menu-label').textContent,
+      acc: b.querySelector('.otm-menu-acc') ? b.querySelector('.otm-menu-acc').textContent : null, disabled: b.disabled,
+      checked: b.getAttribute('aria-checked') === 'true', check: b.querySelector('.otm-menu-check').textContent })) }; })()`);
+async function clickOn(expr) {
+  const p = await evaluate(`(() => { const el = ${expr}; if (!el) return null; el.scrollIntoView({ block: 'nearest' });
+    const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  assert(p, "nothing to click: " + expr);
+  await click(p.x, p.y);
+  return p;
+}
+async function chord(k, code, vk, modifiers) {
+  await cdp("Input.dispatchKeyEvent", { type: "rawKeyDown", key: k, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers });
+  await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers });
+}
+const menuActions = async () => (await received()).filter((m) => m.t === "menuAction");
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+await check("the app's menu bar is in the desktop bar: the name opens the app's own menu, then its other menus", async () => {
+  const titles = MENU.bar.slice(1).map((m) => m.title);
+  await waitFor(`${barTitles}.join('|') === ${JSON.stringify(titles.join("|"))}`, "the menu titles " + titles.join(", "));
+  const name = await evaluate(`(() => { const n = document.getElementById('otm-name'); return n.getAttribute('role') + ' ' + n.getAttribute('aria-haspopup') + ' ' + n.dataset.menu; })()`);
+  assert(name === "button menu 0", "the name isn't the app menu's button: " + name);
+  assert(await evaluate(`document.getElementById('otm-bar').classList.contains('otm-bar-compact')`) === false, "titles collapsed at 1440 px");
+  assert(await evaluate(`getComputedStyle(document.querySelector('.otm-menu-all')).display`) === "none", "the Menu button shows at 1440 px");
+  await shot("9-menu-bar");
+});
+
+await check("a menu opens under its title with checks, shortcuts, separators and submenus; choosing sends menuAction", async () => {
+  await received(true);
+  const b = await clickOn(titleButton("Orders"));
+  await waitFor(`!!document.querySelector('.otm-menu-bar')`, "the Orders menu");
+  const m = await openMenuShape("bar");
+  assert(m.role === "menu", "role " + m.role);
+  const byLabel = Object.fromEntries(m.items.map((i) => [i.label, i]));
+  assert(byLabel["Mark All Shipped"] && byLabel["Mark All Shipped"].acc === "⇧⌘S", "Mark All Shipped: " + JSON.stringify(byLabel["Mark All Shipped"]));
+  assert(byLabel["Show Statistics"] && byLabel["Show Statistics"].acc === "⌥⌘I", "Show Statistics: " + JSON.stringify(byLabel["Show Statistics"]));
+  assert(same(m.heads, ["Filter"]), "submenu headings " + JSON.stringify(m.heads));
+  assert(byLabel.All && byLabel.All.checked && byLabel.All.check === "✓" && !byLabel.Open.checked, "checkmarks " + JSON.stringify([byLabel.All, byLabel.Open]));
+  assert(m.lines === 1, "separators " + m.lines);
+  assert(m.y >= b.y && Math.abs(m.x - (await evaluate(`${titleButton("Orders")}.getBoundingClientRect().left`))) <= 1, "not under its title: " + JSON.stringify(m));
+  assert(await evaluate(`${titleButton("Orders")}.getAttribute('aria-expanded')`) === "true", "title not expanded");
+  await shot("10-menu-orders");
+  await clickOn(menuItem("bar", "Mark All Shipped"));
+  await waitReceived((x) => x.t === "menuAction" && same(x.path, ["Orders", "Mark All Shipped"]) && x.context === false, "menuAction Mark All Shipped");
+  assert(await evaluate(`!document.querySelector('.otm-menu-bar')`), "the menu stayed open after choosing");
+  // A submenu's item sends its whole path.
+  await clickOn(titleButton("Orders"));
+  await clickOn(menuItem("bar", "Shipped"));
+  await waitReceived((x) => x.t === "menuAction" && same(x.path, ["Orders", "Filter", "Shipped"]), "menuAction Filter > Shipped");
+  // The name opens the app's own menu.
+  await clickOn(`document.getElementById('otm-name')`);
+  await waitFor(`!!${menuItem("bar", "About Orbit")}`, "the app menu");
+  await clickOn(menuItem("bar", "About Orbit"));
+  await waitReceived((x) => x.t === "menuAction" && same(x.path, ["Orbit", "About Orbit"]), "menuAction About Orbit");
+  // A disabled item does nothing; pointing at another title switches menus; Escape closes; no clicks reach the app.
+  await clickOn(titleButton("Edit"));
+  const edit = await openMenuShape("bar");
+  const undo = edit.items.find((i) => i.label === "Undo");
+  assert(undo && undo.disabled && undo.acc === "⌘Z", "Undo " + JSON.stringify(undo));
+  await clickOn(menuItem("bar", "Undo"));
+  const v = await evaluate(`(() => { const r = ${titleButton("View")}.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await mouse("mouseMoved", v.x, v.y);
+  await waitFor(`${titleButton("View")}.getAttribute('aria-expanded') === 'true' && !!${menuItem("bar", "Show Tab Bar")}`, "the View menu on hover");
+  await press("Escape", "Escape", 27);
+  await waitFor(`!document.querySelector('.otm-menu-bar')`, "Escape to close the menu");
+  await sleep(150);
+  const sent = await received();
+  assert(!sent.some((x) => x.t === "menuAction" && x.path.includes("Undo")), "a disabled item was sent");
+  assert(!sent.some((x) => x.t === "pointer" || x.t === "key" || x.t === "act"), "menu clicks reached the app: " + JSON.stringify(sent.filter((x) => x.t !== "menuAction")));
+});
+
+await check("menu shortcuts typed in the viewer choose their item; clipboard keys, field editing and the comment box stay with the browser", async () => {
+  await evaluate(`document.activeElement && document.activeElement.blur(), true`);
+  await received(true);
+  await chord("S", "KeyS", 83, CMD | SHIFT);
+  await waitReceived((x) => x.t === "menuAction" && same(x.path, ["Orders", "Mark All Shipped"]) && x.context === false, "⇧⌘S as Mark All Shipped");
+  await chord("ˆ", "KeyI", 73, CMD | ALT); // ⌥I types ˆ on a Mac keyboard: the key's code decides
+  await waitReceived((x) => x.t === "menuAction" && same(x.path, ["Orders", "Show Statistics"]), "⌥⌘I as Show Statistics");
+  await chord("z", "KeyZ", 90, CMD); // Undo is disabled: swallowed, not sent
+  await chord("c", "KeyC", 67, CMD); // the host's clipboard is no use to a viewer
+  await evaluate(`${byKey(CUSTOMER)}.focus(), true`);
+  await chord("a", "KeyA", 65, CMD); // a field's own select all
+  await evaluate(`(() => { const i = document.createElement('input'); i.id = 't-comment'; document.body.appendChild(i); i.focus(); return true; })()`);
+  await chord("S", "KeyS", 83, CMD | SHIFT); // typed in the comment box
+  await evaluate(`document.getElementById('t-comment').remove(), true`);
+  await sleep(250);
+  const actions = await menuActions();
+  assert(actions.length === 2, "menu actions sent: " + JSON.stringify(actions));
+  const other = (await received()).filter((x) => x.t === "key" || x.t === "text");
+  assert(other.length === 0, "shortcuts also went out as keys or text: " + JSON.stringify(other));
+});
+
+await check("a context menu the app pops up shows where it is; choosing, clicking elsewhere and Escape answer it", async () => {
+  await evaluate(`document.activeElement && document.activeElement.blur(), true`);
+  await received(true);
+  await stubSend("contextMenu");
+  await waitFor(`!!document.querySelector('.otm-menu-context')`, "the context menu");
+  const m = await openMenuShape("context");
+  const want = await windowPoint(120, 160);
+  assert(Math.abs(m.x - want.x) <= 2 && Math.abs(m.y - want.y) <= 2, "context menu at " + m.x + "," + m.y + ", app put it at " + want.x + "," + want.y);
+  assert(same(m.items.map((i) => i.label), ["Mark as Shipped", "Duplicate", "Delete"]) && m.lines === 1, "items " + JSON.stringify(m));
+  await shot("11-context-menu");
+  await clickOn(menuItem("context", "Duplicate"));
+  await waitReceived((x) => x.t === "menuAction" && same(x.path, ["Duplicate"]) && x.context === true, "menuAction Duplicate (context)");
+  assert(await evaluate(`!document.querySelector('.otm-menu-context')`), "the context menu stayed after choosing");
+  // The same menu again before the app closed it doesn't reopen it; a new one does.
+  await stubSend("contextMenu");
+  await sleep(150);
+  assert(await evaluate(`!document.querySelector('.otm-menu-context')`), "a chosen menu came back");
+  await stubSend("noContext");
+  await stubSend("contextMenuAgain");
+  await waitFor(`!!document.querySelector('.otm-menu-context')`, "the second context menu");
+  // A click elsewhere closes it, and goes no further (as on a Mac).
+  await received(true);
+  const away = await windowPoint(600, 420);
+  await click(away.x, away.y);
+  await waitReceived((x) => x.t === "menuAction" && same(x.path, []) && x.context === true, "the close on a click elsewhere");
+  await sleep(150);
+  const leaked = (await received()).filter((x) => x.t === "pointer" && x.kind !== "move");
+  assert(leaked.length === 0, "the closing click reached the app: " + JSON.stringify(leaked));
+  assert(await evaluate(`!document.querySelector('.otm-menu-context')`), "still open after a click elsewhere");
+  // Escape closes it without sending Escape to the app.
+  await stubSend("noContext");
+  await stubSend("contextMenu");
+  await waitFor(`!!document.querySelector('.otm-menu-context')`, "the third context menu");
+  await received(true);
+  await press("Escape", "Escape", 27);
+  await waitReceived((x) => x.t === "menuAction" && same(x.path, []) && x.context === true, "the close on Escape");
+  await sleep(100);
+  assert(!(await received()).some((x) => x.t === "key"), "Escape went to the app too");
+  await stubSend("noContext");
+});
+
+await check("a menu bar that changes while a menu is open shows the change", async () => {
+  await clickOn(titleButton("Orders"));
+  await waitFor(`!!${menuItem("bar", "Mark All Shipped")} && !${menuItem("bar", "Mark All Shipped")}.disabled`, "Orders open");
+  await stubSend("menuShippedOff");
+  await waitFor(`!!${menuItem("bar", "Mark All Shipped")} && ${menuItem("bar", "Mark All Shipped")}.disabled`, "Mark All Shipped switched off in the open menu");
+  assert(await evaluate(`${titleButton("Orders")}.getAttribute('aria-expanded')`) === "true", "the open menu lost its title");
+  await press("Escape", "Escape", 27);
+  await stubSend(MENU);
+  await waitFor(`!document.querySelector('.otm-menu-bar')`, "closed");
+});
+
+await check("when the titles don't fit, one Menu button lists every menu", async () => {
+  try {
+    await compactMenu();
+  } finally {
+    await cdp("Emulation.clearDeviceMetricsOverride");
+  }
+  await waitFor(`!document.getElementById('otm-bar').classList.contains('otm-bar-compact')`, "the titles back at full width");
+});
+
+async function compactMenu() {
+  await cdp("Emulation.setDeviceMetricsOverride", { width: 560, height: 700, deviceScaleFactor: 2, mobile: false });
+  await waitFor(`document.getElementById('otm-bar').classList.contains('otm-bar-compact') && getComputedStyle(document.querySelector('.otm-menu-all')).display !== 'none'`, "the compact bar");
+  const bar = await evaluate(`(() => { const r = document.getElementById('otm-bar').getBoundingClientRect(); return { l: r.left, r: r.right }; })()`);
+  assert(bar.l >= 0 && bar.r <= 560, "the bar overflows: " + JSON.stringify(bar));
+  await received(true);
+  await clickOn(`document.querySelector('.otm-menu-all')`);
+  await waitFor(`!!document.querySelector('.otm-menu-bar')`, "the all-menus list");
+  const m = await openMenuShape("bar");
+  const tops = MENU.bar.map((x) => x.title);
+  assert(same(m.heads.filter((h) => tops.includes(h)), tops), "headings " + JSON.stringify(m.heads));
+  assert(m.x >= 0 && m.x + m.w <= 560, "the list overflows: " + JSON.stringify(m));
+  await shot("12-menu-compact");
+  await clickOn(menuItem("bar", "Mark All Shipped"));
+  await waitReceived((x) => x.t === "menuAction" && same(x.path, ["Orders", "Mark All Shipped"]), "menuAction from the all-menus list");
+  assert(!(await received()).some((x) => x.t === "act" || x.t === "pointer"), "the click went through the menu to the app");
+}
 
 // ---- the Simple view: below 700 px the tree as a page of real text and controls
 

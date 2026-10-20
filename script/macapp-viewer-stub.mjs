@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // A stand-in for the Mac app mirror server, for working on the viewer page without a real app: it
-// serves macapp-viewer.html/.js/.css like the mirror server and replays a recorded hello, trees and
-// frames (script/macapp-viewer-fixture.json) to every viewer that connects. Node only, no npm packages.
+// serves macapp-viewer.html/.js/.css like the mirror server and replays a recorded hello, trees, menu
+// bar and frames (script/macapp-viewer-fixture.json) to every viewer that connects. Node only, no npm packages.
 // Protocol: docs/macapp-mirror-protocol.md.
 //
 //   node script/macapp-viewer-stub.mjs [--port 0] [--fixture <file.json>] [--resources <dir>] [--replay]
@@ -134,6 +134,7 @@ function deliver(client, message) {
 function greet(client) {
   client.text(hello);
   for (const tree of fixture.trees || []) deliver(client, tree);
+  if (fixture.menu) deliver(client, fixture.menu);
   for (const frame of fixture.frames || []) deliver(client, { t: "frame", ...frame });
   if (!replay || !Array.isArray(fixture.timeline)) return;
   client.timers = fixture.timeline.map((step) => setTimeout(() => {

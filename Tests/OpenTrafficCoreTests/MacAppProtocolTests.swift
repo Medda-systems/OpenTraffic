@@ -82,8 +82,10 @@ private let everyClientMessage: [MP.ClientMessage] = [
         (#"{"t":"cursor","shape":"default"}"#, .cursor(.default)),
         (#"{"t":"status","state":"crashed","message":"Orbit quit unexpectedly"}"#,
          .status(MP.Status(state: .crashed, message: "Orbit quit unexpectedly"))),
-        (#"{"t":"menu","bar":[{"title":"Orders","enabled":true,"checked":false,"shortcut":null,"items":[{"title":"Mark All Shipped","enabled":true,"checked":false,"shortcut":"⇧⌘S","items":[]}]}]}"#,
-         .menu(MP.Menu(bar: [MP.MenuItem(title: "Orders", items: [MP.MenuItem(title: "Mark All Shipped", shortcut: "⇧⌘S")])]))),
+        (#"{"t":"menu","bar":[{"title":"Orders","enabled":true,"checked":false,"shortcut":null,"separator":false,"items":[{"title":"Mark All Shipped","enabled":true,"checked":false,"shortcut":"⇧⌘S","separator":false,"items":[]},{"title":"","enabled":false,"checked":false,"shortcut":null,"separator":true,"items":[]}]}],"context":null}"#,
+         .menu(MP.Menu(bar: [MP.MenuItem(title: "Orders", items: [MP.MenuItem(title: "Mark All Shipped", shortcut: "⇧⌘S"), .separatorItem])]))),
+        (#"{"t":"menu","bar":[],"context":{"window":1,"x":52,"y":131,"items":[{"title":"Duplicate","enabled":true,"checked":false,"shortcut":null,"separator":false,"items":[]}]}}"#,
+         .menu(MP.Menu(bar: [], context: MP.ContextMenu(window: 1, x: 52, y: 131, items: [MP.MenuItem(title: "Duplicate")])))),
         (#"{"t":"control","mode":"everyone","you":true}"#, .control(MP.Control(mode: .everyone, you: true))),
     ]
     for (json, expected) in examples {
@@ -105,7 +107,8 @@ private let everyClientMessage: [MP.ClientMessage] = [
         (#"{"t":"setText","window":1,"key":"/Window:/Group:/TextField:Customer","value":"Ada Lovelace"}"#,
          .setText(MP.SetText(window: 1, key: "/Window:/Group:/TextField:Customer", value: "Ada Lovelace"))),
         (#"{"t":"viewport","w":1200,"h":700,"appearance":"dark"}"#, .viewport(MP.Viewport(w: 1200, h: 700, appearance: .dark))),
-        (#"{"t":"menuAction","path":["Orders","Mark All Shipped"]}"#, .menuAction(MP.MenuAction(path: ["Orders", "Mark All Shipped"]))),
+        (#"{"t":"menuAction","path":["Orders","Mark All Shipped"],"context":false}"#, .menuAction(MP.MenuAction(path: ["Orders", "Mark All Shipped"]))),
+        (#"{"t":"menuAction","path":[],"context":true}"#, .menuAction(MP.MenuAction(path: [], context: true))),
         (#"{"t":"requestControl"}"#, .requestControl),
     ]
     for (json, expected) in examples {

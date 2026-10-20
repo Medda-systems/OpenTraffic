@@ -166,16 +166,54 @@ The app's cursor: `default`, `pointer`, `text` or `grab`. Map to the same CSS `c
 `state` is `running`, `restarting`, `crashed` or `stopped`; `message` is a human sentence or `null`.
 Show a banner for anything but `running`.
 
-### `menu` (reserved: app menus)
+### `menu`
 
 ```json
-{"t":"menu","bar":[{"title":"Orders","enabled":true,"checked":false,"shortcut":null,"items":[
-  {"title":"Mark All Shipped","enabled":true,"checked":false,"shortcut":"⇧⌘S","items":[]}]}]}
+{"t":"menu","bar":[
+  {"title":"Orbit","enabled":true,"checked":false,"shortcut":null,"separator":false,"items":[
+    {"title":"About Orbit","enabled":true,"checked":false,"shortcut":null,"separator":false,"items":[]}]},
+  {"title":"Orders","enabled":true,"checked":false,"shortcut":null,"separator":false,"items":[
+    {"title":"Mark All Shipped","enabled":true,"checked":false,"shortcut":"⇧⌘S","separator":false,"items":[]},
+    {"title":"","enabled":false,"checked":false,"shortcut":null,"separator":true,"items":[]},
+    {"title":"Filter","enabled":true,"checked":false,"shortcut":null,"separator":false,"items":[
+      {"title":"All","enabled":true,"checked":true,"shortcut":null,"separator":false,"items":[]}]}]}],
+ "context":null}
 ```
 
-The app's menu bar: the top-level menus, each with its items (`items` nests submenus; `[]` for a
-plain item; `shortcut` is the key equivalent as shown, or `null`). Reserved for the app-menus work,
-which may add fields (for example for context menus); v1 servers need not send it.
+The app's menu bar and the menu it has popped up, if any. Sent on connect once the menus have been
+read (after the trees, before the frames) and again whenever either changes; servers without menus
+never send it.
+
+`bar` lists the app's top-level menus in order. The first is the app's own menu, titled with its name
+(on a Mac the bold name in the menu bar). Each menu item:
+
+| Field | Meaning |
+| --- | --- |
+| `title` | The item's title (`""` for a separator) |
+| `enabled` | Whether it can be chosen now |
+| `checked` | Whether it shows a checkmark |
+| `shortcut` | The key equivalent as macOS shows it, or `null`: modifiers in the order `fn` `⌃` `⌥` `⇧` `⌘`, then the key: a capital letter, a digit or punctuation, `Space`, `F1`…`F19`, or a symbol (`↩` `⌤` `⎋` `⌫` `⌦` `⇥` `←` `→` `↑` `↓` `↖` `↘` `⇞` `⇟`) |
+| `items` | A submenu's items (`[]` for a plain item); a submenu is never chosen itself, and has no `shortcut` |
+| `separator` | A line between groups of items |
+
+The server leaves out what reaches beyond the shared app or would take its window away from the
+viewers: the Apple menu (the host's Mac), Services, AutoFill, Dictation, Emoji & Symbols, Hide,
+Hide Others, Show All, Quit, full screen, minimize and window tiling. It can't choose them either.
+Menus are read through Accessibility, and some apps update an item's checkmark or enabled state only
+when the menu is about to open on screen, so those two may lag behind the app.
+
+`context` is `null`, or the menu the app has popped up (a context menu after a right click, a pop-up
+button's menu):
+
+| Field | Meaning |
+| --- | --- |
+| `window` | The window it belongs to |
+| `x`, `y` | Its top-left corner in points relative to that window's top-left; show the menu there |
+| `items` | Its items, as above |
+
+While the app has a menu open it waits for an answer: choose an item or close it with `menuAction`
+(below). A press anywhere else in the viewer should close it (and, as on a Mac, go no further).
+Viewers see the same context menu, whoever right-clicked.
 
 ### `control` (reserved: viewer options)
 
@@ -200,7 +238,7 @@ exists is ignored.
 | `{"t":"key","window":1,"code":"Enter","modifiers":["cmd"]}` | Press one named key |
 | `{"t":"setText","window":1,"key":"/Window:/Group:/TextField:Customer","value":"Ada Lovelace"}` | Replace a field's whole value (the server focuses it, selects all, types) |
 | `{"t":"viewport","w":1200,"h":700,"appearance":"dark"}` | Reserved (viewer options): the viewer's usable size in CSS pixels and its `prefers-color-scheme` (`dark`, `light` or `null`) |
-| `{"t":"menuAction","path":["Orders","Mark All Shipped"]}` | Reserved (app menus): choose a menu item by its titles from the menu bar down |
+| `{"t":"menuAction","path":["Orders","Mark All Shipped"],"context":false}` | Choose a menu item by its titles, from the menu bar down; with `"context":true` from the open context menu down (`["Duplicate"]`), and an empty `path` closes the context menu without choosing |
 | `{"t":"requestControl"}` | Reserved (viewer options): ask the host for control in `askToControl` mode |
 
 - `pointer.kind`: `move`, `down`, `up`, `rightdown`, `rightup`, `wheel`. `dx`/`dy` are wheel
@@ -209,6 +247,19 @@ exists is ignored.
 - `key.code`: `Enter`, `Escape`, `Tab`, `Backspace`, `Delete`, `ArrowUp`, `ArrowDown`, `ArrowLeft`,
   `ArrowRight`, `Space` (DOM `KeyboardEvent.key` names, with `Space` for `" "`).
 - `modifiers` (pointer and key): any of `cmd`, `shift`, `alt`, `ctrl`; may be omitted (`[]`).
+- `menuAction.context` may be omitted (`false`). A path that doesn't lead to an item the `menu`
+  message offered, or to a disabled item, is ignored. Titles are matched exactly; with two items of
+  the same title in one menu the first is chosen.
+- A right click is `pointer` `rightdown` then `rightup`; if the app pops up a context menu, a `menu`
+  message with `context` follows (usually within half a second). `act` `showMenu` opens an element's
+  context menu the same way, for viewers without a right button.
+- **Menu shortcuts.** Cmd key combinations sent as `key` events don't reach an app that isn't the
+  frontmost app on the host's Mac, so a viewer sends a shortcut that belongs to a menu item as that
+  item's `menuAction`. The viewer page matches the key event against the `shortcut` of every item:
+  letters and digits by `KeyboardEvent.code` (`KeyS`, `Digit1`) with Shift exactly as listed,
+  named keys by `KeyboardEvent.key` (`↩` is `Enter`), punctuation by `KeyboardEvent.key` (Shift may be
+  what types it). It leaves copy, cut and paste to the browser (the host's clipboard is no use to a
+  viewer), and select all and undo too while one of its fields has focus.
 
 ## Node keys
 
