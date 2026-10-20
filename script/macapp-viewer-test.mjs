@@ -684,7 +684,7 @@ await check("a sheet is a surface of its own over its window: a dialog with its 
   // The comment picker finds the sheet's own button and labels it.
   const c = await nodeCenter(SHEET + "/Group:/Button:Cancel");
   const picked = await evaluate(`(() => { ${collabLabelSource()} const el = document.elementFromPoint(${c.x}, ${c.y}); return el.dataset.key + '|' + labelFor(el); })()`);
-  assert(picked === SHEET + "/Group:/Button:Cancel|Cancel", "picker over the sheet: " + picked);
+  assert(picked === SHEET + "/Group:/Button:Cancel|Button \u201cCancel\u201d", "picker over the sheet: " + picked);
   await shot("13-sheet");
   await received(true);
   await click(c.x, c.y);
@@ -1034,11 +1034,13 @@ const control = (m) => stubSend({ t: "control", mode: "everyone", you: true, req
 
 await check("the viewer reports its room and color scheme on connect, on a scheme change and after a resize (viewport)", async () => {
   await received(true);
+  // Headless Chrome follows the Mac's appearance: start from light whatever the Mac is set to.
+  await cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "light" }] });
   await stubPost("/__stub/close");
   const first = (await waitReceived((m) => m.t === "viewport", "a viewport after connecting", 6000))[0];
   const room = await evaluate(`(() => { const d = document.getElementById('otm-desk'); return { w: Math.floor(d.clientWidth - 48), h: Math.floor(d.clientHeight - 48) }; })()`);
   assert(first.w === room.w && first.h === room.h, "viewport " + JSON.stringify(first) + " for a desk with room " + JSON.stringify(room));
-  assert(first.appearance === "light", "headless Chrome prefers light, got " + first.appearance);
+  assert(first.appearance === "light", "expected the emulated light scheme, got " + first.appearance);
   await received(true);
   await cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] });
   const dark = (await waitReceived((m) => m.t === "viewport" && m.appearance === "dark", "a dark viewport"))[0];
@@ -1057,7 +1059,7 @@ await check("the viewer reports its room and color scheme on connect, on a schem
   assert(simple.h === 0 && simple.appearance === "dark", "Simple view viewport " + JSON.stringify(simple));
   await evaluate(`document.getElementById('otm-view-window').click()`);
   await waitReceived((m) => m.t === "viewport" && m.w > 0, "a window view viewport again");
-  await cdp("Emulation.setEmulatedMedia", { features: [] });
+  await cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "light" }] });
   await cdp("Emulation.clearDeviceMetricsOverride");
   await waitReceived((m) => m.t === "viewport" && m.appearance === "light" && m.w === room.w, "the first room again", 3000);
 });
