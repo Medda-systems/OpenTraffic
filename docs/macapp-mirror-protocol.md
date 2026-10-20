@@ -25,6 +25,11 @@ untouched. The WebSocket refuses (403) pages from other sites: its `Origin` must
 the request's own `Host`, or an origin the session allows, so a proxy that rewrites `Host` must have
 the share's public origin allowed.
 
+The share's proxy marks the WebSocket of the host's own page (opened with Open as Host) with the
+request header `X-OpenTraffic-Host: 1` and removes that header from everyone else's requests. The
+mirror server only listens on loopback, and pages can't set headers on a WebSocket, so only the proxy
+(or another program of the host's) can send it. That viewer controls the app in every control mode.
+
 ## WebSocket rules
 
 - Server to client: JSON **text** messages, plus **binary** messages that carry frame tiles (only
@@ -232,14 +237,27 @@ While the app has a menu open it waits for an answer: choose an item or close it
 (below). A press anywhere else in the viewer should close it (and, as on a Mac, go no further).
 Viewers see the same context menu, whoever right-clicked.
 
-### `control` (reserved: viewer options)
+### `control`
 
 ```json
-{"t":"control","mode":"everyone","you":true}
+{"t":"control","mode":"askToControl","you":false,"requested":true,"holder":"Ada"}
 ```
 
-`mode` is `everyone`, `watchOnly` or `askToControl`; `you` says whether this viewer may control the
-app now. Reserved for the viewer-options work; until it is sent, everyone controls.
+Who may control the app, as the host chose (see [Viewer options](#viewer-options)). Sent after `hello`
+(and `status`) when the mode isn't `everyone`, and again to each viewer whenever what it says for that
+viewer changes. A viewer that never got one controls the app, as with `everyone`.
+
+| Field | Meaning |
+| --- | --- |
+| `mode` | `everyone` (every viewer controls the app), `watchOnly` (viewers see it, their input is dropped), `askToControl` (only the viewer the host allowed) |
+| `you` | Whether this viewer's input reaches the app now |
+| `requested` | Whether this viewer asked for control (`requestControl`) and the host hasn't answered yet; `false` again after a no |
+| `holder` | `askToControl`: the name of the viewer who has control (`"A viewer"` when it gave none), `null` when nobody has it; `null` in the other modes |
+
+A viewer without control sends no input (`act`, `pointer`, `text`, `key`, `setText`, `menuAction`,
+`windowAction`); the server drops any it gets anyway. It should not show the effect of input either
+(no optimistic presses, read-only fields, no menus or close buttons), and it says why: watching only,
+or a Request Control button in `askToControl`.
 
 ## Client to server
 
@@ -254,10 +272,11 @@ exists is ignored.
 | `{"t":"text","window":1,"text":"Ada"}` | Type Unicode text at the app's current focus |
 | `{"t":"key","window":1,"code":"Enter","modifiers":["cmd"]}` | Press one named key |
 | `{"t":"setText","window":1,"key":"/Window:/Group:/TextField:Customer","value":"Ada Lovelace"}` | Replace a field's whole value (the server focuses it, selects all, types) |
-| `{"t":"viewport","w":1200,"h":700,"appearance":"dark"}` | Reserved (viewer options): the viewer's usable size in CSS pixels and its `prefers-color-scheme` (`dark`, `light` or `null`) |
+| `{"t":"viewport","w":1200,"h":700,"appearance":"dark"}` | The room the viewer has for the main window, in CSS pixels (the area under its bar less margins), and its `prefers-color-scheme` (`dark`, `light` or `null`). Sent once after every `hello` and when either changes (a resized browser after a short pause). `0` by `0`: no size wish (the Simple view), only the color scheme counts |
 | `{"t":"menuAction","path":["Orders","Mark All Shipped"],"context":false}` | Choose a menu item by its titles, from the menu bar down; with `"context":true` from the open context menu down (`["Duplicate"]`), and an empty `path` closes the context menu without choosing |
 | `{"t":"windowAction","window":2,"action":"focus"}` | `focus`: bring a window to the front as the app's key window, so typing goes there (a viewer sends it when it shows a window's tab, or before a press in a window that isn't the focused one); `close`: close it like its close button (a popover is dismissed, a menu closed). The main window is never closed |
-| `{"t":"requestControl"}` | Reserved (viewer options): ask the host for control in `askToControl` mode |
+| `{"t":"requestControl","name":"Ada","client":"q9X…"}` | Ask the host for control (`askToControl`). `name` (or `null`) is how the host's notice names the viewer; `client` (or `null`) is an opaque id the page keeps (the collaboration overlay's own, 8 to 128 letters, digits, `-`, `_`): a page that had control and reconnects sends `requestControl` again with it and gets control back at once |
+| `{"t":"releaseControl"}` | Give control back, or take back a request still waiting |
 
 - `pointer.kind`: `move`, `down`, `up`, `rightdown`, `rightup`, `wheel`. `dx`/`dy` are wheel
   deltas in points (positive `dy` scrolls content down, as in DOM `WheelEvent.deltaY`) and `0` for the
@@ -278,6 +297,47 @@ exists is ignored.
   named keys by `KeyboardEvent.key` (`↩` is `Enter`), punctuation by `KeyboardEvent.key` (Shift may be
   what types it). It leaves copy, cut and paste to the browser (the host's clipboard is no use to a
   viewer), and select all and undo too while one of its fields has focus.
+
+## Viewer options
+
+The host decides three things on the share's card; the server and the session apply them.
+
+**Control** (`control` above). `everyone` is the default. In `watchOnly` every viewer only watches. In
+`askToControl` a viewer sends `requestControl`; the host sees who asks (a notice on the card with
+Allow, and a notification) and may allow one viewer at a time. Control stays with that viewer until
+the host takes it back, the viewer sends `releaseControl`, or the host changes the mode (which also
+drops waiting requests). A viewer with control that disconnects keeps it while away when its
+`requestControl` carried a `client` id, and gets it back when it returns; without one it loses it.
+Input is checked as it arrives, so messages already queued when control moves still apply. The
+host's own page always controls the app (see Origin and HTTP).
+
+**Window size.** `fitViewer` (the default): the server sizes the app's **main** window through
+Accessibility (AXSize) to the leading viewer's `viewport`, in whole points (CSS pixels are points at
+scale 1), at least 200×150, at most what fits the off-screen display (1840×1100 on its 1920×1200
+points). An app's own minimum wins: the first resize it refuses shows its minimum, and later ones
+don't ask for less. A size that would make the window reach one of the host's screens (a window the
+app placed elsewhere on the display) isn't asked for. Second windows, sheets, alerts and popovers keep
+their size. A resize waits for
+150 ms of quiet, and the new size reaches viewers as a `windows` message and a full `frame`. `app`:
+the window keeps (or gets back) the size it had before any viewport changed it, and viewers scale it
+down to fit.
+
+**Appearance.** `viewer` (the default): the app shows in the first viewer's color scheme; `mac`: this
+Mac's; `light` or `dark`. An app reads its appearance when it starts, so the session launches the copy
+with it and restarts it (same data, same address, a `restarting` status, then a new `hello` whose
+`appearance` says it) when the wanted appearance changes: once when the first viewer's scheme differs,
+and when the host picks another. Light works whatever the Mac uses (the launch argument
+`-NSRequiresAquaSystemAppearance YES`); dark only while this Mac uses Dark: AppKit takes the dark
+appearance from the account's global preferences, which no launch argument or per-app preference
+overrides (`-AppleInterfaceStyle Dark` changes what the app's defaults read, not how it looks), and the
+copy shares the account's preferences daemon. A wish for dark on a light Mac leaves the app light, and
+the card says why.
+
+**Several viewers.** The first viewer wins: the main window follows the `viewport` of the viewer
+that connected first (of those connected and with a size wish), or of the viewer the host gave
+control in `askToControl`; when it leaves, the next one leads. The appearance follows the first
+viewer that sent a color scheme in the session, and doesn't change when other viewers come or go.
+Everyone else sees the same window, scaled down to fit their page (never up).
 
 ## Node keys
 

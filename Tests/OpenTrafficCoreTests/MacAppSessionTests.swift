@@ -47,7 +47,8 @@ struct MacAppSessionPieceTests {
         #expect(!MacAppSession.isRecorded(.pointer(.init(window: window, kind: .move, x: 1, y: 2))))
         #expect(MacAppSession.isRecorded(.menuAction(.init(path: ["Orders", "Mark All as Shipped"]))))
         #expect(!MacAppSession.isRecorded(.viewport(.init(w: 800, h: 600, appearance: nil))))
-        #expect(!MacAppSession.isRecorded(.requestControl))
+        #expect(!MacAppSession.isRecorded(.requestControl(.init(name: "Ada"))))
+        #expect(!MacAppSession.isRecorded(.releaseControl))
     }
 
     @Test func theRingKeepsTheLastItems() {

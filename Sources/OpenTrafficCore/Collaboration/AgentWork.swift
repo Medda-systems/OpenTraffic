@@ -374,7 +374,7 @@ public struct MacAppAgentContext: Equatable, Sendable {
             return menu.context ? "chose “\(path)” in the context menu" : "chose the menu item \(path)"
         case .windowAction(let action):
             return action.action == .close ? "closed window \(action.window)" : "brought window \(action.window) to the front"
-        case .viewport, .requestControl:
+        case .viewport, .requestControl, .releaseControl:
             return nil
         }
     }

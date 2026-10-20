@@ -99,17 +99,22 @@ public final class MacAppSession {
         /// Something worth showing on the share's card: dropped entitlements, another OpenTraffic's
         /// virtual display, an action the app refused. Also in the log.
         case warning(String)
-        /// Every message a viewer sent, as it arrived (viewport, menuAction and requestControl are
-        /// only reported here; the rest are also applied by the server and recorded).
+        /// Every message the server took from a viewer, as it arrived: input it applies (and the session
+        /// records), and viewport and control requests. Input from viewers without control isn't here.
         case message(viewer: Int, MirrorProtocol.ClientMessage, at: Date)
+        /// Who may control the app now: the mode, who has control, who asks for it.
+        case control(MirrorServer.ControlState)
+        /// The appearance the running copy shows (it changes with a relaunch).
+        case appearance(MirrorProtocol.Appearance)
     }
 
     public struct Options: Sendable {
         public var app: MacApp
         public var data: DataSource
         public var assets: MirrorServer.Assets
-        /// The appearance viewers get in `hello`; nil means this Mac's.
-        public var appearance: MirrorProtocol.Appearance?
+        /// The host's choices: who may control the app, its appearance and its window size
+        /// (`setViewerOptions` changes them while it runs).
+        public var viewerOptions: MacAppViewerOptions
         /// Where the copy, its home folder and its logs live; deleted by `stop`.
         public var sessionDirectory: URL
         /// How long the app may take to open its first window.
@@ -119,13 +124,13 @@ public final class MacAppSession {
         /// The home folder the app's real data is read from for `.copy`.
         public var realHomeDirectory: String
 
-        public init(app: MacApp, data: DataSource, assets: MirrorServer.Assets, appearance: MirrorProtocol.Appearance? = nil,
+        public init(app: MacApp, data: DataSource, assets: MirrorServer.Assets, viewerOptions: MacAppViewerOptions = .init(),
                     sessionDirectory: URL? = nil, windowTimeout: Duration = .seconds(20), restartsAutomatically: Bool = true,
                     realHomeDirectory: String = ElectronSandbox.realHomeDirectory) {
             self.app = app
             self.data = data
             self.assets = assets
-            self.appearance = appearance
+            self.viewerOptions = viewerOptions
             self.sessionDirectory = sessionDirectory ?? MacAppSession.sessionsDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
             self.windowTimeout = windowTimeout
             self.restartsAutomatically = restartsAutomatically
@@ -149,6 +154,12 @@ public final class MacAppSession {
     nonisolated public static let stableRun: Duration = .seconds(60)
 
     public let options: Options
+    /// The host's choices in force (`options.viewerOptions` at first).
+    public private(set) var viewerOptions: MacAppViewerOptions
+    /// The appearance the copy runs with now.
+    public private(set) var appearance: MirrorProtocol.Appearance = MirrorServer.hostAppearance()
+    /// The first viewer's color scheme, once one said; the app keeps it for the session.
+    public private(set) var viewerAppearance: MirrorProtocol.Appearance?
     /// The copy's bundle identifier: `<id>.opentraffic`.
     public let bundleIdentifier: String
     /// The app's log, line by line, as it comes (one consumer). `recentLog` keeps the last lines.
@@ -207,10 +218,13 @@ public final class MacAppSession {
     private var originalIsSandboxed = false
     private var lastAutomaticRestart: ContinuousClock.Instant?
     private var serverEvents: Task<Void, Never>?
+    /// Whether the card was told that dark needs this Mac in Dark.
+    private var warnedAboutDark = false
     private var queueTail: Task<Void, Never>?
 
     public init(options: Options, hider: MacAppWindowHider = MacAppWindowHider()) {
         self.options = options
+        self.viewerOptions = options.viewerOptions
         self.hider = hider
         bundleIdentifier = Self.copyIdentifier(for: options.app)
         (log, logSink) = AsyncStream.makeStream(of: LogLine.self, bufferingPolicy: .bufferingNewest(Self.logLimit))
@@ -278,14 +292,16 @@ public final class MacAppSession {
             try await prepareBundle()
             try await prepareData()
             let mirrored = try await launchApp(automatic: false)
-            let server = MirrorServer(configuration: .init(app: mirrored, assets: options.assets,
-                                                           appearance: options.appearance ?? MirrorServer.hostAppearance()))
+            let server = MirrorServer(configuration: .init(app: mirrored, assets: options.assets, appearance: appearance,
+                                                           options: viewerOptions, isOnScreen: { OffscreenDisplay.isVisible($0) }))
             self.server = server
             watch(server)
             let port = try await server.start()
             self.port = port
             note("Serving \(name) on 127.0.0.1:\(port).")
             setState(.running)
+            // A viewer may have said its color scheme while the start finished.
+            followAppearance()
             return port
         } catch {
             let failure = Self.failure(error, name: name)
@@ -297,15 +313,15 @@ public final class MacAppSession {
         }
     }
 
-    private func relaunch(resetting: Bool, automatic: Bool) async throws {
+    private func relaunch(resetting: Bool, automatic: Bool, because reason: String? = nil) async throws {
         guard let server else { throw MacAppSessionError.stopped }
         switch state {
         case .running, .crashed, .failed: break
         default: throw MacAppSessionError.stopped
         }
         setState(.restarting)
-        server.setStatus(.init(state: .restarting, message: resetting ? "\(name) is starting again with fresh data." : "\(name) is restarting."))
-        note(resetting ? "Resetting \(name)'s data and starting it again." : automatic ? "Starting \(name) again after it quit." : "Restarting \(name).")
+        server.setStatus(.init(state: .restarting, message: reason ?? (resetting ? "\(name) is starting again with fresh data." : "\(name) is restarting.")))
+        note(reason ?? (resetting ? "Resetting \(name)'s data and starting it again." : automatic ? "Starting \(name) again after it quit." : "Restarting \(name)."))
         await quitApp()
         do {
             if resetting {
@@ -315,6 +331,7 @@ public final class MacAppSession {
             try await prepareBundle()
             try await prepareData()
             let mirrored = try await launchApp(automatic: automatic)
+            server.setAppearance(appearance)
             try await server.replace(app: mirrored)
             if !automatic { lastAutomaticRestart = nil }
             setState(.running)
@@ -377,10 +394,15 @@ public final class MacAppSession {
             // os_log and Logger messages on standard error too, as Xcode's console shows them.
             "OS_ACTIVITY_DT_MODE": "1",
         ]
+        let appearance = wantedAppearance()
+        if appearance != requestedAppearance(), !warnedAboutDark {
+            warnedAboutDark = true
+            warn("\(name) can only look dark while this Mac uses the Dark appearance, so it shows light.")
+        }
         let running: NSRunningApplication
         do {
             running = try await hider.launch(bundle: appCopy, environment: environment,
-                                             arguments: ["-ApplePersistenceIgnoreState", "YES"],
+                                             arguments: ["-ApplePersistenceIgnoreState", "YES"] + Self.appearanceArguments(appearance),
                                              windowTimeout: options.windowTimeout, output: logFile)
         } catch {
             tail.finish()
@@ -400,7 +422,11 @@ public final class MacAppSession {
         guard !hider.windows(pid: pid).isEmpty else {
             throw MacAppSessionError.failed("\(name) didn't open a window within \(options.windowTimeout.components.seconds) seconds.\(lastAppLines())")
         }
-        note("Launched \(name) (pid \(pid)).")
+        note("Launched \(name) (pid \(pid)) in the \(appearance.rawValue) appearance.")
+        if appearance != self.appearance {
+            self.appearance = appearance
+            eventSink.yield(.appearance(appearance))
+        }
         return try MirrorServer.App.live(pid: pid, name: name, boot: boot)
     }
 
@@ -478,8 +504,73 @@ public final class MacAppSession {
                     self.eventSink.yield(.message(viewer: viewer, message, at: date))
                 case .failed(let reason):
                     self.warn(reason)
+                case .control(let control):
+                    self.eventSink.yield(.control(control))
+                case .viewerAppearance(let appearance):
+                    // The first viewer's color scheme decides; later viewers see the same app.
+                    guard self.viewerAppearance == nil else { break }
+                    self.viewerAppearance = appearance
+                    self.followAppearance()
                 }
             }
+        }
+    }
+
+    // MARK: Viewer options
+
+    /// Applies the host's new choices: control and window size at once (through the server), the
+    /// appearance with a relaunch of the app (same data, same address) when it changes what shows.
+    public func setViewerOptions(_ options: MacAppViewerOptions) {
+        guard options != viewerOptions else { return }
+        viewerOptions = options
+        server?.setViewerOptions(options)
+        followAppearance()
+    }
+
+    /// The appearance the host or the first viewer asked for (this Mac's when nobody did).
+    func requestedAppearance() -> MirrorProtocol.Appearance {
+        switch viewerOptions.appearance {
+        case .light: .light
+        case .dark: .dark
+        case .mac: MirrorServer.hostAppearance()
+        case .viewer: viewerAppearance ?? MirrorServer.hostAppearance()
+        }
+    }
+
+    /// The appearance the copy can have: the requested one, except that dark needs this Mac in Dark.
+    func wantedAppearance() -> MirrorProtocol.Appearance {
+        Self.achievableAppearance(requestedAppearance(), host: MirrorServer.hostAppearance())
+    }
+
+    /// An app can be made light whatever the Mac uses (`NSRequiresAquaSystemAppearance`), but no
+    /// launch argument or per-app preference makes it dark: AppKit takes the dark appearance from the
+    /// account's global preferences only (cfprefsd doesn't follow the copy's own home). So dark is
+    /// only possible while this Mac is in Dark.
+    nonisolated static func achievableAppearance(_ requested: MirrorProtocol.Appearance, host: MirrorProtocol.Appearance) -> MirrorProtocol.Appearance {
+        requested == .dark && host == .light ? .light : requested
+    }
+
+    /// Relaunches the copy when it shows another appearance than it should (an app's appearance is
+    /// read at launch). Queued behind other lifecycle work, and checked again when its turn comes.
+    private func followAppearance() {
+        guard state == .running, wantedAppearance() != appearance else { return }
+        Task { @MainActor [weak self] in
+            try? await self?.serially {
+                guard let self, self.state == .running else { return }
+                let wanted = self.wantedAppearance()
+                guard wanted != self.appearance else { return }
+                try await self.relaunch(resetting: false, automatic: false, because: "Switching \(self.name) to the \(wanted.rawValue) appearance.")
+            }
+        }
+    }
+
+    /// Launch arguments for this appearance (the app's argument domain comes before its own
+    /// preferences): light always is (`NSRequiresAquaSystemAppearance` YES keeps it in Aqua), dark
+    /// follows a Mac in Dark (NO undoes an app's own opt-out).
+    nonisolated static func appearanceArguments(_ appearance: MirrorProtocol.Appearance) -> [String] {
+        switch appearance {
+        case .light: ["-NSRequiresAquaSystemAppearance", "YES"]
+        case .dark: ["-NSRequiresAquaSystemAppearance", "NO"]
         }
     }
 
@@ -490,7 +581,7 @@ public final class MacAppSession {
         switch message {
         case .act, .text, .key, .setText, .menuAction, .windowAction: true
         case .pointer(let pointer): pointer.kind != .move
-        case .viewport, .requestControl: false
+        case .viewport, .requestControl, .releaseControl: false
         }
     }
 

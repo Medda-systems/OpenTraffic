@@ -22,6 +22,9 @@ public enum MirrorProtocol {
     public static let snapshotPath = "/__opentraffic/macapp/snapshot.png"
     /// The WebSocket: server messages (JSON text + binary tiles) out, client messages (JSON text) in.
     public static let webSocketPath = "/__opentraffic/macapp/ws"
+    /// Sent by the share's proxy (CollabProxy) with the WebSocket upgrade of the host's own page, and
+    /// removed from everyone else's: that viewer controls the app in every control mode.
+    public static let hostHeader = "X-OpenTraffic-Host"
 
     public static func snapshotPath(window: WindowID) -> String { "\(snapshotPath)?window=\(window)" }
 
@@ -83,7 +86,8 @@ public enum MirrorProtocol {
 
     public enum Modifier: String, Codable, Sendable, CaseIterable { case cmd, shift, alt, ctrl }
 
-    /// Reserved for the viewer-options Task: who may control the app.
+    /// Who may control the app (the host's choice): every viewer, nobody (`watchOnly`: viewers see it,
+    /// their input is dropped), or the one viewer the host allowed after a `requestControl`.
     public enum ControlMode: String, Codable, Sendable, CaseIterable { case everyone, watchOnly, askToControl }
 
     // MARK: Server to client payloads
@@ -348,12 +352,33 @@ public enum MirrorProtocol {
         }
     }
 
-    /// Reserved for the viewer-options Task: `{"t":"control","mode":"everyone","you":true}`, the control
-    /// mode and whether this viewer may control the app right now.
+    /// `{"t":"control","mode":"askToControl","you":false,"requested":true,"holder":"Ada"}`: the control
+    /// mode, whether this viewer may control the app right now, whether its `requestControl` waits for
+    /// the host, and (`askToControl`) the name of the viewer who has control, `null` when nobody does.
     public struct Control: Codable, Equatable, Sendable {
         public var mode: ControlMode
         public var you: Bool
-        public init(mode: ControlMode, you: Bool) { self.mode = mode; self.you = you }
+        public var requested: Bool
+        public var holder: String?
+        public init(mode: ControlMode, you: Bool, requested: Bool = false, holder: String? = nil) {
+            self.mode = mode; self.you = you; self.requested = requested; self.holder = holder
+        }
+
+        private enum CodingKeys: String, CodingKey { case mode, you, requested, holder }
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            mode = try c.decode(ControlMode.self, forKey: .mode)
+            you = try c.decode(Bool.self, forKey: .you)
+            requested = try c.decodeIfPresent(Bool.self, forKey: .requested) ?? false
+            holder = try c.decodeIfPresent(String.self, forKey: .holder)
+        }
+        public func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(mode, forKey: .mode)
+            try c.encode(you, forKey: .you)
+            try c.encode(requested, forKey: .requested)
+            try c.encode(holder, forKey: .holder)
+        }
     }
 
     // MARK: Client to server payloads
@@ -426,8 +451,9 @@ public enum MirrorProtocol {
         public init(window: WindowID, key: String, value: String) { self.window = window; self.key = key; self.value = value }
     }
 
-    /// Reserved for the viewer-options Task: the viewer's usable size in CSS pixels and its
-    /// `prefers-color-scheme` (null when unknown).
+    /// `{"t":"viewport","w":1200,"h":700,"appearance":"dark"}`: the room the viewer has for the main
+    /// window in CSS pixels (`0` by `0`: no size wish, as from the Simple view) and its
+    /// `prefers-color-scheme` (null when unknown). Sent on connect and when it changes.
     public struct Viewport: Codable, Equatable, Sendable {
         public var w: Double
         public var h: Double
@@ -465,6 +491,27 @@ public enum MirrorProtocol {
         }
     }
 
+    /// `{"t":"requestControl","name":"Ada","client":"c-…"}`: ask the host for control (`askToControl`).
+    /// `name` is how the host's notice names the viewer; `client` is an opaque id the viewer keeps (the
+    /// collaboration overlay's), so a viewer that reconnects gets back the control it was given.
+    public struct RequestControl: Codable, Equatable, Sendable {
+        public var name: String?
+        public var client: String?
+        public init(name: String? = nil, client: String? = nil) { self.name = name; self.client = client }
+
+        private enum CodingKeys: String, CodingKey { case name, client }
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            name = try? c.decodeIfPresent(String.self, forKey: .name)
+            client = try? c.decodeIfPresent(String.self, forKey: .client)
+        }
+        public func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(name, forKey: .name)
+            try c.encode(client, forKey: .client)
+        }
+    }
+
     /// `{"t":"windowAction","window":2,"action":"close"}`: focus or close a window from the viewer
     /// (a second window's tab, its close button in a tab strip). The main window is never closed.
     public struct WindowAction: Codable, Equatable, Sendable {
@@ -484,7 +531,7 @@ public enum MirrorProtocol {
         case status(Status)
         /// The menu bar and the open context menu.
         case menu(Menu)
-        /// Reserved: the viewer-options Task.
+        /// Who may control the app, and whether this viewer may now.
         case control(Control)
 
         public var type: String {
@@ -543,14 +590,16 @@ public enum MirrorProtocol {
         case text(Text)
         case key(Key)
         case setText(SetText)
-        /// Reserved: the viewer-options Task.
+        /// The viewer's room for the main window and its color scheme.
         case viewport(Viewport)
         /// Choose a menu item (menu bar or context menu), or close the context menu.
         case menuAction(MenuAction)
         /// Focus or close a window.
         case windowAction(WindowAction)
-        /// Reserved: the viewer-options Task (`Ask to control`): `{"t":"requestControl"}`.
-        case requestControl
+        /// Ask the host for control (`askToControl`).
+        case requestControl(RequestControl)
+        /// Give control back, or take back a request: `{"t":"releaseControl"}`.
+        case releaseControl
 
         public var type: String {
             switch self {
@@ -563,6 +612,7 @@ public enum MirrorProtocol {
             case .menuAction: "menuAction"
             case .windowAction: "windowAction"
             case .requestControl: "requestControl"
+            case .releaseControl: "releaseControl"
             }
         }
 
@@ -575,7 +625,7 @@ public enum MirrorProtocol {
             case .key(let m): m.window
             case .setText(let m): m.window
             case .windowAction(let m): m.window
-            case .viewport, .menuAction, .requestControl: nil
+            case .viewport, .menuAction, .requestControl, .releaseControl: nil
             }
         }
 
@@ -590,7 +640,8 @@ public enum MirrorProtocol {
             case "viewport": self = .viewport(try Viewport(from: decoder))
             case "menuAction": self = .menuAction(try MenuAction(from: decoder))
             case "windowAction": self = .windowAction(try WindowAction(from: decoder))
-            case "requestControl": self = .requestControl
+            case "requestControl": self = .requestControl(try RequestControl(from: decoder))
+            case "releaseControl": self = .releaseControl
             default: throw MirrorProtocolError.unknownMessage(type)
             }
         }
@@ -607,7 +658,8 @@ public enum MirrorProtocol {
             case .viewport(let payload): try payload.encode(to: encoder)
             case .menuAction(let payload): try payload.encode(to: encoder)
             case .windowAction(let payload): try payload.encode(to: encoder)
-            case .requestControl: break
+            case .requestControl(let payload): try payload.encode(to: encoder)
+            case .releaseControl: break
             }
         }
 

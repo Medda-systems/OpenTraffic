@@ -50,3 +50,28 @@ import Testing
     let tolerated = try JSONDecoder().decode(TunnelDefinition.self, from: Data(odd.utf8))
     #expect(tolerated.macApp == nil && tolerated.macAppData == nil)
 }
+
+@Test func aMacAppShareKeepsItsViewerOptions() throws {
+    let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appending(path: "tunnels.json")
+    let persistence = TunnelPersistence(fileURL: file)
+    let options = MacAppViewerOptions(control: .askToControl, appearance: .dark, windowSize: .app)
+    let definition = TunnelDefinition(name: "Orbit", kind: .quick, localURL: "http://127.0.0.1/", collaboration: true,
+                                      macApp: "/Users/me/code/orbit/dist/Orbit.app", macAppData: .copy, macAppOptions: options)
+    try persistence.save([definition])
+    let loaded = try persistence.load()
+    #expect(loaded == [definition])
+    #expect(loaded.first?.macAppOptions == options)
+    let json = try String(contentsOf: file, encoding: .utf8)
+    #expect(json.contains(#""macAppOptions""#) && json.contains(#""askToControl""#) && json.contains(#""windowSize""#))
+
+    // Shares saved without options get the defaults; values this version doesn't know fall back to
+    // the default of that option only.
+    let older = #"{"id":"\#(UUID().uuidString)","name":"Orbit","kind":"quick","localURL":"http://127.0.0.1/","macApp":"/A.app"}"#
+    #expect(try JSONDecoder().decode(TunnelDefinition.self, from: Data(older.utf8)).macAppOptions == nil)
+    #expect(MacAppViewerOptions() == MacAppViewerOptions(control: .everyone, appearance: .viewer, windowSize: .fitViewer))
+    let newer = #"{"id":"\#(UUID().uuidString)","name":"Orbit","kind":"quick","localURL":"http://127.0.0.1/","macApp":"/A.app","macAppOptions":{"control":"watchOnly","appearance":"sepia","windowSize":"huge","later":1}}"#
+    let tolerated = try JSONDecoder().decode(TunnelDefinition.self, from: Data(newer.utf8))
+    #expect(tolerated.macAppOptions == MacAppViewerOptions(control: .watchOnly, appearance: .viewer, windowSize: .fitViewer))
+}

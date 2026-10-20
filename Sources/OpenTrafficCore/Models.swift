@@ -184,6 +184,9 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
     public var macApp: String?
     /// Where that copy's data starts from.
     public var macAppData: MacAppSession.DataSource?
+    /// The host's viewer options for that app: who may control it, its appearance and window size
+    /// (nil: the defaults, everyone controls, the first viewer's appearance, fit to the viewer).
+    public var macAppOptions: MacAppViewerOptions?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -215,6 +218,7 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         case electronData
         case macApp
         case macAppData
+        case macAppOptions
     }
 
     public init(
@@ -246,7 +250,8 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         electronApp: String? = nil,
         electronData: ElectronHostSession.DataSource? = nil,
         macApp: String? = nil,
-        macAppData: MacAppSession.DataSource? = nil
+        macAppData: MacAppSession.DataSource? = nil,
+        macAppOptions: MacAppViewerOptions? = nil
     ) {
         self.id = id
         self.name = name
@@ -277,6 +282,7 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         self.electronData = electronData
         self.macApp = macApp?.nilIfBlank
         self.macAppData = macAppData
+        self.macAppOptions = macAppOptions
     }
 
     public init(from decoder: Decoder) throws {
@@ -310,6 +316,7 @@ public struct TunnelDefinition: Codable, Identifiable, Hashable, Sendable {
         electronData = try? container.decodeIfPresent(ElectronHostSession.DataSource.self, forKey: .electronData)
         macApp = try container.decodeIfPresent(String.self, forKey: .macApp)?.nilIfBlank
         macAppData = try? container.decodeIfPresent(MacAppSession.DataSource.self, forKey: .macAppData)
+        macAppOptions = try? container.decodeIfPresent(MacAppViewerOptions.self, forKey: .macAppOptions)
     }
 
     /// What the person with this browser may do.

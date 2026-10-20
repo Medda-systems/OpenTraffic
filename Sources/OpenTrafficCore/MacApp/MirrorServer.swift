@@ -20,11 +20,56 @@ public protocol MirrorAccessibility: AnyObject, Sendable {
     func raise(window: UInt32) async throws
     /// Closes a window like its close button, or cancels a popover (`windowAction` `close`).
     func close(window: UInt32) async throws
+    /// Sets a window's size (AXSize) and returns the size it took (the app may keep a minimum or a
+    /// maximum), or nil when the bridge can't resize windows.
+    func resize(window: UInt32, to size: CGSize) async throws -> CGSize?
 }
 
 extension MirrorAccessibility {
     public func raise(window: UInt32) async throws {}
     public func close(window: UInt32) async throws {}
+    public func resize(window: UInt32, to size: CGSize) async throws -> CGSize? { nil }
+}
+
+// MARK: - The host's viewer options
+
+/// What the host decided about the viewers of a shared Mac app (the live card's options, saved with
+/// the share): who may control it, its appearance and its window size.
+public struct MacAppViewerOptions: Codable, Hashable, Sendable {
+    /// The app's light or dark appearance.
+    public enum Appearance: String, Codable, Sendable, CaseIterable {
+        /// The first viewer's `prefers-color-scheme` (the app restarts once if it differs from this Mac's).
+        case viewer
+        /// This Mac's appearance.
+        case mac
+        case light
+        case dark
+    }
+
+    /// The main window's size.
+    public enum WindowSize: String, Codable, Sendable, CaseIterable {
+        /// Resized to fill the leading viewer's browser (within the app's minimum and the off-screen display).
+        case fitViewer
+        /// The size the app gives it; viewers scale it down to fit.
+        case app
+    }
+
+    public var control: MirrorProtocol.ControlMode
+    public var appearance: Appearance
+    public var windowSize: WindowSize
+
+    public init(control: MirrorProtocol.ControlMode = .everyone, appearance: Appearance = .viewer, windowSize: WindowSize = .fitViewer) {
+        self.control = control; self.appearance = appearance; self.windowSize = windowSize
+    }
+
+    private enum CodingKeys: String, CodingKey { case control, appearance, windowSize }
+    /// Unknown or missing values fall back to the defaults, so a newer file still loads.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        control = (try? c.decodeIfPresent(MirrorProtocol.ControlMode.self, forKey: .control)) ?? .everyone
+        appearance = (try? c.decodeIfPresent(Appearance.self, forKey: .appearance)) ?? .viewer
+        windowSize = (try? c.decodeIfPresent(WindowSize.self, forKey: .windowSize)) ?? .fitViewer
+    }
 }
 
 /// One window's pixels (`WindowCapture` in the product). `frames` has a single reader: the server.
@@ -151,10 +196,52 @@ public final class MirrorServer: @unchecked Sendable {
         /// Origins (`https://name.example`) besides loopback and the request's own host whose pages may
         /// open the WebSocket; see `acceptsOrigin` and `setAllowedOrigins`.
         public var allowedOrigins: Set<String>
+        /// Who may control the app and how its window is sized (`setViewerOptions` changes them later).
+        public var options: MacAppViewerOptions
+        /// The largest size a viewer's viewport may give the main window: what fits on the off-screen
+        /// display where the hider puts it.
+        public var maximumWindowSize: CGSize
+        /// Whether a global frame would show on a screen people look at: a resize that would put the
+        /// main window there isn't made (the session passes `OffscreenDisplay.isVisible`).
+        public var isOnScreen: @Sendable (CGRect) -> Bool
 
         public init(app: App, assets: Assets, appearance: MirrorProtocol.Appearance = MirrorServer.hostAppearance(),
-                    scale: Double? = nil, allowedOrigins: Set<String> = []) {
+                    scale: Double? = nil, allowedOrigins: Set<String> = [], options: MacAppViewerOptions = .init(),
+                    maximumWindowSize: CGSize = MirrorServer.defaultMaximumWindowSize,
+                    isOnScreen: @escaping @Sendable (CGRect) -> Bool = { _ in false }) {
             self.app = app; self.assets = assets; self.appearance = appearance; self.scale = scale; self.allowedOrigins = allowedOrigins
+            self.options = options; self.maximumWindowSize = maximumWindowSize; self.isOnScreen = isOnScreen
+        }
+    }
+
+    /// The off-screen display less the hider's margin (windows sit 40 pt in and 60 pt down, cascading).
+    public static let defaultMaximumWindowSize = CGSize(width: OffscreenDisplay.pointSize.width - 80,
+                                                         height: OffscreenDisplay.pointSize.height - 100)
+    /// The smallest main window a viewport asks for (an app's own minimum may be larger).
+    public static let minimumViewportSize = CGSize(width: 200, height: 150)
+
+    /// Who may control the app now, for the host's card.
+    public struct ControlState: Equatable, Sendable {
+        /// A viewer asking for control (`askToControl`), with the name its page gave.
+        public struct Request: Equatable, Sendable, Identifiable {
+            public var viewer: Int
+            public var name: String?
+            public var id: Int { viewer }
+        }
+        /// The viewer the host gave control; `connected` is false while its page is away (it gets
+        /// control back when it reconnects, until the host takes it back).
+        public struct Holder: Equatable, Sendable {
+            public var viewer: Int?
+            public var name: String?
+            public var connected: Bool
+        }
+        public var mode: MirrorProtocol.ControlMode
+        public var holder: Holder?
+        /// Oldest first.
+        public var requests: [Request]
+
+        public init(mode: MirrorProtocol.ControlMode, holder: Holder? = nil, requests: [Request] = []) {
+            self.mode = mode; self.holder = holder; self.requests = requests
         }
     }
 
@@ -166,6 +253,11 @@ public final class MirrorServer: @unchecked Sendable {
         case message(viewer: Int, MirrorProtocol.ClientMessage, at: Date)
         /// Something the server tried failed: an action the app refused, a capture that didn't start.
         case failed(String)
+        /// Who may control the app changed: the mode, a viewer asked, the host allowed or took back.
+        case control(ControlState)
+        /// The leading viewer's color scheme, when it becomes known or changes (the session decides
+        /// whether the app's appearance follows).
+        case viewerAppearance(MirrorProtocol.Appearance)
     }
 
     /// Menu reads start at most this often (the bar is read whole, so less often than trees)...
@@ -198,6 +290,8 @@ public final class MirrorServer: @unchecked Sendable {
     static let maximumClientMessageBytes = 1 << 20
     /// Waiting for setText's field to take the focus.
     static let setTextTimeout: Duration = .seconds(1)
+    /// A resize waits this long for more viewport changes (a browser window being dragged larger).
+    static let resizeSettle: Duration = .milliseconds(150)
 
     /// One thread serves every mirror server; frames are encoded on the capture queues.
     private static let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
@@ -243,10 +337,28 @@ public final class MirrorServer: @unchecked Sendable {
     private var status = MirrorProtocol.Status(state: .running)
     /// The latest `menu` message, encoded once (nil until the menus were read, or without menus).
     private var menuText: String?
+    /// The host's options (control mode, window size).
+    private var options: MacAppViewerOptions
+    /// The app's appearance, for `hello`.
+    private var appearance: MirrorProtocol.Appearance
+    /// `askToControl`: who the host gave control.
+    private var grant: Grant?
+    private var requestCount = 0
+    /// The leading viewer's color scheme last reported.
+    private var reportedAppearance: MirrorProtocol.Appearance?
+
+    /// Control given to a viewer: its connection, and the id its page keeps across reconnects.
+    private struct Grant {
+        var viewer: Int?
+        var client: String?
+        var name: String?
+    }
 
     public init(configuration: Configuration) {
         self.configuration = configuration
         app = configuration.app
+        options = configuration.options
+        appearance = configuration.appearance
         shared.withLock { $0.allowedOrigins = configuration.allowedOrigins }
         loop = Self.group.next()
         (events, eventSink) = AsyncStream.makeStream(of: Event.self, bufferingPolicy: .bufferingNewest(1024))
@@ -347,6 +459,70 @@ public final class MirrorServer: @unchecked Sendable {
 
     var allowedOrigins: Set<String> { shared.withLock { $0.allowedOrigins } }
 
+    // MARK: Viewer options and control
+
+    /// Applies the host's options: a new control mode takes control from whoever had it and drops
+    /// waiting requests (every viewer is told); a new window size resizes the main window (`app`
+    /// gives it back the size it had). The appearance is the session's (it needs a relaunch).
+    public func setViewerOptions(_ options: MacAppViewerOptions) {
+        loop.execute {
+            let old = self.options
+            self.options = options
+            if old.control != options.control {
+                self.grant = nil
+                for client in self.clients.values { client.requested = nil }
+                self.controlChanged()
+            }
+            if old.windowSize != options.windowSize { self.requestResize() }
+        }
+    }
+
+    /// The options in force.
+    public func viewerOptions() async -> MacAppViewerOptions {
+        (try? await loop.submit { self.options }.get()) ?? configuration.options
+    }
+
+    /// `askToControl`: gives control to a viewer that asked (or any connected viewer); whoever had it
+    /// loses it. Its window size then leads.
+    public func allowControl(viewer: Int) {
+        loop.execute {
+            guard self.options.control == .askToControl, let client = self.clients[viewer] else { return }
+            self.grant = Grant(viewer: viewer, client: client.token, name: client.name)
+            client.requested = nil
+            self.controlChanged()
+            self.requestResize()
+        }
+    }
+
+    /// `askToControl`: turns down a viewer's request (it may ask again).
+    public func denyControl(viewer: Int) {
+        loop.execute {
+            guard let client = self.clients[viewer], client.requested != nil else { return }
+            client.requested = nil
+            self.controlChanged()
+        }
+    }
+
+    /// `askToControl`: takes control back from the viewer who has it; only the host controls the app.
+    public func revokeControl() {
+        loop.execute {
+            guard self.grant != nil else { return }
+            self.grant = nil
+            self.controlChanged()
+            self.requestResize()
+        }
+    }
+
+    /// Who may control the app now.
+    public func controlState() async -> ControlState {
+        (try? await loop.submit { self.currentControlState() }.get()) ?? ControlState(mode: configuration.options.control)
+    }
+
+    /// The app's appearance for `hello` (set by the session before it launches the app with it).
+    public func setAppearance(_ appearance: MirrorProtocol.Appearance) {
+        loop.execute { self.appearance = appearance }
+    }
+
     /// Reads the windows and trees again soon (coalesced like change notifications).
     public func refreshSoon() {
         shared.withLock { $0.runtime }?.requestRefresh()
@@ -373,6 +549,9 @@ public final class MirrorServer: @unchecked Sendable {
         /// Requests to read the menus again (coalesced like tree refreshes).
         let menuSignals: AsyncStream<Void>
         private let menuSignal: AsyncStream<Void>.Continuation
+        /// Requests to size the main window for the leading viewer (coalesced).
+        let sizeSignals: AsyncStream<Void>
+        private let sizeSignal: AsyncStream<Void>.Continuation
 
         struct State {
             var tasks: [Task<Void, Never>] = []
@@ -392,6 +571,12 @@ public final class MirrorServer: @unchecked Sendable {
             var rightClick: (window: MirrorProtocol.WindowID, point: CGPoint)?
             /// Until when menu reads are requested often (after a right click or showMenu).
             var menuWatchUntil: ContinuousClock.Instant?
+            /// The main window's size before a viewport changed it (given back for `WindowSize.app`).
+            var appSize: CGSize?
+            /// The smallest size the app let its main window take, learned from resizes it refused.
+            var minimumSize: CGSize = .zero
+            /// The last resize: the size asked for and the size the window took.
+            var lastResize: (asked: CGSize, got: CGSize)?
             var stopped = false
         }
         let state = OSAllocatedUnfairLock(initialState: State())
@@ -401,10 +586,12 @@ public final class MirrorServer: @unchecked Sendable {
             self.generation = generation
             (signals, signal) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
             (menuSignals, menuSignal) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
+            (sizeSignals, sizeSignal) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
         }
 
         func requestRefresh() { signal.yield() }
         func requestMenuRefresh() { menuSignal.yield() }
+        func requestResize() { sizeSignal.yield() }
 
         /// Reads again after each delay (counted from the one before), for changes that come late.
         func refresh(after delays: [Duration]) {
@@ -450,6 +637,7 @@ public final class MirrorServer: @unchecked Sendable {
             }
             signal.finish()
             menuSignal.finish()
+            sizeSignal.finish()
             for task in tasks { task.cancel() }
             // Bounded: ending a share must not wait on a capture that hangs.
             for capture in captures { _ = try? await WindowCapture.within(MirrorServer.captureStopLimit) { await capture.stop() } }
@@ -514,6 +702,10 @@ public final class MirrorServer: @unchecked Sendable {
             runtime.requestMenuRefresh()
         }
         runtime.add(Task { [weak self, weak runtime] in
+            guard let runtime else { return }
+            await self?.sizeLoop(runtime)
+        })
+        runtime.add(Task { [weak self, weak runtime] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: MirrorServer.treePollInterval)
                 if let self, self.viewerCount > 0 {
@@ -527,6 +719,8 @@ public final class MirrorServer: @unchecked Sendable {
             self.live = true
             for client in self.clients.values { self.greet(client) }
         }.get()
+        // A new launch opens its window at the app's own size: size it for the leading viewer again.
+        runtime.requestResize()
         return runtime
     }
 
@@ -818,6 +1012,101 @@ public final class MirrorServer: @unchecked Sendable {
         return .init(window: rightClick?.window ?? window, x: point.x, y: point.y, items: open.items)
     }
 
+    // MARK: The main window's size
+
+    /// Sizes the main window for the leading viewer on request (coalesced, after `resizeSettle`),
+    /// or gives it back its own size when the host chose `WindowSize.app`.
+    private func sizeLoop(_ runtime: Runtime) async {
+        for await _ in runtime.sizeSignals {
+            try? await Task.sleep(for: Self.resizeSettle)
+            if Task.isCancelled || runtime.isStopped { return }
+            let generation = runtime.generation
+            let wanted = try? await loop.submit { () -> (current: Bool, size: CGSize?) in
+                (self.generation == generation, self.wantedMainSize())
+            }.get()
+            guard let wanted, wanted.current else { continue }
+            await resizeMain(to: wanted.size, in: runtime)
+        }
+    }
+
+    /// The size the leading viewer's viewport asks for, nil when the window keeps the app's size.
+    private func wantedMainSize() -> CGSize? {
+        guard options.windowSize == .fitViewer, let viewport = leadingViewport() else { return nil }
+        return Self.windowSize(for: viewport, maximum: configuration.maximumWindowSize)
+    }
+
+    /// The viewer whose size the main window follows: the one the host gave control (`askToControl`),
+    /// else the first viewer still connected, of those with a size wish.
+    private func leadingViewport() -> MirrorProtocol.Viewport? {
+        let sized = clients.values.filter { ($0.viewport?.w ?? 0) > 0 && ($0.viewport?.h ?? 0) > 0 }
+        if options.control == .askToControl, let holder = grant?.viewer, let client = sized.first(where: { $0.id == holder }) {
+            return client.viewport
+        }
+        return sized.min { $0.id < $1.id }?.viewport
+    }
+
+    /// The main window's size for a viewport: whole points, at least `minimumViewportSize`, at most
+    /// `maximum`. Nil for a viewport without a size wish (`0` by `0`).
+    static func windowSize(for viewport: MirrorProtocol.Viewport, maximum: CGSize) -> CGSize? {
+        guard viewport.w.isFinite, viewport.h.isFinite, viewport.w > 0, viewport.h > 0 else { return nil }
+        let w = min(max(viewport.w.rounded(.down), minimumViewportSize.width), maximum.width)
+        let h = min(max(viewport.h.rounded(.down), minimumViewportSize.height), maximum.height)
+        return CGSize(width: w, height: h)
+    }
+
+    /// The size to ask the app for: the wish, but never below the minimum the app showed it keeps.
+    static func target(_ want: CGSize, minimum: CGSize) -> CGSize {
+        CGSize(width: max(want.width, minimum.width), height: max(want.height, minimum.height))
+    }
+
+    /// What a refused resize says about the app's minimum: a side the window kept larger than asked.
+    static func learnedMinimum(asked: CGSize, got: CGSize, before: CGSize) -> CGSize {
+        CGSize(width: got.width > asked.width + 0.5 ? max(before.width, got.width) : before.width,
+               height: got.height > asked.height + 0.5 ? max(before.height, got.height) : before.height)
+    }
+
+    /// Resizes the main window through AXSize (second windows, sheets and popovers keep their size),
+    /// remembering its own size the first time; `size` nil gives that size back.
+    private func resizeMain(to size: CGSize?, in runtime: Runtime) async {
+        let (mainID, frame, appSize, minimum, last) = runtime.state.withLock { state in
+            (state.mainID, state.mainID.flatMap { state.frames[$0] }, state.appSize, state.minimumSize, state.lastResize)
+        }
+        guard let mainID, let frame else { return }
+        let target: CGSize
+        if let size {
+            target = Self.target(size, minimum: minimum)
+        } else if let appSize {
+            target = appSize
+        } else {
+            return
+        }
+        let current = frame.size
+        if abs(current.width - target.width) < 1, abs(current.height - target.height) < 1 {
+            if size == nil { runtime.state.withLock { $0.appSize = nil } }
+            return
+        }
+        // The app already turned this exact size down (a maximum, or a fixed size): don't ask again.
+        if let last, last.asked == target, abs(last.got.width - current.width) < 1, abs(last.got.height - current.height) < 1 { return }
+        // Never onto the host's screens: a window the app placed elsewhere on the display stays as it is.
+        if configuration.isOnScreen(CGRect(origin: frame.origin, size: target)) {
+            eventSink.yield(.failed("Didn't resize the window to \(Int(target.width))×\(Int(target.height)): it would reach a screen of this Mac."))
+            return
+        }
+        do {
+            guard let got = try await runtime.app.accessibility.resize(window: mainID, to: target) else { return }
+            runtime.state.withLock { state in
+                if size != nil, state.appSize == nil { state.appSize = current }
+                if size == nil { state.appSize = nil }
+                state.lastResize = (target, got)
+                state.minimumSize = Self.learnedMinimum(asked: target, got: got, before: state.minimumSize)
+            }
+        } catch {
+            eventSink.yield(.failed("Couldn't resize the window to \(Int(target.width))×\(Int(target.height)): \(error)"))
+        }
+        // The window list carries the new size; the capture sends a full frame of it by itself.
+        runtime.requestRefresh()
+    }
+
     // MARK: Captures
 
     /// Starts captures for newly mirrored windows and stops those of windows that went away.
@@ -963,8 +1252,19 @@ public final class MirrorServer: @unchecked Sendable {
         /// Windows whose frames are skipped until the viewer catches up.
         var stale: Set<MirrorProtocol.WindowID> = []
         var cursor: MirrorProtocol.CursorShape?
+        /// The viewer's latest `viewport`.
+        var viewport: MirrorProtocol.Viewport?
+        /// From `requestControl`: the name the host sees, and the id the page keeps across reconnects.
+        var name: String?
+        var token: String?
+        /// `askToControl`: when (in request order) it asked for control and the host hasn't answered.
+        var requested: Int?
+        /// The `control` message it got last.
+        var control: MirrorProtocol.Control?
+        /// The host's own page (the share's proxy said so): it controls the app in every mode.
+        let isHost: Bool
 
-        init(id: Int, channel: Channel) { self.id = id; self.channel = channel }
+        init(id: Int, channel: Channel, isHost: Bool = false) { self.id = id; self.channel = channel; self.isHost = isHost }
 
         func resetFrames() { pending = [:]; stale = []; cursor = nil }
 
@@ -994,7 +1294,7 @@ public final class MirrorServer: @unchecked Sendable {
     }
 
     private func helloText() -> String? {
-        let hello = MirrorProtocol.Hello(boot: app.boot, scale: scale ?? configuration.scale ?? 2, appearance: configuration.appearance,
+        let hello = MirrorProtocol.Hello(boot: app.boot, scale: scale ?? configuration.scale ?? 2, appearance: appearance,
                                          app: .init(name: app.name), windows: windows)
         return try? MirrorProtocol.ServerMessage.hello(hello).jsonString()
     }
@@ -1007,6 +1307,8 @@ public final class MirrorServer: @unchecked Sendable {
         if status.state != .running, let text = try? MirrorProtocol.ServerMessage.status(status).jsonString() {
             client.sendText(text, flush: false)
         }
+        // Without a `control` message everyone controls, so it is only sent when that isn't so.
+        if options.control != .everyone || client.control != nil { sendControl(client, flush: false) }
         for window in windows {
             if let text = treeTexts[window.id] { client.sendText(text, flush: false) }
         }
@@ -1015,11 +1317,11 @@ public final class MirrorServer: @unchecked Sendable {
         for window in windows { syncFrames(client, window: window.id) }
     }
 
-    fileprivate func clientConnected(_ channel: Channel) -> Int {
+    fileprivate func clientConnected(_ channel: Channel, isHost: Bool) -> Int {
         loop.preconditionInEventLoop()
         let id = nextClientID
         nextClientID += 1
-        let client = Client(id: id, channel: channel)
+        let client = Client(id: id, channel: channel, isHost: isHost)
         clients[id] = client
         greet(client)
         let (count, runtime) = shared.withLock { state -> (Int, Runtime?) in
@@ -1035,10 +1337,18 @@ public final class MirrorServer: @unchecked Sendable {
 
     fileprivate func clientDisconnected(_ id: Int) {
         loop.preconditionInEventLoop()
-        guard clients.removeValue(forKey: id) != nil else { return }
+        guard let client = clients.removeValue(forKey: id) else { return }
         let count = clients.count
         shared.withLock { $0.viewers = count }
         eventSink.yield(.viewerDisconnected(id: id, viewers: count))
+        // A viewer with control keeps it while away if its page can say who it is when it comes back.
+        var changed = client.requested != nil
+        if let grant, grant.viewer == id {
+            self.grant = grant.client == nil ? nil : Grant(viewer: nil, client: grant.client, name: grant.name)
+            changed = true
+        }
+        if changed { controlChanged() }
+        viewportsChanged()
     }
 
     /// The viewer's connection drained: windows it fell behind on restart from a full frame.
@@ -1050,12 +1360,139 @@ public final class MirrorServer: @unchecked Sendable {
         for window in windows { syncFrames(client, window: window) }
     }
 
-    /// A text message from a viewer: decoded here, applied in order by the applier.
+    /// A text message from a viewer: decoded here, applied in order by the applier. Input from a
+    /// viewer who may not control the app (`watchOnly`, or `askToControl` without control) is dropped
+    /// here, as it arrives: it never reaches the app or the session's record.
     fileprivate func clientSent(_ id: Int, _ data: Data) {
         guard let message = try? MirrorProtocol.ClientMessage.decode(data) else { return } // unknown `t` or not JSON: ignored
+        guard let client = clients[id] else { return }
+        switch message {
+        case .viewport(let viewport):
+            eventSink.yield(.message(viewer: id, message, at: Date()))
+            client.viewport = viewport
+            viewportsChanged()
+            return
+        case .requestControl(let request):
+            eventSink.yield(.message(viewer: id, message, at: Date()))
+            requestControl(client, request)
+            return
+        case .releaseControl:
+            eventSink.yield(.message(viewer: id, message, at: Date()))
+            releaseControl(client)
+            return
+        case .act, .pointer, .text, .key, .setText, .menuAction, .windowAction:
+            guard mayControl(client) else { return }
+        }
         eventSink.yield(.message(viewer: id, message, at: Date()))
         if case .pointer(let pointer) = message, pointer.kind == .move { updateCursor(id, pointer) }
         inboxSink.yield((id, message))
+    }
+
+    // MARK: Control (on the loop)
+
+    /// Whether the viewer's input reaches the app now.
+    private func mayControl(_ client: Client) -> Bool {
+        if client.isHost { return true }
+        switch options.control {
+        case .everyone: return true
+        case .watchOnly: return false
+        case .askToControl:
+            guard let grant else { return false }
+            return grant.viewer == client.id || (grant.client != nil && grant.client == client.token)
+        }
+    }
+
+    /// The `control` message for a viewer.
+    private func control(for client: Client) -> MirrorProtocol.Control {
+        let holder = options.control == .askToControl ? grant.map { $0.name ?? "A viewer" } : nil
+        return MirrorProtocol.Control(mode: options.control, you: mayControl(client), requested: client.requested != nil, holder: holder)
+    }
+
+    private func sendControl(_ client: Client, flush: Bool = true) {
+        let control = self.control(for: client)
+        guard let text = try? MirrorProtocol.ServerMessage.control(control).jsonString() else { return }
+        client.control = control
+        client.sendText(text, flush: flush)
+    }
+
+    /// Tells every viewer whose `control` changed, and the session who may control the app now.
+    private func controlChanged() {
+        if live {
+            for client in clients.values where client.control != control(for: client) { sendControl(client) }
+        }
+        eventSink.yield(.control(currentControlState()))
+    }
+
+    private func currentControlState() -> ControlState {
+        let holder = options.control == .askToControl ? grant.map { grant in
+            let connected = clients.values.contains { $0.id == grant.viewer || (grant.client != nil && $0.token == grant.client) }
+            return ControlState.Holder(viewer: grant.viewer, name: grant.name, connected: connected)
+        } : nil
+        let requests = clients.values.compactMap { client in client.requested.map { (order: $0, client: client) } }
+            .sorted { $0.order < $1.order }
+            .map { ControlState.Request(viewer: $0.client.id, name: $0.client.name) }
+        return ControlState(mode: options.control, holder: holder, requests: options.control == .askToControl ? requests : [])
+    }
+
+    /// A viewer asks for control. A page that had it (same `client` id) gets it back at once;
+    /// otherwise the host is asked (`control` event) and the viewer is told it waits.
+    private func requestControl(_ client: Client, _ request: MirrorProtocol.RequestControl) {
+        client.name = Self.cleanName(request.name) ?? client.name
+        client.token = Self.cleanToken(request.client) ?? client.token
+        guard options.control == .askToControl else { return sendControl(client) }
+        if let grant, grant.viewer != client.id, grant.client != nil, grant.client == client.token {
+            self.grant = Grant(viewer: client.id, client: grant.client, name: client.name ?? grant.name)
+            controlChanged()
+            requestResize()
+            return
+        }
+        if mayControl(client) { return sendControl(client) }
+        if client.requested == nil {
+            requestCount += 1
+            client.requested = requestCount
+        }
+        controlChanged()
+    }
+
+    /// A viewer gives control back, or takes back its request.
+    private func releaseControl(_ client: Client) {
+        var changed = false
+        if client.requested != nil { client.requested = nil; changed = true }
+        if let grant, grant.viewer == client.id || (grant.client != nil && grant.client == client.token) {
+            self.grant = nil
+            changed = true
+            requestResize()
+        }
+        if changed { controlChanged() } else { sendControl(client) }
+    }
+
+    /// A viewer's name as the host sees it: trimmed, without control characters, at most 32 characters.
+    static func cleanName(_ name: String?) -> String? {
+        guard let name else { return nil }
+        let clean = String(name.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.map(Character.init))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return clean.isEmpty ? nil : String(clean.prefix(32))
+    }
+
+    /// A page's id: 8 to 128 characters of letters, digits, `-` and `_`, else ignored.
+    static func cleanToken(_ token: String?) -> String? {
+        guard let token, (8...128).contains(token.count),
+              token.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) && $0.isASCII || $0 == "-" || $0 == "_" }) else { return nil }
+        return token
+    }
+
+    /// The viewers' sizes or color schemes changed (one connected, left or sent `viewport`).
+    private func viewportsChanged() {
+        requestResize()
+        let first = clients.values.filter { $0.viewport?.appearance != nil }.min { $0.id < $1.id }
+        if let appearance = first?.viewport?.appearance, appearance != reportedAppearance {
+            reportedAppearance = appearance
+            eventSink.yield(.viewerAppearance(appearance))
+        }
+    }
+
+    private func requestResize() {
+        shared.withLock { $0.runtime }?.requestResize()
     }
 
     /// Cursor feedback from the tree: an I-beam over enabled text fields, a hand over links.
@@ -1104,7 +1541,7 @@ public final class MirrorServer: @unchecked Sendable {
             runtime.refresh(after: Self.menuActionRefreshes)
             return
         }
-        guard let window = message.window else { return } // viewport, requestControl: events only (reserved)
+        guard let window = message.window else { return } // viewport and control requests are handled as they arrive
         // Not a mirrored window: ignored.
         guard let (mirroredWindow, latest) = try? await loop.submit({ () -> (MirroredWindow, AXSnapshot?)? in
             guard let mirrored = self.mirrored[window] else { return nil }
@@ -1158,7 +1595,7 @@ public final class MirrorServer: @unchecked Sendable {
                 guard let node = try await node(setText.key) else { return }
                 try await app.input.replaceText(in: target, field: CGRect(x: node.x, y: node.y, width: node.w, height: node.h),
                                                 with: setText.value, timeout: Self.setTextTimeout)
-            case .viewport, .menuAction, .requestControl:
+            case .viewport, .menuAction, .requestControl, .releaseControl:
                 return
             }
         } catch {
@@ -1342,7 +1779,7 @@ private final class MirrorHTTPHandler: ChannelInboundHandler, RemovableChannelHa
         context.write(wrapOutboundOut(.head(HTTPResponseHead(version: head.version, status: .switchingProtocols, headers: headers))), promise: nil)
         context.writeAndFlush(wrapOutboundOut(.end(nil))).assumeIsolated().whenComplete { [self] result in
             guard case .success = result else { return context.close(promise: nil) }
-            let socket = MirrorSocketHandler(server: server)
+            let socket = MirrorSocketHandler(server: server, isHost: head.headers.first(name: MirrorProtocol.hostHeader) == "1")
             do {
                 let sync = context.pipeline.syncOperations
                 for handler in downstream { _ = sync.removeHandler(handler) }
@@ -1378,12 +1815,13 @@ private final class MirrorSocketHandler: ChannelInboundHandler {
     typealias OutboundOut = WebSocketFrame
 
     private let server: MirrorServer
+    private let isHost: Bool
     private var context: ChannelHandlerContext?
     private var id: Int?
     private var keepAlive: RepeatedTask?
     private var closing = false
 
-    init(server: MirrorServer) { self.server = server }
+    init(server: MirrorServer, isHost: Bool) { self.server = server; self.isHost = isHost }
 
     func handlerAdded(context: ChannelHandlerContext) { self.context = context }
 
@@ -1391,7 +1829,7 @@ private final class MirrorSocketHandler: ChannelInboundHandler {
     /// (Cloudflare drops WebSockets idle for 100 seconds).
     func begin() {
         guard let context, context.channel.isActive, id == nil else { return }
-        id = server.clientConnected(context.channel)
+        id = server.clientConnected(context.channel, isHost: isHost)
         let channel = context.channel
         keepAlive = context.eventLoop.scheduleRepeatedTask(initialDelay: MirrorServer.pingInterval, delay: MirrorServer.pingInterval) { _ in
             channel.writeAndFlush(WebSocketFrame(fin: true, opcode: .ping, data: ByteBuffer()), promise: nil)

@@ -10,6 +10,10 @@ struct MacAppShareStatus: Equatable {
     /// The latest thing worth a look: dropped entitlements, another off-screen display, an action
     /// the app refused.
     var warning: String?
+    /// Who may control the app: the mode, who has control, who asks for it.
+    var control: MirrorServer.ControlState?
+    /// The appearance the copy runs with.
+    var appearance: MirrorProtocol.Appearance?
 }
 
 /// A Mac app share waiting for the permissions it needs; it starts once they're on.
@@ -184,7 +188,8 @@ extension AppStore {
         let session = MacAppSession(options: .init(
             app: app,
             data: data,
-            assets: .init(page: viewer.page, script: viewer.script, style: viewer.style, icon: Self.iconPNG(for: app))
+            assets: .init(page: viewer.page, script: viewer.script, style: viewer.style, icon: Self.iconPNG(for: app)),
+            viewerOptions: definition.macAppOptions ?? MacAppViewerOptions()
         ))
         macAppSessions[id] = session
         macAppStatus[id] = MacAppShareStatus(state: .starting)
@@ -205,6 +210,7 @@ extension AppStore {
         appendMacAppLog("Starting an isolated copy of \(app.name) with \(data == .empty ? "empty data" : "a copy of its data").", for: id)
         do {
             let port = try await session.start()
+            if macAppSessions[id] === session { macAppStatus[id, default: MacAppShareStatus()].appearance = session.appearance }
             if let host = runtime(for: id).publicURL.flatMap(Self.publicOrigin) { session.server?.setAllowedOrigins([host]) }
             return port
         } catch {
@@ -282,6 +288,32 @@ extension AppStore {
         }
     }
 
+    // MARK: Viewer options
+
+    /// The host's viewer options for a Mac app share (saved with it; a running share follows at once,
+    /// with a restart of the app when its appearance changes).
+    func setMacAppOptions(_ options: MacAppViewerOptions, for id: UUID) {
+        guard let index = definitions.firstIndex(where: { $0.id == id }), (definitions[index].macAppOptions ?? MacAppViewerOptions()) != options else { return }
+        definitions[index].macAppOptions = options
+        saveDefinitions()
+        macAppSessions[id]?.setViewerOptions(options)
+    }
+
+    /// Ask to control: gives control to a viewer who asked.
+    func allowMacAppControl(viewer: Int, for id: UUID) {
+        macAppSessions[id]?.server?.allowControl(viewer: viewer)
+    }
+
+    /// Ask to control: turns a viewer's request down.
+    func denyMacAppControl(viewer: Int, for id: UUID) {
+        macAppSessions[id]?.server?.denyControl(viewer: viewer)
+    }
+
+    /// Ask to control: takes control back from the viewer who has it.
+    func revokeMacAppControl(for id: UUID) {
+        macAppSessions[id]?.server?.revokeControl()
+    }
+
     /// The public address is known: pages from it may open the app's WebSocket.
     func macAppReceived(publicURL: String, for id: UUID) {
         guard let session = macAppSessions[id], let origin = Self.publicOrigin(publicURL) else { return }
@@ -318,6 +350,18 @@ extension AppStore {
             macAppStatus[id, default: MacAppShareStatus()].viewers = count
         case .warning(let text):
             macAppStatus[id, default: MacAppShareStatus()].warning = text
+        case .control(let control):
+            let before = Set(macAppStatus[id]?.control?.requests.map(\.viewer) ?? [])
+            macAppStatus[id, default: MacAppShareStatus()].control = control
+            // Someone new asks: the card shows Allow; a notification brings the host to it.
+            if let request = control.requests.last(where: { !before.contains($0.viewer) }) {
+                let who = request.name ?? "A viewer"
+                TunnelNotifications.post(title: "\(who) asks to control \(shareName(id))",
+                                         body: "Allow it on the share's Live Collaboration card.",
+                                         identifier: "macapp-control-\(id.uuidString)", tunnelID: id)
+            }
+        case .appearance(let appearance):
+            macAppStatus[id, default: MacAppShareStatus()].appearance = appearance
         case .message:
             break
         }

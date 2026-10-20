@@ -193,6 +193,20 @@ public final class AccessibilityTree: @unchecked Sendable {
         }
     }
 
+    /// Sets a window's size (AXSize; its top-left stays) and returns the size it took: an app keeps
+    /// its minimum and maximum, and may round. The app isn't activated.
+    public func resize(window number: UInt32, to size: CGSize) async throws -> CGSize? {
+        try await run { [self] in
+            try checkTrust()
+            guard let element = windowElement(number: number) else { throw AccessibilityTreeError.noWindow }
+            var wanted = size
+            guard let value = AXValueCreate(.cgSize, &wanted) else { return nil }
+            let result = AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, value)
+            guard result == .success else { throw AccessibilityTreeError.axFailure(operation: "resize", code: result.rawValue) }
+            return copy(element, kAXSizeAttribute).flatMap(Self.size)
+        }
+    }
+
     // MARK: Changes
 
     /// The app's accessibility notifications as a stream: values, focus, destroyed elements,

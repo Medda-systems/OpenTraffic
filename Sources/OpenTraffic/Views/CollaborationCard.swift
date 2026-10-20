@@ -232,6 +232,7 @@ struct CollaborationCard: View {
         }
         .font(.callout)
         .onAppear { store.refreshMacAppPermissions() }
+        macAppOptions(status)
         if let warning = status?.warning {
             InlineMessage(severity: .info, message: warning)
         }
@@ -244,14 +245,77 @@ struct CollaborationCard: View {
         }
     }
 
+    /// Who may control the shared app, its appearance and window size; viewers asking for control.
+    @ViewBuilder
+    private func macAppOptions(_ status: MacAppShareStatus?) -> some View {
+        let options = tunnel.macAppOptions ?? MacAppViewerOptions()
+        let name = macAppName
+        Picker("Viewers", selection: Binding(
+            get: { options.control },
+            set: { var changed = options; changed.control = $0; store.setMacAppOptions(changed, for: tunnel.id) }
+        )) {
+            ForEach(MirrorProtocol.ControlMode.allCases, id: \.self) { mode in Text(mode.title).tag(mode) }
+        }
+        .help("Everyone can click and type in \(name), or only watch it, or ask you for control first. Your own browser (Open as Host) always can.")
+        Picker("Appearance", selection: Binding(
+            get: { options.appearance },
+            set: { var changed = options; changed.appearance = $0; store.setMacAppOptions(changed, for: tunnel.id) }
+        )) {
+            ForEach(MacAppViewerOptions.Appearance.allCases, id: \.self) { appearance in Text(appearance.title).tag(appearance) }
+        }
+        .help("Light or dark, as the first viewer's browser prefers or as you choose. \(name) restarts to change it; its data stays. Dark needs this Mac in the Dark appearance.")
+        Picker("Window size", selection: Binding(
+            get: { options.windowSize },
+            set: { var changed = options; changed.windowSize = $0; store.setMacAppOptions(changed, for: tunnel.id) }
+        )) {
+            ForEach(MacAppViewerOptions.WindowSize.allCases, id: \.self) { size in Text(size.title).tag(size) }
+        }
+        .help("Resize \(name)'s window to fill the first viewer's browser (the one with control, when you gave it), or keep its own size and let viewers scale it down.")
+        if store.isActive(tunnel.id), let control = status?.control, control.mode == .askToControl {
+            ForEach(control.requests) { request in
+                let who = request.name ?? "A viewer"
+                InlineMessage(severity: .info, message: "\(who) wants to click and type in \(name). Others keep watching; you can take control back at any time.",
+                              title: "\(who) asks for control") {
+                    Button("Allow") { store.allowMacAppControl(viewer: request.viewer, for: tunnel.id) }
+                    Button("Not Now") { store.denyMacAppControl(viewer: request.viewer, for: tunnel.id) }
+                }
+            }
+            HStack(spacing: Spacing.s) {
+                Image(systemName: control.holder == nil ? "hand.raised" : "cursorarrow.click.2")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text(Self.controlCaption(control, app: name))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                if control.holder != nil {
+                    Button("Take Back") { store.revokeMacAppControl(for: tunnel.id) }
+                        .help("Take control back: viewers only watch until you allow someone again")
+                }
+            }
+            .font(.callout)
+        }
+    }
+
+    private var macAppName: String {
+        tunnel.macApp.map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent } ?? tunnel.name
+    }
+
+    static func controlCaption(_ control: MirrorServer.ControlState, app: String) -> String {
+        guard let holder = control.holder else { return "Viewers watch \(app); they can ask you for control." }
+        let who = holder.name ?? "A viewer"
+        return holder.connected ? "\(who) has control of \(app)." : "\(who) has control of \(app) (away; they get it back when they return)."
+    }
+
     private func macAppCaption(_ status: MacAppShareStatus?) -> String {
-        let name = tunnel.macApp.map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent } ?? tunnel.name
+        let name = macAppName
         let data = tunnel.macAppData == .empty ? "empty data" : "a copy of its data"
         let about = "\(name) runs hidden on this Mac as a separate copy with \(data); your own copy and its data aren't touched."
         guard store.isActive(tunnel.id), let status else { return about }
         let state = switch status.state {
         case .idle, .starting: "Starting…"
-        case .running: status.viewers == 1 ? "Running, 1 viewer." : "Running, \(status.viewers) viewers."
+        case .running: (status.viewers == 1 ? "Running, 1 viewer" : "Running, \(status.viewers) viewers") + (status.appearance.map { ", \($0.rawValue) appearance." } ?? ".")
         case .restarting: "Restarting…"
         case .crashed(let message): message
         case .failed(let message): message
@@ -434,6 +498,36 @@ extension Color {
             green: Double((value >> 8) & 0xFF) / 255,
             blue: Double(value & 0xFF) / 255
         )
+    }
+}
+
+extension MirrorProtocol.ControlMode {
+    var title: String {
+        switch self {
+        case .everyone: "Everyone can control"
+        case .watchOnly: "Watch only"
+        case .askToControl: "Ask to control"
+        }
+    }
+}
+
+extension MacAppViewerOptions.Appearance {
+    var title: String {
+        switch self {
+        case .viewer: "First viewer's"
+        case .mac: "This Mac's"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+}
+
+extension MacAppViewerOptions.WindowSize {
+    var title: String {
+        switch self {
+        case .fitViewer: "Fit the viewer's browser"
+        case .app: "The app's own size"
+        }
     }
 }
 

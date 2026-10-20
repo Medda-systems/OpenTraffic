@@ -29,6 +29,14 @@ A Mac app has no web page to send, so OpenTraffic sends what the app looks like 
 
 Sheets, alerts, popovers, and the app's other windows show up too: sheets and popovers where the app put them, alerts in the middle, and other windows side by side, or as tabs when they wouldn't fit. A click in a window brings it to the front, so typing goes there. A tab's close button closes its window.
 
+## Who drives it, its size, and its look
+
+The Mac app section of the share's Live Collaboration card has three choices, kept with the share:
+
+- **Viewers:** **Everyone can control** (the default), **Watch only**, or **Ask to control**. Watching viewers see the app and comment on it, but their clicks and typing don't reach it, and the bar above the window tells them so. With **Ask to control**, a viewer clicks **Request Control** in that bar; you get a notification and an **Allow** button on the card. Control stays with that person until you click **Take Back** or they click **Give Back**, and comes back to them if their page reconnects. Your own browser, opened with **Open as Host**, can always use the app.
+- **Window size:** **Fit the viewer's browser** (the default) resizes the app's main window to fill the first viewer's browser (or the browser of the person you gave control), as far as the app's minimum size and OpenTraffic's off-screen display allow. Everyone else sees it scaled down. **The app's own size** leaves the window as the app made it.
+- **Appearance:** **First viewer's** (the default) shows the app light or dark as the first viewer's browser prefers; or pick **This Mac's**, **Light**, or **Dark**. Changing it restarts the copy with the same data. Dark only works while your Mac uses the Dark appearance; otherwise the app stays light, and the card says so.
+
 ## Permissions
 
 OpenTraffic needs two permissions to share a Mac app, both in System Settings → Privacy & Security:
@@ -94,7 +102,8 @@ opentraffic stop Orbit
 ## Limits
 
 - One share per app at a time. Stop the other share first.
-- Everyone uses the same copy, so they see the same data, and one person's click is everyone's.
+- Everyone uses the same copy, so they see the same data, and one person's click is everyone's. Choose **Watch only** or **Ask to control** on the card when that's too many hands.
+- The app can only look dark while your Mac uses the Dark appearance.
 - No drag and drop between the app and other apps or the browser.
 - There's a short delay between a click and the change on screen, longer on a slow connection.
 - The copy isn't sandboxed. It runs as you, without the App Sandbox even when your app uses it, so it can reach what your app's own code can reach on this Mac. Viewers can only do what the app's windows and menus let them do, but share it with people you'd let use the app on your Mac.

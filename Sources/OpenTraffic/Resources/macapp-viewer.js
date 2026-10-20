@@ -6,7 +6,9 @@
  * the app opens is a surface of its own: sheets, alerts, popovers and menus over their window, second
  * windows beside the main one (or as tabs when side by side would make everything too small). On small
  * screens (or when chosen in the bar) a Simple view shows the same trees as a page of real text and
- * web controls instead of the scaled window.
+ * web controls instead of the scaled window. The viewer tells the server the room it has and its color
+ * scheme (`viewport`), so the host can size the app's window and pick its appearance for it, and
+ * follows the host's control mode (`control`): watching only, or asking for control first.
  * The whole contract is docs/macapp-mirror-protocol.md.
  */
 (() => {
@@ -31,6 +33,11 @@
   const ATTACHED = new Set(["sheet", "alert", "popover", "menu"]);
   const SIMPLE_BELOW = 700; // viewports narrower than this get the Simple view unless the viewer chose
   const VIEW_PREF = "opentraffic.macapp.view"; // localStorage: "simple" or "window", the viewer's choice
+  const HAD_CONTROL = "opentraffic.macapp.control"; // sessionStorage: "1" while the host has given this page control
+  const COLLAB_NAME = "__opentraffic_collab_name"; // collab.js's localStorage: the name this person goes by
+  const COLLAB_CLIENT = "__opentraffic_collab_client"; // collab.js's localStorage: this browser's private id
+  const VIEWPORT_DELAY = 250; // a resized browser says its new size after this much quiet
+  const INPUT = new Set(["act", "pointer", "text", "key", "setText", "menuAction", "windowAction"]); // need control
   const SET_TEXT_INTERVAL = 120; // Simple view fields: at most this often a setText while typing
   const NAMED_KEYS = new Set(["Enter", "Escape", "Tab", "Backspace", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
   const CURSORS = { default: "default", pointer: "pointer", text: "text", grab: "grab" };
@@ -95,6 +102,9 @@
     lastLocal: 0, // when the viewer last clicked or typed
     simple: false, // the Simple view is showing (its elements carry the ids, not the layer's)
     viewPref: null, // "simple", "window" or null (by width)
+    control: { mode: "everyone", you: true, requested: false, holder: null }, // the host's control mode, for this viewer
+    asked: false, // this page asked for control (so "Give Back" makes sense; the host's page never asks)
+    viewportSent: null, // the last viewport message, as JSON
   };
 
   // ---------------------------------------------------------------- connection
@@ -142,6 +152,7 @@
   function send(message) {
     const ws = state.socket;
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    if (INPUT.has(message.t) && !state.control.you) return false; // the server would drop it anyway
     ws.send(JSON.stringify(message));
     return true;
   }
@@ -162,6 +173,7 @@
       case "cursor": return setCursor(m.shape);
       case "status": return setStatus(m.state, m.message);
       case "menu": return applyMenu(m);
+      case "control": return applyControl(m);
       // (windowAction is client to server only.)
       default: return; // unknown and reserved messages are ignored
     }
@@ -192,6 +204,11 @@
     }
     setStatus("running", null);
     applyWindows(m.windows);
+    // A new connection: the server knows nothing of this viewer yet.
+    state.viewportSent = null;
+    sendViewport();
+    renderControl();
+    if (readSession(HAD_CONTROL) === "1") requestControl(); // the host gave this page control before a drop or reload
   }
 
   function clearAll() {
@@ -414,7 +431,7 @@
       if (tabsEl.childElementCount) tabsEl.textContent = "";
       return;
     }
-    const want = top.map((w) => w.id).join(",") + "|" + state.tab + "|" + top.map((w) => w.info.title).join("\u0000");
+    const want = top.map((w) => w.id).join(",") + "|" + state.tab + "|" + state.control.you + "|" + top.map((w) => w.info.title).join("\u0000");
     if (tabsEl.dataset.want === want) return;
     tabsEl.dataset.want = want;
     tabsEl.textContent = "";
@@ -430,7 +447,7 @@
       b.textContent = w.info.title || (w.info.kind === "main" ? state.appName : "Window");
       b.addEventListener("click", () => showTab(w.id));
       tab.appendChild(b);
-      if (w.info.kind !== "main") {
+      if (w.info.kind !== "main" && state.control.you) {
         const x = document.createElement("button");
         x.type = "button";
         x.className = "otm-tab-close";
@@ -461,6 +478,149 @@
     fitBox.style.height = h * f + "px";
   }
   window.addEventListener("resize", () => layout());
+
+  // ---------------------------------------------------------------- viewport and appearance
+  //
+  // The room the main window has here (the desk less its margins, CSS pixels = points at scale 1) and
+  // the browser's color scheme: the host may resize the app's window to fill it and show the app in
+  // the viewer's appearance. The Simple view has no size wish (0 by 0); only its scheme counts.
+
+  const darkQuery = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  const lightQuery = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
+  function colorScheme() {
+    if (darkQuery && darkQuery.matches) return "dark";
+    if (lightQuery && lightQuery.matches) return "light";
+    return null;
+  }
+
+  function currentViewport() {
+    if (state.simple || desk.hidden) return { t: "viewport", w: 0, h: 0, appearance: colorScheme() };
+    const w = Math.max(0, Math.floor(desk.clientWidth - PAD * 2));
+    const h = Math.max(0, Math.floor(desk.clientHeight - PAD * 2 - (state.tabbed ? TABS_H : 0)));
+    return { t: "viewport", w, h, appearance: colorScheme() };
+  }
+
+  function sendViewport() {
+    const m = currentViewport();
+    const json = JSON.stringify(m);
+    if (json === state.viewportSent) return;
+    if (send(m)) state.viewportSent = json;
+  }
+
+  let viewportTimer = null;
+  function viewportSoon() {
+    clearTimeout(viewportTimer);
+    viewportTimer = setTimeout(sendViewport, VIEWPORT_DELAY);
+  }
+  window.addEventListener("resize", viewportSoon);
+  for (const q of [darkQuery, lightQuery]) if (q && q.addEventListener) q.addEventListener("change", sendViewport);
+
+  // ---------------------------------------------------------------- control
+  //
+  // `control` says whether this viewer may drive the app. Without it (watch only, or ask to control
+  // before the host allowed) nothing is sent and nothing reacts as if it was: fields are read-only,
+  // menus and the tab close buttons go away, and the desktop bar says why, with Request Control when
+  // the host takes requests. The collaboration overlay (cursors, comments) works the same either way.
+
+  function readSession(key) {
+    try { return sessionStorage.getItem(key); } catch { return null; }
+  }
+  function writeSession(key, value) {
+    try { value === null ? sessionStorage.removeItem(key) : sessionStorage.setItem(key, value); } catch { /* private mode */ }
+  }
+  function readLocal(key) {
+    try { return localStorage.getItem(key); } catch { return null; }
+  }
+
+  const controlEl = document.createElement("span");
+  controlEl.className = "otm-control";
+  controlEl.setAttribute("data-opentraffic-ui", "");
+  controlEl.setAttribute("role", "status");
+  controlEl.hidden = true;
+  const controlText = document.createElement("span");
+  controlText.className = "otm-control-text";
+  const controlButton = document.createElement("button");
+  controlButton.type = "button";
+  controlButton.className = "otm-control-button";
+  controlButton.setAttribute("data-opentraffic-ui", "");
+  controlEl.append(controlText, controlButton);
+  {
+    const views = document.querySelector(".otm-views");
+    const barEl = $("otm-bar");
+    if (views) views.before(controlEl);
+    else if (barEl) barEl.appendChild(controlEl);
+  }
+
+  function requestControl() {
+    const name = (readLocal(COLLAB_NAME) || "").trim().slice(0, 32) || null;
+    const client = readLocal(COLLAB_CLIENT) || null;
+    state.asked = true;
+    send({ t: "requestControl", name, client });
+  }
+
+  controlButton.addEventListener("click", () => {
+    const c = state.control;
+    if (c.mode !== "askToControl") return;
+    if (c.you || c.requested) {
+      writeSession(HAD_CONTROL, null);
+      state.asked = false;
+      send({ t: "releaseControl" });
+    } else requestControl();
+  });
+
+  function applyControl(m) {
+    const mode = m.mode === "watchOnly" || m.mode === "askToControl" ? m.mode : "everyone";
+    const c = { mode, you: m.you !== false, requested: m.requested === true, holder: typeof m.holder === "string" && m.holder ? m.holder : null };
+    const was = state.control;
+    state.control = c;
+    if (mode === "askToControl" && c.you && state.asked) writeSession(HAD_CONTROL, "1");
+    else if (!c.you || mode !== "askToControl") writeSession(HAD_CONTROL, null);
+    if (!c.requested && !c.you) state.asked = false;
+    document.body.dataset.control = c.you ? "yes" : "no";
+    for (const el of document.querySelectorAll(".otm-field, .otm-s-field")) el.readOnly = !c.you;
+    if (!c.you) {
+      // Whatever was under way stops here: menus, a press, a drag.
+      closeMenu();
+      hideContext();
+      if (document.activeElement && (stage.contains(document.activeElement) || (simpleRoot && simpleRoot.contains(document.activeElement)))) document.activeElement.blur();
+    }
+    renderControl();
+    if (was.you !== c.you) layout();
+  }
+
+  function renderControl() {
+    const c = state.control;
+    const app = state.appName === "the app" ? "the app" : state.appName;
+    let text = "", button = "", title = "";
+    if (c.mode === "watchOnly") {
+      if (!c.you) {
+        text = "Watching only";
+        title = "The host lets viewers watch " + app + ", not click or type in it. Comments still work.";
+      }
+    } else if (c.mode === "askToControl") {
+      if (c.you && state.asked) {
+        text = "You have control";
+        button = "Give Back";
+        title = "The host gave you control of " + app + ". Give it back when you're done.";
+      } else if (c.you) {
+        text = "";
+      } else if (c.requested) {
+        text = "Asked the host…";
+        button = "Cancel";
+        title = "Waiting for the host to give you control of " + app + ".";
+      } else {
+        text = c.holder ? c.holder + " has control" : "Watching";
+        button = "Request Control";
+        title = "Ask the host to let you click and type in " + app + ".";
+      }
+    }
+    controlText.textContent = text;
+    controlButton.textContent = button;
+    controlButton.hidden = !button;
+    controlEl.title = title;
+    controlEl.hidden = !text && !button;
+    controlEl.dataset.mode = c.mode;
+  }
 
   // ---------------------------------------------------------------- frames
 
@@ -559,6 +719,7 @@
       el.setAttribute("autocapitalize", "off");
       el.setAttribute("autocorrect", "off");
       el.setAttribute("data-1p-ignore", ""); // password managers: this isn't a login form on this site
+      el.readOnly = !state.control.you;
       el.addEventListener("blur", () => onFieldBlur(el));
     } else {
       el.className = "otm-node";
@@ -704,6 +865,7 @@
   let dragging = null; // { win, pointerId, right } between a synthesized down and up
 
   stage.addEventListener("pointerdown", (e) => {
+    if (!state.control.you) return;
     const hit = locate(e);
     if (!hit) return;
     state.lastLocal = Date.now();
@@ -762,6 +924,7 @@
   });
 
   stage.addEventListener("click", (e) => {
+    if (!state.control.you) return;
     const hit = locate(e);
     if (!hit || e.button !== 0) return;
     const how = clickAction(hit.item);
@@ -799,6 +962,7 @@
     pointer(m.win, "move", m.x, m.y, m.e);
   }
   stage.addEventListener("pointermove", (e) => {
+    if (!state.control.you) return;
     const hit = dragging ? locate(e, dragging.win) : locate(e);
     if (!hit) return;
     move = { win: hit.win, x: hit.x, y: hit.y, e: { metaKey: e.metaKey, shiftKey: e.shiftKey, altKey: e.altKey, ctrlKey: e.ctrlKey } };
@@ -818,6 +982,7 @@
     pointer(w.win, "wheel", w.x, w.y, w.e, round(w.dx), round(w.dy));
   }
   stage.addEventListener("wheel", (e) => {
+    if (!state.control.you) return;
     const hit = locate(e);
     if (!hit) return;
     e.preventDefault();
@@ -886,7 +1051,7 @@
   // Keys while no field of ours has focus (after clicking a button or a custom view in the app) go to
   // the app too, unless the page has another editable thing focused (the comment box, say).
   document.addEventListener("keydown", (e) => {
-    if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
+    if (e.defaultPrevented || e.isComposing || e.keyCode === 229 || !state.control.you) return;
     const t = e.target;
     if (t instanceof Element && (stage.contains(t) && t.classList.contains("otm-field"))) return;
     if (t instanceof Element && t !== document.body && t !== document.documentElement && !stage.contains(t)) return;
@@ -1003,6 +1168,7 @@
       // A field: text, password or textarea.
       if (sk !== "textarea") el.type = sk === "password" ? "password" : "text";
       el.className = "otm-s-node otm-s-field";
+      el.readOnly = !state.control.you;
       el.autocomplete = sk === "password" ? "new-password" : "off";
       el.spellcheck = false;
       el.setAttribute("autocapitalize", "off");
@@ -1298,6 +1464,10 @@
   if (simpleRoot) {
     simpleRoot.addEventListener("click", (e) => {
       const hit = simpleHit(e.target);
+      if (hit && !state.control.you) {
+        if (!hit.el.classList.contains("otm-s-field")) e.preventDefault(); // a checkbox doesn't flip; fields stay selectable
+        return;
+      }
       if (!hit || !enabled(hit.item)) return;
       const { win, item, el } = hit;
       const sk = el.__sk;
@@ -1322,7 +1492,7 @@
       const input = e.target;
       if (!(input instanceof HTMLInputElement) || (input.type !== "checkbox" && input.type !== "radio")) return;
       const hit = simpleHit(input);
-      if (!hit || hit.el.__sk !== "check" || !enabled(hit.item)) return;
+      if (!hit || hit.el.__sk !== "check" || !enabled(hit.item) || !state.control.you) return;
       const { win, item, el } = hit;
       const now = input.checked;
       state.lastLocal = Date.now();
@@ -1336,7 +1506,7 @@
     });
 
     simpleRoot.addEventListener("keydown", (e) => {
-      if (e.isComposing || e.keyCode === 229) return;
+      if (e.isComposing || e.keyCode === 229 || !state.control.you) return;
       const hit = simpleHit(e.target);
       if (!hit || !enabled(hit.item)) return;
       const { win, item, el } = hit;
@@ -1432,6 +1602,7 @@
       renderSimple();
       window.scrollTo(0, 0);
     } else layout();
+    sendViewport();
   }
 
   function chooseView(view) {
@@ -1534,7 +1705,7 @@
     if (!ctx) menus.dismissed = null;
     if (json === menus.contextJSON) return;
     menus.contextJSON = json;
-    if (!ctx || json === menus.dismissed) return hideContext();
+    if (!ctx || json === menus.dismissed || !state.control.you) return hideContext();
     showContext(ctx);
   }
 
@@ -1716,14 +1887,14 @@
   if (bar) {
     bar.addEventListener("click", (e) => {
       const hit = onTitle(e);
-      if (!hit) return;
+      if (!hit || !state.control.you) return;
       e.stopPropagation();
       if (menus.open && menus.open.anchor === hit.el) return closeMenu();
       openMenu(hit.index, hit.el);
     });
     bar.addEventListener("keydown", (e) => {
       const hit = onTitle(e);
-      if (!hit || (e.key !== "Enter" && e.key !== " " && e.key !== "ArrowDown")) return;
+      if (!hit || !state.control.you || (e.key !== "Enter" && e.key !== " " && e.key !== "ArrowDown")) return;
       e.preventDefault();
       e.stopPropagation();
       openMenu(hit.index, hit.el);
@@ -1832,7 +2003,7 @@
   // Left to the browser: the comment box and other page fields, copy/cut/paste (the host's clipboard
   // is no use here), and a focused field's own select all and undo.
   document.addEventListener("keydown", (e) => {
-    if (e.defaultPrevented || e.isComposing || e.keyCode === 229 || !(e.metaKey || e.ctrlKey) || !menus.bar.length) return;
+    if (e.defaultPrevented || e.isComposing || e.keyCode === 229 || !(e.metaKey || e.ctrlKey) || !menus.bar.length || !state.control.you) return;
     const t = e.target;
     const inStage = t instanceof Element && stage.contains(t);
     const inSimple = t instanceof Element && simpleRoot && simpleRoot.contains(t);

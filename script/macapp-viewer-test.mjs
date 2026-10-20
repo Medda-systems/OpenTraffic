@@ -9,7 +9,8 @@
 // map to the protocol's messages; optimistic feedback; tiles paint; cursor, status, reconnect and boot;
 // the app's menu bar in the desktop bar, its context menus and its shortcuts as menuAction;
 // fit-to-viewport; the Simple view at 390 px (real text and controls in reading order, the same ids and
-// messages, comment anchors that resolve in either view, the bar's toggle); no console errors. Exits 1 on a failure; skips (exit 0) without Google Chrome.
+// messages, comment anchors that resolve in either view, the bar's toggle); viewer options (viewport with
+// the room and color scheme, watch only, ask to control); no console errors. Exits 1 on a failure; skips (exit 0) without Google Chrome.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -1023,6 +1024,107 @@ await check("fits a small viewport and still maps clicks to window points", asyn
   assert(down && Math.abs(down.x - 400) <= 2 && Math.abs(down.y - 400) <= 2, "scaled click landed at " + (down && down.x + "," + down.y));
   await shot("5-fit-600");
   await cdp("Emulation.clearDeviceMetricsOverride");
+});
+
+// ---- viewer options: the room and color scheme the viewer reports, and the host's control modes
+
+const INPUT_TYPES = new Set(["act", "pointer", "text", "key", "setText", "menuAction", "windowAction"]);
+const controlText = () => evaluate(`(() => { const c = document.querySelector('.otm-control'); return c && !c.hidden ? c.textContent.trim() : ''; })()`);
+const control = (m) => stubSend({ t: "control", mode: "everyone", you: true, requested: false, holder: null, ...m });
+
+await check("the viewer reports its room and color scheme on connect, on a scheme change and after a resize (viewport)", async () => {
+  await received(true);
+  await stubPost("/__stub/close");
+  const first = (await waitReceived((m) => m.t === "viewport", "a viewport after connecting", 6000))[0];
+  const room = await evaluate(`(() => { const d = document.getElementById('otm-desk'); return { w: Math.floor(d.clientWidth - 48), h: Math.floor(d.clientHeight - 48) }; })()`);
+  assert(first.w === room.w && first.h === room.h, "viewport " + JSON.stringify(first) + " for a desk with room " + JSON.stringify(room));
+  assert(first.appearance === "light", "headless Chrome prefers light, got " + first.appearance);
+  await received(true);
+  await cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] });
+  const dark = (await waitReceived((m) => m.t === "viewport" && m.appearance === "dark", "a dark viewport"))[0];
+  assert(dark.w === room.w && dark.h === room.h, "the size changed with the scheme: " + JSON.stringify(dark));
+  await received(true);
+  await cdp("Emulation.setDeviceMetricsOverride", { width: 1000, height: 700, deviceScaleFactor: 2, mobile: false });
+  const resized = (await waitReceived((m) => m.t === "viewport" && m.w < room.w, "a viewport after resizing"))[0];
+  const small = await evaluate(`(() => { const d = document.getElementById('otm-desk'); return { w: Math.floor(d.clientWidth - 48), h: Math.floor(d.clientHeight - 48) }; })()`);
+  assert(resized.w === small.w && resized.h === small.h && resized.appearance === "dark", "resized viewport " + JSON.stringify(resized) + " for " + JSON.stringify(small));
+  // A burst of resizes says the size once it settles.
+  assert((await received()).filter((m) => m.t === "viewport").length === 1, "more than one viewport for one resize");
+  // The Simple view has no size wish.
+  await received(true);
+  await evaluate(`document.getElementById('otm-view-simple').click()`);
+  const simple = (await waitReceived((m) => m.t === "viewport" && m.w === 0, "a Simple view viewport"))[0];
+  assert(simple.h === 0 && simple.appearance === "dark", "Simple view viewport " + JSON.stringify(simple));
+  await evaluate(`document.getElementById('otm-view-window').click()`);
+  await waitReceived((m) => m.t === "viewport" && m.w > 0, "a window view viewport again");
+  await cdp("Emulation.setEmulatedMedia", { features: [] });
+  await cdp("Emulation.clearDeviceMetricsOverride");
+  await waitReceived((m) => m.t === "viewport" && m.appearance === "light" && m.w === room.w, "the first room again", 3000);
+});
+
+await check("watch only: nothing is sent, fields are read-only, menus go away, and the bar says why", async () => {
+  await control({ mode: "watchOnly", you: false });
+  await waitFor(`document.body.dataset.control === 'no'`, "the viewer to stop controlling");
+  const text = await controlText();
+  assert(text === "Watching only", "bar says " + JSON.stringify(text));
+  const field = await evaluate(`${byKey(CUSTOMER)}.readOnly`);
+  assert(field === true, "the field isn't read-only");
+  const menusShown = await evaluate(`getComputedStyle(document.querySelector('.otm-menus')).display`);
+  assert(menusShown === "none", "menus still show: " + menusShown);
+  await received(true);
+  const c = await nodeCenter(ADD);
+  await click(c.x, c.y);
+  const p = await windowPoint(400, 400);
+  await click(p.x, p.y);
+  await mouse("mouseWheel", p.x, p.y, { deltaX: 0, deltaY: 120 });
+  const f = await nodeCenter(CUSTOMER);
+  await click(f.x, f.y);
+  await press("a", "KeyA", 65, "a");
+  await press("Enter", "Enter", 13, "\r");
+  await sleep(400);
+  const pressed = await evaluate(`${byKey(ADD)}.classList.contains('otm-pressed')`);
+  assert(!pressed, "Add Order shows pressed for a watcher");
+  const value = await evaluate(`${byKey(CUSTOMER)}.value`);
+  assert(!value.endsWith("a"), "typing reached the read-only field: " + JSON.stringify(value));
+  const sent = (await received()).filter((m) => INPUT_TYPES.has(m.t));
+  assert(sent.length === 0, "a watcher sent " + JSON.stringify(sent).slice(0, 300));
+  await shot("9-watch-only");
+});
+
+await check("ask to control: Request Control asks with the overlay's name and id; once allowed input flows; it comes back after a reconnect; Give Back returns it", async () => {
+  await evaluate(`localStorage.setItem('__opentraffic_collab_name', 'Ada'); localStorage.setItem('__opentraffic_collab_client', 'client-test-0001')`);
+  await control({ mode: "askToControl", you: false, holder: "Bob" });
+  await waitFor(`document.querySelector('.otm-control-button') && document.querySelector('.otm-control-button').textContent === 'Request Control'`, "Request Control");
+  assert((await controlText()).startsWith("Bob has control"), "bar says " + (await controlText()));
+  await received(true);
+  await evaluate(`document.querySelector('.otm-control-button').click()`);
+  const ask = (await waitReceived((m) => m.t === "requestControl", "requestControl"))[0];
+  assert(ask.name === "Ada" && ask.client === "client-test-0001", "requestControl " + JSON.stringify(ask));
+  await control({ mode: "askToControl", you: false, requested: true, holder: "Bob" });
+  await waitFor(`document.querySelector('.otm-control-text').textContent === 'Asked the host…'`, "the waiting state");
+  assert(await evaluate(`document.querySelector('.otm-control-button').textContent`) === "Cancel", "no Cancel while waiting");
+  await control({ mode: "askToControl", you: true, holder: "Ada" });
+  await waitFor(`document.body.dataset.control === 'yes' && document.querySelector('.otm-control-text').textContent === 'You have control'`, "control");
+  assert(await evaluate(`${byKey(CUSTOMER)}.readOnly`) === false, "the field stays read-only with control");
+  await received(true);
+  const c = await nodeCenter(ADD);
+  await click(c.x, c.y);
+  await waitReceived((m) => m.t === "act" && m.key === ADD, "act press with control");
+  // A dropped connection: the page asks again with its id, and the server gives control back at once.
+  await received(true);
+  await stubPost("/__stub/close");
+  const again = (await waitReceived((m) => m.t === "requestControl", "requestControl after reconnecting", 6000))[0];
+  assert(again.client === "client-test-0001", "the reconnect asked without the id: " + JSON.stringify(again));
+  await shot("10-ask-to-control");
+  await received(true);
+  await evaluate(`document.querySelector('.otm-control-button').click()`);
+  await waitReceived((m) => m.t === "releaseControl", "releaseControl");
+  await control({ mode: "askToControl", you: false });
+  await waitFor(`document.querySelector('.otm-control-button').textContent === 'Request Control'`, "Request Control again");
+  assert(await evaluate(`sessionStorage.getItem('opentraffic.macapp.control')`) === null, "the page still thinks it had control");
+  await control({ mode: "everyone", you: true });
+  await waitFor(`document.body.dataset.control === 'yes' && document.querySelector('.otm-control').hidden`, "everyone controls again");
+  await evaluate(`localStorage.removeItem('__opentraffic_collab_name'); localStorage.removeItem('__opentraffic_collab_client')`);
 });
 
 await check("no console errors", async () => {

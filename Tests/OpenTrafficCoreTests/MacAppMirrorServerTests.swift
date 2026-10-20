@@ -840,27 +840,25 @@ struct MacAppMirrorServerFixtureTests {
         }
     }
 
-    @Test func aResizedWindowSendsANewWindowListAndAFullFrame() async throws {
+    @Test func aViewportResizesTheWindowWhichSendsANewWindowListAndAFullFrame() async throws {
         try await withMirroredOrbit { server, viewer, orbit in
-            let collected = OSAllocatedUnfairLock(initialState: [Proto.Viewport]())
-            let watcher = Task { for await event in server.events { if case .message(_, .viewport(let v), _) = event { collected.withLock { $0.append(v) } } } }
-            defer { watcher.cancel() }
             let hello = try #require(await viewer.first(within: .seconds(10)) { $0.hello != nil }?.received.item.hello)
             let start = try #require(await viewer.first(within: .seconds(10)) { $0.frame?.full == true })
             let window = try #require(hello.windows.first)
-            // What the viewer-options work will do on a `viewport`: resize the window through AXSize.
-            try await viewer.send(.viewport(.init(w: 1000, h: 700, appearance: nil)))
-            // Larger: Orbit has a minimum size. The app may round or limit the size, so compare with what it took.
-            let size = try resizeMainWindow(of: orbit.pid, to: CGSize(width: window.w + 80, height: window.h + 60))
-            #expect(size.width > window.w && size.height > window.h, "Orbit kept its size: \(size)")
-            let resized = try #require(await viewer.first(after: start.index) { item in
-                item.windows?.first.map { abs($0.w - size.width) <= 1 && abs($0.h - size.height) <= 1 } ?? false
-            }, "no window list with the new size \(size): \(viewer.items.compactMap(\.item.windows))")
-            #expect(resized.received.item.windows?.first?.id == window.id)
+            // Larger: Orbit has a minimum size. The server resizes the main window through AXSize to the
+            // viewer's room (viewer options, fit to the viewer); the app may round, so compare with what it took.
+            try await viewer.send(.viewport(.init(w: window.w + 80, h: window.h + 60, appearance: nil)))
+            let resized = try #require(await viewer.first(after: start.index, within: .seconds(10)) { item in
+                item.windows?.first.map { $0.w > window.w && $0.h > window.h } ?? false
+            }, "no window list with a larger size: \(viewer.items.compactMap(\.item.windows))")
+            let info = try #require(resized.received.item.windows?.first)
+            #expect(info.id == window.id)
+            let size = try mainWindowSize(of: orbit.pid)
+            #expect(abs(size.width - (window.w + 80)) <= 1 && abs(size.height - (window.h + 60)) <= 1, "AXSize is \(size)")
+            #expect(abs(info.w - size.width) <= 1 && abs(info.h - size.height) <= 1)
             // The capture follows the resize with a full frame of the new size (it may come before the window list).
             let resizedTile = await viewer.first(after: start.index + 1, within: .seconds(5), isTile(of: size))
             #expect(resizedTile != nil, "no full frame of \(size); frames: \(viewer.items.compactMap(\.item.frame))")
-            #expect(collected.withLock { $0 }.contains { $0.w == 1000 && $0.h == 700 })
         }
     }
 }
@@ -912,20 +910,15 @@ private func isTile(of size: CGSize) -> @Sendable (Viewer.Item) -> Bool {
     }
 }
 
-private func resizeMainWindow(of pid: pid_t, to size: CGSize) throws -> CGSize {
+private func mainWindowSize(of pid: pid_t) throws -> CGSize {
     let app = AXUIElementCreateApplication(pid)
     var value: CFTypeRef?
     guard AXUIElementCopyAttributeValue(app, kAXMainWindowAttribute as CFString, &value) == .success, let value else {
         throw FixtureError("Orbit has no main window")
     }
-    let window = value as! AXUIElement
-    var size = size
-    let axSize = AXValueCreate(.cgSize, &size)!
-    let result = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, axSize)
-    guard result == .success else { throw FixtureError("AXSize failed: \(result.rawValue)") }
     var current: CFTypeRef?
     var taken = CGSize.zero
-    guard AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &current) == .success, let current,
-          AXValueGetValue(current as! AXValue, .cgSize, &taken) else { throw FixtureError("can't read AXSize back") }
+    guard AXUIElementCopyAttributeValue(value as! AXUIElement, kAXSizeAttribute as CFString, &current) == .success, let current,
+          AXValueGetValue(current as! AXValue, .cgSize, &taken) else { throw FixtureError("can't read AXSize") }
     return taken
 }

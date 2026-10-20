@@ -735,6 +735,9 @@ private final class ProxyHandler: ChannelInboundHandler, RemovableChannelHandler
                 // through as they are. The socket drives the app, so only this share's pages may open it.
                 if isUpgrade, !proxy.acceptsOrigin(head) { return }
                 localRoute = false
+                // The host's own page controls the app whoever else may: only the proxy says so.
+                forwarded.headers.remove(name: MirrorProtocol.hostHeader)
+                if isUpgrade, proxy.isHost(head) { forwarded.headers.add(name: MirrorProtocol.hostHeader, value: "1") }
             } else if let target = CollabProxy.bridgedTarget(head.uri) {
                 guard proxy.allowsBridgedPort(target.port) else {
                     proxy.reportBridgeCandidate(target.port)

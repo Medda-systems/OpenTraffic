@@ -77,6 +77,21 @@ body {
 .otm-view[aria-pressed="true"] { background: rgba(255, 255, 255, .24); color: var(--otm-bar-fg); }
 .otm-view:focus-visible { outline: 2px solid var(--otm-accent); outline-offset: 1px; }
 
+/* Who may control the app (the host's choice): a hint while watching, Request Control when the host takes requests. */
+.otm-control { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; color: var(--otm-bar-muted); }
+.otm-control[hidden] { display: none; }
+.otm-control-text:empty { display: none; }
+.otm-control-button {
+  appearance: none; -webkit-appearance: none; margin: 0; padding: 2px 9px; border: 0; border-radius: 999px;
+  background: var(--otm-accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer;
+}
+.otm-control-button[hidden] { display: none; }
+.otm-control-button:hover { filter: brightness(1.08); }
+.otm-control-button:focus-visible { outline: 2px solid var(--otm-bar-fg); outline-offset: 1px; }
+/* Without control the app's menus aren't offered. */
+body[data-control="no"] .otm-menus, body[data-control="no"] .otm-bar .otm-menu-all { display: none !important; }
+body[data-control="no"] .otm-name.otm-menu-title { cursor: inherit; }
+
 /* The app's menu bar, in the desktop bar: the name opens the app's own menu, then its other menus.
    When they don't fit, one "Menu" button lists them all. */
 .otm-name.otm-menu-title { cursor: default; border-radius: 999px; padding: 1px 6px; margin: -1px -6px; }

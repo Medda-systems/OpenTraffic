@@ -36,6 +36,8 @@ private let everyServerMessage: [MP.ServerMessage] = [
     .status(MP.Status(state: .running)),
     .menu(MP.Menu(bar: [MP.MenuItem(title: "Orders", items: [MP.MenuItem(title: "Mark All Shipped", shortcut: "⇧⌘S"), MP.MenuItem(title: "Show Archived", enabled: false, checked: true)])])),
     .control(MP.Control(mode: .askToControl, you: false)),
+    .control(MP.Control(mode: .askToControl, you: false, requested: true, holder: "Ada")),
+    .control(MP.Control(mode: .watchOnly, you: true)),
 ]
 
 private let everyClientMessage: [MP.ClientMessage] = [
@@ -50,7 +52,9 @@ private let everyClientMessage: [MP.ClientMessage] = [
     .menuAction(MP.MenuAction(path: ["Orders", "Mark All Shipped"])),
     .windowAction(MP.WindowAction(window: 3, action: .focus)),
     .windowAction(MP.WindowAction(window: 3, action: .close)),
-    .requestControl,
+    .requestControl(MP.RequestControl(name: "Ada", client: "q9XAbc-_0123456789abcd")),
+    .requestControl(MP.RequestControl()),
+    .releaseControl,
 ]
 
 @Test func everyServerMessageRoundTrips() throws {
@@ -69,7 +73,7 @@ private let everyClientMessage: [MP.ClientMessage] = [
         #expect(try MP.ClientMessage.decode(text) == message, "\(text)")
         #expect(try object(text)["t"] as? String == message.type)
     }
-    #expect(Set(everyClientMessage.map(\.type)) == ["act", "pointer", "text", "key", "setText", "viewport", "menuAction", "windowAction", "requestControl"])
+    #expect(Set(everyClientMessage.map(\.type)) == ["act", "pointer", "text", "key", "setText", "viewport", "menuAction", "windowAction", "requestControl", "releaseControl"])
 }
 
 @Test func theContractsServerExamplesDecodeAndReencodeExactly() throws {
@@ -89,7 +93,9 @@ private let everyClientMessage: [MP.ClientMessage] = [
          .menu(MP.Menu(bar: [MP.MenuItem(title: "Orders", items: [MP.MenuItem(title: "Mark All Shipped", shortcut: "⇧⌘S"), .separatorItem])]))),
         (#"{"t":"menu","bar":[],"context":{"window":1,"x":52,"y":131,"items":[{"title":"Duplicate","enabled":true,"checked":false,"shortcut":null,"separator":false,"items":[]}]}}"#,
          .menu(MP.Menu(bar: [], context: MP.ContextMenu(window: 1, x: 52, y: 131, items: [MP.MenuItem(title: "Duplicate")])))),
-        (#"{"t":"control","mode":"everyone","you":true}"#, .control(MP.Control(mode: .everyone, you: true))),
+        (#"{"t":"control","mode":"askToControl","you":false,"requested":true,"holder":"Ada"}"#,
+         .control(MP.Control(mode: .askToControl, you: false, requested: true, holder: "Ada"))),
+        (#"{"t":"control","mode":"everyone","you":true,"requested":false,"holder":null}"#, .control(MP.Control(mode: .everyone, you: true))),
     ]
     for (json, expected) in examples {
         let decoded = try MP.ServerMessage.decode(json)
@@ -113,7 +119,9 @@ private let everyClientMessage: [MP.ClientMessage] = [
         (#"{"t":"menuAction","path":["Orders","Mark All Shipped"],"context":false}"#, .menuAction(MP.MenuAction(path: ["Orders", "Mark All Shipped"]))),
         (#"{"t":"menuAction","path":[],"context":true}"#, .menuAction(MP.MenuAction(path: [], context: true))),
         (#"{"t":"windowAction","window":2,"action":"close"}"#, .windowAction(MP.WindowAction(window: 2, action: .close))),
-        (#"{"t":"requestControl"}"#, .requestControl),
+        (#"{"t":"requestControl","name":"Ada","client":"q9X…"}"#, .requestControl(MP.RequestControl(name: "Ada", client: "q9X…"))),
+        (#"{"t":"releaseControl"}"#, .releaseControl),
+        (#"{"t":"viewport","w":0,"h":0,"appearance":null}"#, .viewport(MP.Viewport(w: 0, h: 0))),
     ]
     for (json, expected) in examples {
         let decoded = try MP.ClientMessage.decode(json)
@@ -131,6 +139,12 @@ private let everyClientMessage: [MP.ClientMessage] = [
     #expect(node["value"] is NSNull)
     #expect(try object(try MP.ServerMessage.status(MP.Status(state: .stopped)).jsonString())["message"] is NSNull)
     #expect(try object(try MP.ClientMessage.viewport(MP.Viewport(w: 1, h: 2)).jsonString())["appearance"] is NSNull)
+    #expect(try object(try MP.ServerMessage.control(MP.Control(mode: .everyone, you: true)).jsonString())["holder"] is NSNull)
+    #expect(try object(try MP.ClientMessage.requestControl(MP.RequestControl()).jsonString())["client"] is NSNull)
+    // The shapes reserved before the viewer options still read: a bare control and a bare requestControl.
+    #expect(try MP.ServerMessage.decode(#"{"t":"control","mode":"watchOnly","you":false}"#) == .control(MP.Control(mode: .watchOnly, you: false)))
+    #expect(try MP.ClientMessage.decode(#"{"t":"requestControl"}"#) == .requestControl(MP.RequestControl()))
+    #expect(try MP.ClientMessage.decode(#"{"t":"requestControl","name":7}"#) == .requestControl(MP.RequestControl()))
 
     // Read: the viewer may leave out wheel deltas and modifiers.
     #expect(try MP.ClientMessage.decode(#"{"t":"pointer","window":1,"kind":"down","x":3,"y":4}"#) == .pointer(MP.Pointer(window: 1, kind: .down, x: 3, y: 4)))
