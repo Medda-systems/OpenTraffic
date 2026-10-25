@@ -13,6 +13,9 @@ struct PermissionsWizardView: View {
 
     /// Permissions whose pane was opened from here, so the next hint can show.
     @State private var opened: Set<MacAppSession.Permission>
+    /// System Settings showed no window after Open System Settings (it can hang, or be left
+    /// running where macOS no longer counts it as open, and then nothing opens).
+    @State private var settingsDidNotOpen = false
 
     /// Off for renders of a made-up state (debug snapshots), which a live check would replace.
     private let checksLive: Bool
@@ -58,10 +61,25 @@ struct PermissionsWizardView: View {
                         // second opening.
                         let first = opened.insert(permission).inserted
                         store.requestMacAppPermission(permission, ask: first)
+                        settingsDidNotOpen = false
+                        Task {
+                            try? await Task.sleep(for: .seconds(4))
+                            settingsDidNotOpen = !Self.systemSettingsShowsAWindow()
+                        }
                     }
                 }
             }
             .padding(.horizontal, Spacing.xl)
+
+            if settingsDidNotOpen, !allOn {
+                InlineMessage(
+                    severity: .warning,
+                    message: "It may be stuck. Quit it with Force Quit (Option-Command-Esc), then click Open System Settings again.",
+                    title: "System Settings didn't open"
+                ) {}
+                .padding(.horizontal, Spacing.xl)
+                .padding(.top, Spacing.m)
+            }
 
             Label("OpenTraffic only reads and captures the app you share, and only while you share it.", systemImage: "lock.shield")
                 .font(.caption)
@@ -104,7 +122,15 @@ struct PermissionsWizardView: View {
         }
     }
 
-    static let size = CGSize(width: 580, height: 520)
+    static let size = CGSize(width: 580, height: 560)
+
+    /// Whether System Settings is running, as macOS counts apps, with a window on screen.
+    static func systemSettingsShowsAWindow() -> Bool {
+        let pids = Set(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.systempreferences").map(\.processIdentifier))
+        guard !pids.isEmpty else { return false }
+        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return windows.contains { ($0[kCGWindowOwnerPID as String] as? pid_t).map(pids.contains) == true && ($0[kCGWindowLayer as String] as? Int) == 0 }
+    }
 
     private var subtitle: String {
         if allOn { return "Both permissions are on. Share an app from the Mac Apps list in the menu bar." }
