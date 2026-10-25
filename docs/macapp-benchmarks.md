@@ -79,9 +79,12 @@ defaults find). Run it with an isolated OpenTraffic copy, never the one you use 
    ```sh
    sh Examples/macapp-orbit/package.sh                      # dist/Orbit.app
    OPENTRAFFIC_CONFIGURATION=release OPENTRAFFIC_BUNDLE_ID=se.medda.opentraffic.e2e \
-     OPENTRAFFIC_DIST_DIR=/tmp/ot-bench/dist OPENTRAFFIC_SIGNING_IDENTITY=- ./script/build_and_run.sh --build-only
+     OPENTRAFFIC_DIST_DIR=~/Library/Developer/OpenTraffic-e2e OPENTRAFFIC_SIGNING_IDENTITY=- ./script/build_and_run.sh --build-only
    ```
 
+   Not in `/tmp`: macOS doesn't register apps in temporary folders, so System Settings can't list
+   the copy and its permissions can't be seen or reset there. The copy shows as "OpenTraffic (e2e)";
+   its Permissions for Mac Apps window (`opentraffic permissions`) walks through granting them.
    Launch the copy with `CFFIXED_USER_HOME=/tmp/ot-bench/home` and
    `OPENTRAFFIC_SOCKET=/tmp/ot-bench/ot.sock`, from a terminal that has Accessibility and Screen
    Recording. Benchmark the release configuration: an unoptimized debug build can't compare Retina
@@ -90,7 +93,7 @@ defaults find). Run it with an isolated OpenTraffic copy, never the one you use 
 
    ```sh
    export OPENTRAFFIC_SOCKET=/tmp/ot-bench/ot.sock
-   /tmp/ot-bench/dist/OpenTraffic.app/Contents/MacOS/opentraffic-cli share Examples/macapp-orbit/dist/Orbit.app --via opentunnel --name Orbit
+   ~/Library/Developer/OpenTraffic-e2e/OpenTraffic.app/Contents/MacOS/opentraffic-cli share Examples/macapp-orbit/dist/Orbit.app --via opentunnel --name Orbit
    ```
 
    It prints the public URL (`https://….opentunnel.xyz`). `--via quick` (trycloudflare.com) works the
@@ -100,7 +103,7 @@ defaults find). Run it with an isolated OpenTraffic copy, never the one you use 
    doesn't:
 
    ```sh
-   for p in $(lsof -nP -a -p "$(pgrep -f /tmp/ot-bench/dist/OpenTraffic.app/Contents/MacOS/OpenTraffic)" -iTCP -sTCP:LISTEN | awk 'NR>1 {sub(/.*:/,"",$9); print $9}'); do
+   for p in $(lsof -nP -a -p "$(pgrep -f ~/Library/Developer/OpenTraffic-e2e/OpenTraffic.app/Contents/MacOS/OpenTraffic)" -iTCP -sTCP:LISTEN | awk 'NR>1 {sub(/.*:/,"",$9); print $9}'); do
      printf '%s mirror:%s proxy:%s\n' "$p" \
        "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$p/__opentraffic/macapp/viewer.js)" \
        "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$p/__opentraffic/collab.js)"
@@ -113,7 +116,7 @@ defaults find). Run it with an isolated OpenTraffic copy, never the one you use 
    ```sh
    node script/macapp-bench.mjs http://127.0.0.1:<mirror port> http://127.0.0.1:<proxy port> https://<name>.opentunnel.xyz \
      --label mirror --label proxy --label opentunnel \
-     --restart-cmd "/tmp/ot-bench/dist/OpenTraffic.app/Contents/MacOS/opentraffic-cli restart Orbit --app" \
+     --restart-cmd "~/Library/Developer/OpenTraffic-e2e/OpenTraffic.app/Contents/MacOS/opentraffic-cli restart Orbit --app" \
      --json /tmp/ot-bench/bench.json
    ```
 
