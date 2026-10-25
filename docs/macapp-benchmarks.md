@@ -79,7 +79,7 @@ defaults find). Run it with an isolated OpenTraffic copy, never the one you use 
    ```sh
    sh Examples/macapp-orbit/package.sh                      # dist/Orbit.app
    OPENTRAFFIC_CONFIGURATION=release OPENTRAFFIC_BUNDLE_ID=se.medda.opentraffic.e2e \
-     OPENTRAFFIC_DIST_DIR=/Users/Shared/OpenTraffic-e2e OPENTRAFFIC_SIGNING_IDENTITY=- ./script/build_and_run.sh --build-only
+     OPENTRAFFIC_DIST_DIR=/Users/Shared/OpenTraffic-e2e ./script/build_and_run.sh --build-only
    ```
 
    Not in `/tmp`, and not under `~/Library`: macOS doesn't register apps in temporary folders, so
@@ -88,8 +88,11 @@ defaults find). Run it with an isolated OpenTraffic copy, never the one you use 
    its Permissions for Mac Apps window (`opentraffic permissions`) walks through granting them.
    Launch the copy with `CFFIXED_USER_HOME=/tmp/ot-bench/home` and
    `OPENTRAFFIC_SOCKET=/tmp/ot-bench/ot.sock`, from a terminal that has Accessibility and Screen
-   Recording. Benchmark the release configuration: an unoptimized debug build can't compare Retina
-   frames fast enough and its numbers are meaningless.
+   Recording. Leave it signed with your Apple Development certificate (the script's default when
+   one is installed): the permissions you grant then stay with every rebuild, while an ad-hoc
+   build (`OPENTRAFFIC_SIGNING_IDENTITY=-`) needs them granted again each time. Benchmark the
+   release configuration: an unoptimized debug build can't compare Retina frames fast enough and
+   its numbers are meaningless.
 3. Share Orbit through OpenTunnel with the copy's command:
 
    ```sh
@@ -144,19 +147,19 @@ Copy the tables into Results below with the date, the machine and the build.
 The mirror server and the proxy ran in the test runner (`swift test -c release`, which has
 Accessibility and Screen Recording; the same `MacAppSession` and `CollabProxy` the app uses),
 serving `Examples/macapp-orbit/dist/Orbit.app` as an isolated copy with empty data; the restart
-command restarted the session. 30 presses and 30 keystrokes, 5 connects, 20 pings. The OpenTunnel
-column waits for an OpenTraffic test copy with the two permissions granted (the steps above).
+command restarted the session. 30 presses and 30 keystrokes, 5 connects, 20 pings. The tunnel
+numbers are in [In the app, through OpenTunnel](#in-the-app-through-opentunnel) below.
 
-| Row (p50 / p95 ms) | mirror (local) | proxy (local) | OpenTunnel |
-| --- | --- | --- | --- |
-| connect: first full frame | 18.2 / 20.5 | 21.2 / 24.3 | not yet measured |
-| network: ping round trip | 0.6 / 1.4 | 0.9 / 2.2 | not yet measured |
-| press -> tree | 60.9 / 99.5 | 60.3 / 85 | not yet measured |
-| press -> tile over element | 36.5 / 94.4 | 35.9 / 68.9 | not yet measured |
-| keystroke -> tile over field | 44.8 / 64.2 | 47 / 70.4 | not yet measured |
-| restart -> first full frame | 1225 (n=1) | 964 (n=1) | not yet measured |
-| idle kB/s, tiles/s | 74, 0.4 (two full frames in 5 s) | 37, 0.2 | not yet measured |
-| scrolling kB/s, tiles/s | 2156, 20 (83 kB per tile) | 2144, 23 | not yet measured |
+| Row (p50 / p95 ms) | mirror (local) | proxy (local) |
+| --- | --- | --- |
+| connect: first full frame | 18.2 / 20.5 | 21.2 / 24.3 |
+| network: ping round trip | 0.6 / 1.4 | 0.9 / 2.2 |
+| press -> tree | 60.9 / 99.5 | 60.3 / 85 |
+| press -> tile over element | 36.5 / 94.4 | 35.9 / 68.9 |
+| keystroke -> tile over field | 44.8 / 64.2 | 47 / 70.4 |
+| restart -> first full frame | 1225 (n=1) | 964 (n=1) |
+| idle kB/s, tiles/s | 74, 0.4 (two full frames in 5 s) | 37, 0.2 |
+| scrolling kB/s, tiles/s | 2156, 20 (83 kB per tile) | 2144, 23 |
 
 The first full frame of the 1020 by 660 point window is 184 kB (scale 2). Pressing costs about
 100 kB/s and typing about 85 kB/s. A debug build of the same host (`swift test`) gave press ->
@@ -167,8 +170,35 @@ redraw plus ScreenCaptureKit's next frame and the JPEG tile; press -> tree (61 m
 accessibility read of the whole window, which the tile doesn't wait for. The proxy adds nothing
 measurable on loopback. Two things to look at: when the app is idle the mirror still sends a full
 frame now and then (two in 5 s here, 184 kB each), and scrolling the long list sends 83 kB tiles
-at 20 per second (2 MB/s), which a tunnel can't carry; smaller tiles or a lower rate while
+at 20 per second (2 MB/s), more than a slow uplink can carry; smaller tiles or a lower rate while
 scrolling would help there.
+
+### In the app, through OpenTunnel
+
+25 October 2026, same Mac with an external display attached, macOS 27.0, Node 22. The isolated
+release copy (`se.medda.opentraffic.e2e`, the steps above) shared the Orbit fixture with
+`--via opentunnel`; the harness measured its mirror server, its proxy on loopback and the public
+URL in one run, restarting the app with `opentraffic-cli restart Orbit --app`. Load average 6 to 10
+from other work on the Mac. 30 presses and 30 keystrokes, 5 connects, 20 pings.
+
+| Row (p50 / p95 ms) | mirror (local) | proxy (local) | OpenTunnel |
+| --- | --- | --- | --- |
+| connect: socket upgrade | 2.6 / 10 | 2.8 / 6.1 | 302 / 530 |
+| connect: first full frame | 27.1 / 37.1 | 35.8 / 39.2 | 461 / 666 |
+| network: ping round trip | 0.5 / 1.1 | 0.9 / 2.5 | 93.3 / 102.7 |
+| press -> tree | 69.4 / 90.2 | 68.6 / 108.7 | 162 / 191 |
+| press -> tile over element | 42.3 / 67.4 | 43.1 / 88.6 | 135 / 163 |
+| keystroke -> tile over field | 55.2 / 73.4 | 52.8 / 77.9 | 153 / 177 |
+| restart -> first full frame | 1091 (n=1) | 724 (n=1) | 862 (n=1) |
+| idle kB/s, tiles/s | 1.6, 1.2 | 0, 0 | 1.7, 1.2 |
+| pressing kB/s | 112 | 115 | 85 |
+| scrolling kB/s, tiles/s | 3406, 18.7 (153 kB per tile) | 3362, 17.8 | 3396, 23.4 |
+
+The tunnel meets its target: press -> tile over element is the local 43 ms plus one round trip
+(93 ms) to 135 ms, and a keystroke's echo is 153 ms. Connecting costs about 300 ms for the TLS and
+WebSocket upgrade through the tunnel and 460 ms to the first full frame, which is 337 kB here (the
+window drew more detail than in the run above). Idle traffic was small tiles only, no full frames.
+Scrolling still sends 3.4 MB/s; this tunnel carried it, a slower uplink won't.
 
 ### Harness self-test (the stub, not product performance)
 
