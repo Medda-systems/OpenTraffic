@@ -39,7 +39,7 @@ opentraffic stop --all
 | `restart <share> --app` / `--reset-data` | Mac app shares: start just the app again from its latest build on the same address (after rebuilding it to show a fix), or start it over from the data it started with. |
 | `remove <share> [--yes]` (`rm`) | Remove a share with its settings and comments. Asks first on a terminal; scripts pass `--yes`. |
 | `rename <share> <new name>` | Rename. |
-| `set <share> [options]` | `--url PORT\|URL` (stop it first), `--collab on\|off`, `--errors on\|off`, `--branch on\|off`, `--autostart on\|off`, `--project NAME` / `--no-project`, `--host-header on\|off`, `--stop-after never\|15m\|1h\|4h`. |
+| `set <share> [options]` | `--url PORT\|URL` (stop it first), `--collab on\|off`, `--errors on\|off`, `--branch on\|off`, `--autostart on\|off`, `--project NAME` / `--no-project`, `--host-header on\|off`, `--stop-after never\|15m\|1h\|4h`; for a Mac app, `--control everyone\|watch-only\|ask`, `--appearance viewer\|mac\|light\|dark`, `--window-size fit\|app`. |
 | `protect <share> password [--user NAME]` | Protect a share with a generated password; prints it. Temporary and OpenTunnel shares get OpenTraffic's sign-in page (any username works there). |
 | `protect <share> google\|github [email …]` | Sign in with Google or GitHub (ngrok), optionally only for these emails. |
 | `protect <share> email <email …>` | One-time email codes for a custom domain (Cloudflare Access). |

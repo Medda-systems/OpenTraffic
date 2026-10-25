@@ -95,3 +95,11 @@ func parseSwitch(_ value: String, option: String) throws -> Bool {
     default: throw CLIError.usage("--\(option) takes on or off.")
     }
 }
+
+/// One of a few words (`--control watch-only`), as the API's value for it.
+func parseChoice(_ value: String, option: String, _ choices: KeyValuePairs<String, String>) throws -> String {
+    guard let match = choices.first(where: { $0.key == value.lowercased() }) else {
+        throw CLIError.usage("--\(option) takes \(choices.map(\.key).joined(separator: ", ")).")
+    }
+    return match.value
+}

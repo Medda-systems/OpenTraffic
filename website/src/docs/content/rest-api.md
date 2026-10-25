@@ -38,7 +38,7 @@ Shares are named by id or by name (case-insensitive); percent-encode names with 
 | GET | `/v1/shares` | | `{shares: [Share]}` |
 | POST | `/v1/shares` | see below | `Share` (waits ≤ 30 s for the URL) |
 | GET | `/v1/shares/{ref}` | | `Share` |
-| PATCH | `/v1/shares/{ref}` | `{name?, url?, collaboration?, captureErrors?, branch?, autoStart?, project?, rewriteHostHeader?, autoStop?}` | `Share` |
+| PATCH | `/v1/shares/{ref}` | `{name?, url?, collaboration?, captureErrors?, branch?, autoStart?, project?, rewriteHostHeader?, autoStop?, macAppControl?, macAppAppearance?, macAppWindowSize?}` | `Share`; the `macApp…` fields are a Mac app share's viewer options: `everyone`, `watchOnly` or `askToControl`; `viewer`, `mac`, `light` or `dark`; `fitViewer` or `app` |
 | DELETE | `/v1/shares/{ref}` | | `{deleted: true}` |
 | POST | `/v1/shares/{ref}/start`, `/stop`, `/restart` | | `Share` (`/stop` waits ≤ 10 s until it has stopped) |
 | POST | `/v1/shares/{ref}/restart-app`, `/reset-data` | | `Share`, once the Mac app is back: `/restart-app` starts a Mac app share's app again from its latest build on the same address, `/reset-data` starts it over from the data it started with (409 when the share isn't running, 502 `restart_failed` with the reason when the app doesn't come back) |

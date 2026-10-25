@@ -82,3 +82,13 @@ import Testing
     let apps = try #require(try JSON.decoder.decode(ServicesBody.self, from: services).apps)
     #expect(apps.map(\.device) == ["iPhone 17 Simulator", nil])
 }
+
+@Test func setTakesTheMacAppViewerOptions() throws {
+    let set = try Invocation.parse(["set", "Orbit", "--control", "watch-only", "--appearance", "dark", "--window-size", "app"])
+    #expect(set.options == ["control": "watch-only", "appearance": "dark", "window-size": "app"])
+    #expect(try parseChoice("Watch-Only", option: "control", ["everyone": "everyone", "watch-only": "watchOnly", "ask": "askToControl"]) == "watchOnly")
+    #expect(try parseChoice("fit", option: "window-size", ["fit": "fitViewer", "app": "app"]) == "fitViewer")
+    #expect(throws: CLIError.self) { try parseChoice("nobody", option: "control", ["everyone": "everyone", "watch-only": "watchOnly"]) }
+    let details = try #require(Commands.spec(named: "set")).details
+    #expect(details.contains("--control everyone|watch-only|ask") && details.contains("--appearance") && details.contains("--window-size"))
+}

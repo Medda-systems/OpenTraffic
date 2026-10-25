@@ -238,8 +238,15 @@ public struct APIShareUpdate: Codable, Equatable, Sendable {
     public var autoStop: String?
     /// Work on a branch of its own while running (collaboration, in a git repository).
     public var branch: Bool?
+    /// Mac app shares, the Live Collaboration card's viewer options: who controls the app
+    /// ("everyone", "watchOnly", "askToControl"), its appearance ("viewer", "mac", "light", "dark")
+    /// and its window size ("fitViewer", "app").
+    public var macAppControl: String?
+    public var macAppAppearance: String?
+    public var macAppWindowSize: String?
 
-    public init(name: String? = nil, url: String? = nil, collaboration: Bool? = nil, captureErrors: Bool? = nil, autoStart: Bool? = nil, project: String? = nil, rewriteHostHeader: Bool? = nil, autoStop: String? = nil, branch: Bool? = nil) {
+    public init(name: String? = nil, url: String? = nil, collaboration: Bool? = nil, captureErrors: Bool? = nil, autoStart: Bool? = nil, project: String? = nil, rewriteHostHeader: Bool? = nil, autoStop: String? = nil, branch: Bool? = nil,
+                macAppControl: String? = nil, macAppAppearance: String? = nil, macAppWindowSize: String? = nil) {
         self.name = name
         self.url = url
         self.collaboration = collaboration
@@ -249,6 +256,9 @@ public struct APIShareUpdate: Codable, Equatable, Sendable {
         self.rewriteHostHeader = rewriteHostHeader
         self.autoStop = autoStop
         self.branch = branch
+        self.macAppControl = macAppControl
+        self.macAppAppearance = macAppAppearance
+        self.macAppWindowSize = macAppWindowSize
     }
 }
 

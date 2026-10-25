@@ -476,6 +476,7 @@ extension AppStore {
             return duration
         }
         let newLocalURL = try update.url.map { try apiLocalURL(port: nil, url: $0) }
+        let macAppOptions = try apiMacAppOptions(update, for: definition)
         if update.rewriteHostHeader == true {
             var updated = definition
             updated.localURL = newLocalURL ?? definition.localURL
@@ -505,7 +506,28 @@ extension AppStore {
             }
         }
         if let autoStop { setAutoStop(id, after: autoStop) }
+        if let macAppOptions { setMacAppOptions(macAppOptions, for: id) }
         return try apiShare(apiDefinition(id.uuidString))
+    }
+
+    /// The share's viewer options with the update's changes, nil when it changes none.
+    private func apiMacAppOptions(_ update: APIShareUpdate, for definition: TunnelDefinition) throws -> MacAppViewerOptions? {
+        guard update.macAppControl != nil || update.macAppAppearance != nil || update.macAppWindowSize != nil else { return nil }
+        guard definition.macApp != nil else { throw OpenTrafficAPIError.badRequest("Viewer options are for Mac app shares.") }
+        var options = definition.macAppOptions ?? MacAppViewerOptions()
+        if let raw = update.macAppControl {
+            guard let control = MirrorProtocol.ControlMode(rawValue: raw) else { throw OpenTrafficAPIError.badRequest("macAppControl must be everyone, watchOnly, or askToControl.") }
+            options.control = control
+        }
+        if let raw = update.macAppAppearance {
+            guard let appearance = MacAppViewerOptions.Appearance(rawValue: raw) else { throw OpenTrafficAPIError.badRequest("macAppAppearance must be viewer, mac, light, or dark.") }
+            options.appearance = appearance
+        }
+        if let raw = update.macAppWindowSize {
+            guard let size = MacAppViewerOptions.WindowSize(rawValue: raw) else { throw OpenTrafficAPIError.badRequest("macAppWindowSize must be fitViewer or app.") }
+            options.windowSize = size
+        }
+        return options
     }
 
     func apiRestartShare(_ reference: String, client: String) async throws -> APIShare {

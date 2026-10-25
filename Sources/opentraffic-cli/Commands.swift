@@ -73,8 +73,16 @@ enum Commands {
               --project NAME         Put it in a project (--no-project to take it out)
               --host-header on|off   Send the local server's own host in the Host header (Vite, Next.js)
               --stop-after DURATION  Stop by itself: never, 15m, 1h, or 4h
+
+            Mac app shares (the Live Collaboration card's viewer options):
+              --control everyone|watch-only|ask   Who can click and type in the app (ask: viewers
+                                                  ask, you allow them on the card)
+              --appearance viewer|mac|light|dark  Light or dark: as the first viewer's browser
+                                                  prefers, as this Mac is, or always one
+              --window-size fit|app               Fill the first viewer's browser, or keep the
+                                                  app's own size
             """,
-            flags: ["no-project"], options: ["url", "collab", "errors", "branch", "autostart", "project", "host-header", "stop-after"], arguments: 1...1
+            flags: ["no-project"], options: ["url", "collab", "errors", "branch", "autostart", "project", "host-header", "stop-after", "control", "appearance", "window-size"], arguments: 1...1
         ),
         CommandSpec(
             name: "protect", group: "Shares", usage: "protect <share> password|google|github|email|off [email ...] [--user NAME]",
@@ -429,6 +437,9 @@ struct Context {
         if let value = options["stop-after"] { changes["autoStop"] = value }
         if let project = options["project"] { changes["project"] = project }
         if invocation.flag("no-project") { changes["project"] = "" }
+        if let value = options["control"] { changes["macAppControl"] = try parseChoice(value, option: "control", ["everyone": "everyone", "watch-only": "watchOnly", "ask": "askToControl"]) }
+        if let value = options["appearance"] { changes["macAppAppearance"] = try parseChoice(value, option: "appearance", ["viewer": "viewer", "mac": "mac", "light": "light", "dark": "dark"]) }
+        if let value = options["window-size"] { changes["macAppWindowSize"] = try parseChoice(value, option: "window-size", ["fit": "fitViewer", "app": "app"]) }
         guard !changes.isEmpty else {
             throw CLIError.usage("Nothing to change. Run `opentraffic help set` for the options.")
         }

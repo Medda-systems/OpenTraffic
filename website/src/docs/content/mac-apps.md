@@ -37,6 +37,8 @@ The Mac app section of the share's Live Collaboration card has three choices, ke
 - **Window size:** **Fit the viewer's browser** (the default) resizes the app's main window to fill the first viewer's browser (or the browser of the person you gave control), as far as the app's minimum size and OpenTraffic's off-screen display allow. Everyone else sees it scaled down. **The app's own size** leaves the window as the app made it.
 - **Appearance:** **First viewer's** (the default) shows the app light or dark as the first viewer's browser prefers; or pick **This Mac's**, **Light**, or **Dark**. Changing it restarts the copy with the same data. Dark only works while your Mac uses the Dark appearance; otherwise the app stays light, and the card says so.
 
+From the terminal: `opentraffic set Orbit --control watch-only` (`everyone`, `watch-only`, `ask`), `--appearance viewer|mac|light|dark` and `--window-size fit|app`.
+
 ## Permissions
 
 OpenTraffic needs two permissions to share a Mac app, both in System Settings → Privacy & Security:
@@ -102,7 +104,8 @@ Agents that read comments through MCP, the REST API, or the `opentraffic` comman
 ```sh
 opentraffic services                          # web servers, then the Mac apps you're building
 opentraffic share Orbit                       # share it by name, on a temporary URL
-opentraffic share dist/Orbit.app --via opentunnel --empty-data
+opentraffic share dist/Orbit.app --via opentunnel --empty-data --name "Orbit review"
+opentraffic set Orbit --control watch-only    # viewers watch; --control ask, or everyone again
 opentraffic restart Orbit --app               # after a rebuild: the new build, same address
 opentraffic restart Orbit --reset-data        # start over from the data it started with
 opentraffic stop Orbit
@@ -110,7 +113,7 @@ opentraffic stop Orbit
 
 - A name is matched against the apps `services` lists, ignoring case. When two builds have the same name, the running one wins; otherwise give the path.
 - Mac apps are shared with `--via quick` (the default) or `--via opentunnel`, always with live collaboration. Sharing the same app the same way again starts that share. `--save` isn't supported.
-- [REST API](/docs/rest-api): `POST /v1/shares` with `macApp` (the path or name) and `macAppData` (`copy` or `empty`); `POST /v1/shares/{ref}/restart-app` and `/reset-data`; `GET /v1/services` lists the apps under `apps`. A share without the permissions is refused with 409 `missing_permissions`; a restart whose app doesn't come back fails with 502 `restart_failed`.
+- [REST API](/docs/rest-api): `POST /v1/shares` with `macApp` (the path or name) and `macAppData` (`copy` or `empty`); `PATCH /v1/shares/{ref}` with `macAppControl`, `macAppAppearance` and `macAppWindowSize`; `POST /v1/shares/{ref}/restart-app` and `/reset-data`; `GET /v1/services` lists the apps under `apps`. A share without the permissions is refused with 409 `missing_permissions`; a restart whose app doesn't come back fails with 502 `restart_failed`.
 - [MCP](/docs/mcp): the `share` tool takes `mac_app` and `mac_app_data`, and `restart_mac_app` restarts the app (`reset_data` to start over).
 
 ## iPhone apps in the Simulator
