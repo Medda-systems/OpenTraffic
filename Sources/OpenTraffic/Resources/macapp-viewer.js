@@ -1401,6 +1401,8 @@
     if (!HOLDERS.has(sk)) return item.s;
     const shown = children.filter((c) => buildSimple(win, kids, c, false));
     if (sk === "row" && !shown.length) {
+      // A row the app hasn't laid out (scrolled out of a long list) has no cells and nothing to read.
+      if (!textOf(item.node)) return null;
       setText(item.s, textOf(item.node));
       return item.s;
     }
