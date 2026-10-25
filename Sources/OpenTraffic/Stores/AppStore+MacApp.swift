@@ -23,6 +23,7 @@ struct PendingMacAppShare: Equatable {
     var app: MacApp
     var kind: TunnelKind
     var data: MacAppSession.DataSource
+    var name: String? = nil
 }
 
 /// Sharing a native Mac app being developed: an isolated copy runs hidden on this Mac (see
@@ -79,7 +80,7 @@ extension AppStore {
         macAppPermissionPolling = nil
         if let pending = pendingMacAppShare {
             pendingMacAppShare = nil
-            share(pending.app, kind: pending.kind, data: pending.data)
+            share(pending.app, kind: pending.kind, data: pending.data, name: pending.name)
         }
     }
 
@@ -163,7 +164,8 @@ extension AppStore {
 
     /// One-step sharing of a Mac app, like a web server: reuse its saved share or create one. Without
     /// Accessibility and Screen Recording it waits for them and opens the window that walks through them.
-    func share(_ app: MacApp, kind: TunnelKind = .quick, data: MacAppSession.DataSource = .copy) {
+    /// `name` names a new share (default: the app's); a share of the app that exists keeps its own.
+    func share(_ app: MacApp, kind: TunnelKind = .quick, data: MacAppSession.DataSource = .copy, name: String? = nil) {
         let kind: TunnelKind = kind == .opentunnel ? .opentunnel : .quick
         if let device = app.simulator, !Self.sharesSimulatorApps {
             notice = AppNotice(.warning, "Sharing \(app.name) from the \(device.label) isn't available yet.")
@@ -175,7 +177,7 @@ extension AppStore {
         }
         refreshMacAppPermissions()
         guard missingMacAppPermissions.isEmpty else {
-            pendingMacAppShare = PendingMacAppShare(app: app, kind: kind, data: data)
+            pendingMacAppShare = PendingMacAppShare(app: app, kind: kind, data: data, name: name)
             showPermissionsWizard()
             return
         }
@@ -193,8 +195,8 @@ extension AppStore {
         }
         do {
             var definition = switch kind {
-            case .opentunnel: try addOpenTunnel(name: app.name, localURL: localURL, collaboration: true)
-            default: try addQuick(name: app.name, localURL: localURL, collaboration: true)
+            case .opentunnel: try addOpenTunnel(name: name ?? app.name, localURL: localURL, collaboration: true)
+            default: try addQuick(name: name ?? app.name, localURL: localURL, collaboration: true)
             }
             guard let index = definitions.firstIndex(where: { $0.id == definition.id }) else { return }
             definitions[index].macApp = app.id

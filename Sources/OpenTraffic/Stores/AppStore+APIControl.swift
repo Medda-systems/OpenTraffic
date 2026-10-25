@@ -207,12 +207,16 @@ extension AppStore {
             throw OpenTrafficAPIError.conflict("\(app.name) is already shared by “\(other.name)”. Stop that share first.")
         }
         try apiCheckMacAppSupport()
+        let name = request.name?.nilIfBlank
+        if let name, let other = definitions.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame && !($0.macApp == app.id && $0.kind == kind) }) {
+            throw OpenTrafficAPIError.conflict("A share named “\(other.name)” already exists. Pick another name, or remove it first.")
+        }
         if let blocker = await apiBlocker(for: kind) {
             throw OpenTrafficAPIError(status: 409, code: "not_ready", message: blocker)
         }
         try confirmAPIPublishing("share the Mac app \(app.name) publicly with \(kind.provider.title) and live collaboration", client: client)
         let earlierNotice = notice?.id
-        share(app, kind: kind, data: data)
+        share(app, kind: kind, data: data, name: name)
         guard let definition = definitions.first(where: { $0.macApp == app.id && $0.kind == kind }) else {
             let message = notice.flatMap { $0.id != earlierNotice && $0.severity == .error ? $0.message : nil }
             throw OpenTrafficAPIError.badRequest(message ?? "Couldn't share \(app.name).")
