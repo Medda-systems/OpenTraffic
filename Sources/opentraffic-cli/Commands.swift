@@ -117,6 +117,7 @@ enum Commands {
         CommandSpec(name: "install", group: "OpenTraffic", usage: "install <cloudflared|opentunnel|ngrok|tailscale>", summary: "Install a tool to share with, from its maker's official release (Tailscale asks for your Mac's password)", arguments: 1...1),
         CommandSpec(name: "setup", group: "OpenTraffic", usage: "setup", summary: "Start OpenTraffic if needed and check it answers (there's nothing to set up)"),
         CommandSpec(name: "show", group: "OpenTraffic", usage: "show [share]", summary: "Open OpenTraffic's window", arguments: 0...1),
+        CommandSpec(name: "permissions", group: "OpenTraffic", usage: "permissions", summary: "Open the window that walks you through the permissions sharing Mac apps needs (Accessibility and Screen Recording)"),
         CommandSpec(name: "help", group: "OpenTraffic", usage: "help [command]", summary: "Help for every command, or one", arguments: 0...1),
         CommandSpec(name: "version", group: "OpenTraffic", usage: "version", summary: "This command's version"),
     ]
@@ -183,6 +184,7 @@ struct Context {
         case "setup": try await setup()
         case "install": try await install()
         case "show": try show()
+        case "permissions": try permissions()
         case "help": try help()
         case "version": say(Self.version)
         default: throw CLIError.usage("Unknown command “\(invocation.command)”.")
@@ -814,6 +816,12 @@ struct Context {
         _ = try await client.setUp()
         if json { return say(JSON.pretty(JSON.encode(["ready": true]))) }
         say("\(style.green("✓")) Ready, nothing to set up. Try `opentraffic services` or `opentraffic share 3000`.")
+    }
+
+    func permissions() throws {
+        try client.openLink("opentraffic://permissions")
+        if json { return say(JSON.pretty(JSON.encode(["opened": true]))) }
+        say("OpenTraffic opened its permissions window: follow its steps on this Mac, then share again.")
     }
 
     func show() throws {

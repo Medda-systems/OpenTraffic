@@ -66,6 +66,8 @@ private struct GeneralSettingsView: View {
                 }
             }
 
+            MacAppPermissionsSettingsSection(store: store)
+
             UpdatesSettingsSection()
 
             Section {
@@ -240,5 +242,35 @@ private struct CommandLineToolRow: View {
             OpenTrafficCommandLink.uninstall()
         }
         installedPath = OpenTrafficCommandLink.installedPath
+    }
+}
+
+/// Whether Mac app sharing has the permissions it needs, and the way to turn them on.
+private struct MacAppPermissionsSettingsSection: View {
+    let store: AppStore
+
+    var body: some View {
+        Section {
+            ForEach(MacAppSession.Permission.allCases, id: \.self) { permission in
+                LabeledContent(permission.title) {
+                    let on = !store.missingMacAppPermissions.contains(permission)
+                    Label(on ? "On" : "Off", systemImage: on ? "checkmark.circle.fill" : "exclamationmark.circle")
+                        .foregroundStyle(on ? Color.green : Color.orange)
+                }
+            }
+            HStack {
+                Spacer()
+                Button(store.missingMacAppPermissions.isEmpty ? "Review Permissions…" : "Set Up Permissions…") {
+                    store.showPermissionsWizard()
+                }
+            }
+        } header: {
+            Text("Mac App Sharing")
+        } footer: {
+            Text("Sharing a Mac app or an iPhone app in the Simulator needs both. OpenTraffic only reads and captures the app you share.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .onAppear { store.refreshMacAppPermissions() }
     }
 }

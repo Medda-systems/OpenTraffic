@@ -118,6 +118,8 @@ extension AppStore {
             startProject(name)
         case .stopProject(let name):
             stopProject(name)
+        case .permissions:
+            showPermissionsWizard()
         case .enableAPI:
             enableAPIIfConfirmed()
         }

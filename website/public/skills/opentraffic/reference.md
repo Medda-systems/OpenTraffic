@@ -71,4 +71,5 @@ Every command takes `--json`. Exit status: `0` worked, `1` failed or refused, `2
 | `opentraffic setup` | Start OpenTraffic if it isn't running and check it answers. Nothing else to set up. |
 | `opentraffic install <cloudflared\|opentunnel\|ngrok\|tailscale>` | Install a tool to share with, from its maker's official release (Tailscale asks the user for their Mac's password). |
 | `opentraffic show [share]` | Open OpenTraffic's window. |
+| `opentraffic permissions` | Open the window that walks the user through the permissions sharing Mac apps needs. |
 | `opentraffic help [command]` | Help. |

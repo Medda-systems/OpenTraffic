@@ -110,13 +110,17 @@ public enum APIMacAppReference: Equatable, Sendable {
 
 extension OpenTrafficAPIError {
     /// Sharing a Mac app needs Accessibility and Screen Recording for OpenTraffic.
-    public static func missingMacAppPermissions(_ missing: [MacAppSession.Permission]) -> OpenTrafficAPIError {
+    /// With `wizardOpened`, OpenTraffic has opened its permissions window, which walks through them.
+    public static func missingMacAppPermissions(_ missing: [MacAppSession.Permission], wizardOpened: Bool = false) -> OpenTrafficAPIError {
         let names = missing.map(\.title)
         let list = names.count > 1 ? names.dropLast().joined(separator: ", ") + " and " + names[names.count - 1] : names.joined()
+        let how = wizardOpened
+            ? "OpenTraffic opened a window that walks you through it"
+            : "`opentraffic permissions` opens a window that walks you through it"
         return OpenTrafficAPIError(
             status: 409,
             code: "missing_permissions",
-            message: "OpenTraffic needs \(list) to share Mac apps. Turn \(names.count > 1 ? "them" : "it") on for OpenTraffic in System Settings → Privacy & Security (OpenTraffic's menu bar shows how), then share again."
+            message: "OpenTraffic needs \(list) to share Mac apps. Turn \(names.count > 1 ? "them" : "it") on for OpenTraffic in System Settings → Privacy & Security (\(how)), then share again."
         )
     }
 }

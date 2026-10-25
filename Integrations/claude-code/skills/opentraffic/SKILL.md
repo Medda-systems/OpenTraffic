@@ -23,7 +23,8 @@ For a native Mac app the user is building (SwiftUI, AppKit, Catalyst), call `sha
 or the full path of its .app) instead of `port`. OpenTraffic runs an isolated copy of the app, hidden, and people
 who open the link use its window in their browser. `mac_app_data: "empty"` starts the copy without the app's data.
 It needs Accessibility and Screen Recording for OpenTraffic: if `share` is refused with `missing_permissions`, ask
-the user to switch them on in System Settings → Privacy & Security (OpenTraffic's menu bar has buttons for it).
+the user to switch them on: OpenTraffic has opened a window on their Mac that walks them through it
+(`opentraffic permissions` opens it again). Share again once they say both are on.
 
 Comments on a Mac app are pinned to its controls: `label` reads like `Button “Add Order”`, and `context.selector`
 is the element's accessibility path, not a CSS selector. Find the view in the Swift sources by its label text or

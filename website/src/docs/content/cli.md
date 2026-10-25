@@ -96,6 +96,7 @@ opentraffic stop --all
 | `setup` | Turns on the local API. |
 | `install <cloudflared\|opentunnel\|ngrok\|tailscale>` | Installs a tool to share with, from its maker's official release, checked before it's installed (see [Installation](/docs/installation#tools-for-sharing)). Tailscale asks for your Mac's password. Does nothing if it's already there. |
 | `show [share]` | Opens OpenTraffic's window. |
+| `permissions` | Opens the window that walks you through the permissions sharing Mac apps needs (Accessibility and Screen Recording). |
 | `help [command]`, `version` | Help and version. |
 
 Shares are named by name (case-insensitive) or id; quote names with spaces.

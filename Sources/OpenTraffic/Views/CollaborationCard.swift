@@ -541,8 +541,8 @@ extension MacAppSession.State {
     }
 }
 
-/// What sharing a Mac app needs from System Settings, with buttons that ask macOS for it (its prompt
-/// lists OpenTraffic there) and open the pane where it's turned on.
+/// What sharing a Mac app needs from System Settings, with a button that opens the window walking
+/// through it (PermissionsWizardView).
 struct MacAppPermissionsMessage: View {
     let store: AppStore
     /// The app a share is waiting to start, if any.
@@ -552,10 +552,8 @@ struct MacAppPermissionsMessage: View {
     var body: some View {
         let missing = store.missingMacAppPermissions
         InlineMessage(severity: .warning, message: message(missing), title: missing.count == 1 ? "One permission needed" : "Two permissions needed") {
-            ForEach(missing, id: \.self) { permission in
-                Button("\(Self.shortTitle(permission))…") { store.requestMacAppPermission(permission) }
-                    .help("Ask macOS for \(permission.title) and open System Settings > Privacy & Security > \(permission.title)")
-            }
+            Button("Set Up…") { store.showPermissionsWizard() }
+                .help("Walks you through turning on \(missing.map(\.title).joined(separator: " and ")) in System Settings")
             if let onCancel { Button("Cancel", action: onCancel) }
         }
     }
@@ -573,7 +571,6 @@ struct MacAppPermissionsMessage: View {
         if missing.contains(.accessibility) { parts.append("Accessibility lets it read and press the app's controls.") }
         if missing.contains(.screenRecording) { parts.append("Screen Recording lets it show the app's window, and only that window.") }
         if waitingApp != nil { parts.append("The share starts once \(missing.count == 1 ? "it's" : "both are") on.") }
-        if missing.contains(.screenRecording) { parts.append("If Screen Recording stays off, quit and reopen OpenTraffic.") }
         return parts.joined(separator: " ")
     }
 }

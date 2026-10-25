@@ -63,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DemoCapture.start(store: AppStore.shared)
         #endif
         let store = AppStore.shared
+        store.resumeAfterPermissionsRelaunch()
         if store.globalHotKeysEnabled { GlobalHotKeys.shared.setEnabled(true) }
         if store.hasCompletedOnboarding, store.notifyWhenReady || store.notifyOnFailure {
             TunnelNotifications.requestAuthorizationIfNeeded()

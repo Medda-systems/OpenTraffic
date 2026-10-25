@@ -51,7 +51,7 @@ public final class MacAppSession {
     }
 
     /// A permission the share needs and doesn't have.
-    public enum Permission: String, Sendable, Equatable {
+    public enum Permission: String, Sendable, Equatable, CaseIterable {
         case accessibility
         case screenRecording
 

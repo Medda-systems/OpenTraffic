@@ -217,7 +217,10 @@ final class Client: Sendable {
 
     /// Hands a link to this copy of OpenTraffic (not whichever copy macOS would pick).
     func openLink(_ link: String) throws {
-        guard Shell.run("/usr/bin/open", ["-g", "-b", location.bundleID, link]) != nil else {
+        // To this command's own app when it's inside one: a copy macOS hasn't registered (a test
+        // build) can't be found by its bundle identifier.
+        let target = location.appURL.map { ["-a", $0.path] } ?? ["-b", location.bundleID]
+        guard Shell.run("/usr/bin/open", ["-g"] + target + [link]) != nil else {
             throw CLIError.failed("Couldn't reach OpenTraffic.")
         }
     }

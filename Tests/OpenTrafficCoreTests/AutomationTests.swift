@@ -123,6 +123,8 @@ private func parse(_ string: String) -> AutomationCommand? {
 
 @Test func linkTurnsOnTheLocalAPI() {
     #expect(AutomationCommand.parse(URL(string: "opentraffic://enable-api")!) == .enableAPI)
+    #expect(AutomationCommand.parse(URL(string: "opentraffic://permissions")!) == .permissions)
+    #expect(AutomationCommand.permissions.exposesService == false)
     #expect(AutomationCommand.parse(URL(string: "opentraffic:enable-api")!) == .enableAPI)
     // Turning the API on asks every time, so it doesn't count as quietly exposing anything.
     #expect(!AutomationCommand.enableAPI.exposesService)

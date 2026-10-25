@@ -306,8 +306,10 @@ private func json(_ response: APIResponse) throws -> [String: Any] {
     #expect(both.code == "missing_permissions")
     #expect(both.message.hasPrefix("OpenTraffic needs Accessibility and Screen & System Audio Recording to share Mac apps. Turn them on"))
     #expect(both.message.contains("System Settings → Privacy & Security"))
-    let one = OpenTrafficAPIError.missingMacAppPermissions([.screenRecording])
+    #expect(both.message.contains("`opentraffic permissions`"))
+    let one = OpenTrafficAPIError.missingMacAppPermissions([.screenRecording], wizardOpened: true)
     #expect(one.message.hasPrefix("OpenTraffic needs Screen & System Audio Recording to share Mac apps. Turn it on"))
+    #expect(one.message.contains("OpenTraffic opened a window that walks you through it"))
 }
 
 @Test func macAppSessionStatesHaveAPINames() {

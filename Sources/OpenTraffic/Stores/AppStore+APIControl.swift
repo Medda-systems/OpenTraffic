@@ -266,7 +266,11 @@ extension AppStore {
             throw OpenTrafficAPIError(status: 500, code: "internal", message: "OpenTraffic's Mac app support is missing from the app. Reinstall OpenTraffic.")
         }
         refreshMacAppPermissions()
-        if !missingMacAppPermissions.isEmpty { throw OpenTrafficAPIError.missingMacAppPermissions(missingMacAppPermissions) }
+        if !missingMacAppPermissions.isEmpty {
+            // The command can't turn them on; the person at this Mac can, with the wizard.
+            showPermissionsWizard()
+            throw OpenTrafficAPIError.missingMacAppPermissions(missingMacAppPermissions, wizardOpened: true)
+        }
     }
 
     /// A saved Mac app share that is about to start: refused (before asking) without the permissions,

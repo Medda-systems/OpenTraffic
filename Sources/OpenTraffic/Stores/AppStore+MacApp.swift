@@ -108,10 +108,58 @@ extension AppStore {
         macAppPermissionPolling = nil
     }
 
+    /// Opens the window that walks through the permissions (PermissionsWizardView).
+    func showPermissionsWizard() {
+        refreshMacAppPermissions()
+        PermissionsWindowController.shared.show(store: self)
+    }
+
+    /// The share waiting for permissions, kept across Quit & Reopen (Screen Recording applies when
+    /// the app starts): the app's id, the tunnel kind and its data.
+    private static let pendingShareKey = "pendingMacAppShareAfterRelaunch"
+
+    /// Quits and reopens OpenTraffic for Screen Recording to apply; a share waiting for it starts
+    /// once the app is back (and the wizard opens again if something is still off).
+    func relaunchForPermissions() {
+        var saved: [String: String] = ["wizard": "1"]
+        if let pending = pendingMacAppShare {
+            saved["app"] = pending.app.id
+            saved["kind"] = pending.kind.rawValue
+            saved["data"] = pending.data.rawValue
+        }
+        UserDefaults.standard.set(saved, forKey: Self.pendingShareKey)
+        AppRelauncher.relaunch()
+    }
+
+    /// At launch, after Quit & Reopen: starts the share that was waiting (it starts once both
+    /// permissions are on), or opens the wizard again while one is still off.
+    func resumeAfterPermissionsRelaunch() {
+        guard let saved = UserDefaults.standard.dictionary(forKey: Self.pendingShareKey) as? [String: String] else { return }
+        UserDefaults.standard.removeObject(forKey: Self.pendingShareKey)
+        refreshMacAppPermissions()
+        guard let id = saved["app"] else {
+            if !missingMacAppPermissions.isEmpty || saved["wizard"] != nil { showPermissionsWizard() }
+            return
+        }
+        let kind = saved["kind"].flatMap(TunnelKind.init(rawValue:)) ?? .quick
+        let data = saved["data"].flatMap(MacAppSession.DataSource.init(rawValue:)) ?? .copy
+        Task {
+            let app: MacApp? = SimulatorDiscovery.parseAppID(id) != nil
+                ? try? await Task.detached { try SimulatorDiscovery.resolve(id: id) }.value
+                : try? await Task.detached { try MacAppDiscovery.resolve(path: id) }.value
+            guard let app else {
+                if !missingMacAppPermissions.isEmpty { showPermissionsWizard() }
+                return
+            }
+            share(app, kind: kind, data: data)
+            if !missingMacAppPermissions.isEmpty || saved["wizard"] != nil { showPermissionsWizard() }
+        }
+    }
+
     // MARK: Sharing
 
     /// One-step sharing of a Mac app, like a web server: reuse its saved share or create one. Without
-    /// Accessibility and Screen Recording it waits for them (the menu bar shows how to turn them on).
+    /// Accessibility and Screen Recording it waits for them and opens the window that walks through them.
     func share(_ app: MacApp, kind: TunnelKind = .quick, data: MacAppSession.DataSource = .copy) {
         let kind: TunnelKind = kind == .opentunnel ? .opentunnel : .quick
         if let device = app.simulator, !Self.sharesSimulatorApps {
@@ -125,6 +173,7 @@ extension AppStore {
         refreshMacAppPermissions()
         guard missingMacAppPermissions.isEmpty else {
             pendingMacAppShare = PendingMacAppShare(app: app, kind: kind, data: data)
+            showPermissionsWizard()
             return
         }
         pendingMacAppShare = nil

@@ -44,9 +44,15 @@ OpenTraffic needs two permissions to share a Mac app, both in System Settings �
 - **Accessibility**, to read the app's controls and press them.
 - **Screen Recording** (called Screen & System Audio Recording on recent macOS), to show the app's window, and only that window.
 
-If you click **Share** without them, the Mac Apps list says which are missing. Click **Accessibility…** or **Screen Recording…**: macOS asks, and System Settings opens at the right list. Switch on OpenTraffic there. The share starts by itself once both are on; **Cancel** drops it. If Screen Recording stays off after you switched it on, quit and reopen OpenTraffic.
+If you click **Share** without them, a **Permissions for Mac Apps** window walks you through them, one step at a time:
 
-The share's Live Collaboration card shows the same buttons, or that both permissions are on. The `opentraffic` command, the REST API, and MCP don't wait: they refuse the share and say what's missing.
+1. **Open System Settings** asks macOS for the permission and opens the right list. Switch on OpenTraffic there. If OpenTraffic isn't in the list, drag its icon from the window into the list, or click **+** and choose it.
+2. Each step ticks itself off as soon as its switch is on, and the next one starts.
+3. macOS applies Screen Recording when an app starts. If its step still waits after you switched it on, click **Quit & Reopen**: OpenTraffic opens again and the share continues.
+
+The share starts by itself once both are on; **Cancel Share** drops it. You can open the window any time from Settings → General → Mac App Sharing, which also shows whether each permission is on, with `opentraffic permissions`, or with the link `opentraffic://permissions`.
+
+The share's Live Collaboration card says when a permission is missing, with a **Set Up…** button for the same window. The `opentraffic` command, the REST API, and MCP don't wait: they refuse the share, say what's missing, and open the window on your Mac.
 
 ## The isolated copy
 
@@ -134,7 +140,7 @@ Sharing an iPhone app shows viewers the Simulator's window for its device, cut t
 ## Troubleshooting
 
 - **The app isn't listed:** only debug builds and recent Xcode builds are. Share it by its path; if it's refused, the message says why (installed, signed by another team, or an Electron app).
-- **The share waits:** a permission is missing, and the Mac Apps list says which. See [Permissions](/docs/mac-apps#permissions).
+- **The share waits:** a permission is missing, and the Mac Apps list says which. Click **Set Up…**, or see [Permissions](/docs/mac-apps#permissions).
 - **"… is already shared by …":** that app is running in another share. Stop that one first.
 - **"The window server isn't answering", or the share takes long to start:** macOS's display system is slow to answer. It happens more while another OpenTraffic or a test run has its own off-screen display; the card warns about that. Wait a moment and try again. If it keeps happening, log out and back in, or restart the Mac.
 - **"The Simulator didn't show iPhone 17":** the Simulator app is open but has no window for that device. Open it with **File → Open Simulator**, then share again.

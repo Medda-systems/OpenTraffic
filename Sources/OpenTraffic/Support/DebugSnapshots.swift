@@ -50,6 +50,23 @@ enum DebugSnapshots {
                     to: URL(fileURLWithPath: folder).appending(path: "macapp-permissions-\(name).png")
                 )
             }
+            // The permissions window: both off with a share waiting, then Screen Recording's step
+            // with its hints, then everything on.
+            let waiting = store.pendingMacAppShare
+            if let orbit = store.detectedMacApps.first { store.pendingMacAppShare = PendingMacAppShare(app: orbit, kind: .opentunnel, data: .copy) }
+            for (state, missing) in [("both-off", [MacAppSession.Permission.accessibility, .screenRecording]), ("screen-off", [.screenRecording]), ("all-on", [])] {
+                store.missingMacAppPermissions = missing
+                for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                    render(
+                        PermissionsWizardView(store: store, onClose: {}, previewOpened: state == "screen-off" ? [.screenRecording] : Set())
+                            .tint(Brand.accent).background(Color(nsColor: .windowBackgroundColor)),
+                        size: PermissionsWizardView.size,
+                        appearance: appearance,
+                        to: URL(fileURLWithPath: folder).appending(path: "permissions-\(state)-\(name).png")
+                    )
+                }
+            }
+            store.pendingMacAppShare = waiting
             store.missingMacAppPermissions = granted
             if let request = ProcessInfo.processInfo.environment["OPENTRAFFIC_SNAPSHOTS_SHARE"].flatMap(\.nilIfBlank) {
                 await shareMacApp(request, store: store, folder: URL(fileURLWithPath: folder))
