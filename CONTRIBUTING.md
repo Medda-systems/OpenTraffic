@@ -29,7 +29,7 @@ swift test --disable-sandbox       # run the tests
 `build_and_run.sh` signs with your Apple Development certificate when you have one, so Keychain access
 survives rebuilds; otherwise it signs ad hoc and macOS may ask for Keychain access again after a rebuild.
 To keep a test build's settings and data apart from your real ones, give it another bundle identifier:
-`OPENTRAFFIC_BUNDLE_ID=se.medda.opentraffic.dev ./script/build_and_run.sh`.
+`OPENTRAFFIC_BUNDLE_ID=se.medda.opentraffic.dev ./script/build_and_run.sh`. It shows as "OpenTraffic (dev)" in Finder and System Settings, so its permissions aren't mixed up with the installed app's (`OPENTRAFFIC_DISPLAY_NAME` sets another name).
 
 For the website: `cd website && npm install && npm run dev`.
 

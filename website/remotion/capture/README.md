@@ -7,7 +7,7 @@ so capturing never takes over the screen or touches your own OpenTraffic.
 1. Build a separate copy, so its settings don't mix with yours:
 
    ```sh
-   OPENTRAFFIC_BUNDLE_ID=se.medda.opentraffic.demo OPENTRAFFIC_DIST_DIR=/tmp/ot-demo-app \
+   OPENTRAFFIC_BUNDLE_ID=se.medda.opentraffic.demo OPENTRAFFIC_DISPLAY_NAME=OpenTraffic OPENTRAFFIC_DIST_DIR=/tmp/ot-demo-app \
      OPENTRAFFIC_SIGNING_IDENTITY=- ./script/build_and_run.sh --build-only
    ```
 

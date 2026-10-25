@@ -124,6 +124,9 @@ struct PermissionsWizardView: View {
 
     static let size = CGSize(width: 580, height: 560)
 
+    /// The name this OpenTraffic has in System Settings' lists (a test build's says which it is).
+    static let appName = (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "OpenTraffic"
+
     /// Whether System Settings is running, as macOS counts apps, with a window on screen.
     static func systemSettingsShowsAWindow() -> Bool {
         let pids = Set(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.systempreferences").map(\.processIdentifier))
@@ -236,8 +239,8 @@ private struct PermissionStepCard: View {
 
     private var hint: String {
         let pane = "Privacy & Security > \(permission.settingsListName)"
-        if !wasOpened { return "Opens \(pane). Switch on OpenTraffic there; macOS may ask for your password." }
-        var text = "In \(pane), switch on OpenTraffic. Not in the list? Drag the icon below into it (or drag it from Finder), or click + and choose it."
+        if !wasOpened { return "Opens \(pane). Switch on \(PermissionsWizardView.appName) there; macOS may ask for your password." }
+        var text = "In \(pane), switch on \(PermissionsWizardView.appName). Not in the list? Drag the icon below into it (or drag it from Finder), or click + and choose it."
         if permission == .screenRecording {
             text += " Already on and this step still waits? macOS applies it after OpenTraffic reopens: click Quit & Reopen."
         }
@@ -252,11 +255,14 @@ private struct AppDragTile: View {
 
     var body: some View {
         HStack(spacing: Spacing.s) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: bundle.path))
+            // The app's own icon image: the Finder icon of the bundle comes through macOS's icon
+            // treatment, which crops OpenTraffic's icon file at this size.
+            Image(nsImage: NSApp.applicationIconImage)
                 .resizable()
+                .interpolation(.high)
                 .frame(width: 32, height: 32)
             VStack(alignment: .leading, spacing: 2) {
-                Text(bundle.deletingPathExtension().lastPathComponent).font(.callout.weight(.medium))
+                Text(PermissionsWizardView.appName).font(.callout.weight(.medium))
                 Text(location).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: 0)

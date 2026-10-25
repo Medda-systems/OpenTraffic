@@ -5,6 +5,16 @@ MODE="${1:-run}"
 APP_NAME="OpenTraffic"
 # OPENTRAFFIC_BUNDLE_ID gives a test build its own preferences and Keychain (e.g. demo captures).
 BUNDLE_ID="${OPENTRAFFIC_BUNDLE_ID:-se.medda.opentraffic}"
+# The name people see (Finder, System Settings' privacy lists, the Dock). A test build with its own
+# bundle identifier says which one it is, so its row in Privacy & Security isn't mistaken for the
+# installed OpenTraffic: se.medda.opentraffic.e2e shows as "OpenTraffic (e2e)".
+if [[ -n "${OPENTRAFFIC_DISPLAY_NAME:-}" ]]; then
+  DISPLAY_NAME="$OPENTRAFFIC_DISPLAY_NAME"
+elif [[ "$BUNDLE_ID" == "se.medda.opentraffic" ]]; then
+  DISPLAY_NAME="OpenTraffic"
+else
+  DISPLAY_NAME="OpenTraffic (${BUNDLE_ID##*.})"
+fi
 # Updates (Sparkle): the feed every release publishes, and the public half of the signing key
 # (the private half is in the release maintainer's Keychain; see script/package_dmg.sh).
 # OPENTRAFFIC_UPDATE_FEED_URL and OPENTRAFFIC_UPDATE_PUBLIC_KEY point a test build at a local feed.
@@ -129,6 +139,8 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$BUNDLE_ID</string>
   <key>CFBundleName</key>
   <string>$APP_NAME</string>
+  <key>CFBundleDisplayName</key>
+  <string>$DISPLAY_NAME</string>
   <key>CFBundleIconFile</key>
   <string>OpenTraffic</string>
   <key>CFBundlePackageType</key>
