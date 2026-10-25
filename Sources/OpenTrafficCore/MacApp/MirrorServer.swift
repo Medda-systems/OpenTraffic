@@ -23,10 +23,13 @@ public protocol MirrorAccessibility: AnyObject, Sendable {
     /// Sets a window's size (AXSize) and returns the size it took (the app may keep a minimum or a
     /// maximum), or nil when the bridge can't resize windows.
     func resize(window: UInt32, to size: CGSize) async throws -> CGSize?
+    /// Makes this list or table row the selected one, as a click on it would.
+    func select(key: String, window: UInt32?) async throws
 }
 
 extension MirrorAccessibility {
     public func raise(window: UInt32) async throws {}
+    public func select(key: String, window: UInt32?) async throws {}
     public func close(window: UInt32) async throws {}
     public func resize(window: UInt32, to size: CGSize) async throws -> CGSize? { nil }
 }
@@ -1558,6 +1561,17 @@ public final class MirrorServer: @unchecked Sendable {
         shared.withLock { $0.runtime }?.requestResize()
     }
 
+    /// The unselected list or table row a plain click at this point is on (the click landed on the row
+    /// or on something in it other than a field), else nil.
+    static func rowToSelect(at point: CGPoint, in nodes: [MirrorProtocol.AXNode]) -> MirrorProtocol.AXNode? {
+        // Not the last node there: a table's AXColumn comes after its rows and spans them all.
+        let here = nodes.filter { $0.w > 0 && $0.h > 0 && CGRect(x: $0.x, y: $0.y, width: $0.w, height: $0.h).contains(point) }
+        guard let hit = here.max(by: { $0.depth < $1.depth }),
+              !["AXTextField", "AXTextArea", "AXSecureTextField", "AXSearchField", "AXComboBox"].contains(hit.role),
+              let row = here.filter({ $0.role == "AXRow" }).max(by: { $0.depth < $1.depth }), !row.selected else { return nil }
+        return row
+    }
+
     /// Cursor feedback from the tree: an I-beam over enabled text fields, a hand over links.
     private func updateCursor(_ id: Int, _ pointer: MirrorProtocol.Pointer) {
         guard let client = clients[id], let snapshot = snapshots[pointer.window] else { return }
@@ -1644,7 +1658,16 @@ public final class MirrorServer: @unchecked Sendable {
             case .pointer(let pointer):
                 try app.input.send(pointer, in: target)
                 if pointer.kind == .move { return }
-                if pointer.kind == .up { runtime.refresh(after: Self.pressRefreshes) }
+                if pointer.kind == .up {
+                    // The app is never active, so AppKit takes a click on a view that doesn't accept the
+                    // first mouse (SwiftUI's texts in a List row) as activation only: the row the click
+                    // was on is selected through Accessibility, as the click would have.
+                    if pointer.modifiers.isEmpty, let latest, let row = Self.rowToSelect(at: CGPoint(x: pointer.x, y: pointer.y), in: latest.nodes),
+                       let key = MirrorProtocol.NodeKey.unrebase(row.key, from: root) {
+                        try await app.accessibility.select(key: key, window: window)
+                    }
+                    runtime.refresh(after: Self.pressRefreshes)
+                }
                 if pointer.kind == .rightup, app.menus != nil {
                     // The app may pop up a context menu: read the menus often until it shows.
                     runtime.state.withLock { $0.rightClick = (window, CGPoint(x: pointer.x, y: pointer.y)) }

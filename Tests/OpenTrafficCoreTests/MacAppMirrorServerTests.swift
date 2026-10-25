@@ -35,6 +35,7 @@ private final class StubAccessibility: MirrorAccessibility, @unchecked Sendable 
         var windows: [AccessibilityTree.Window]
         var nodes: [Proto.AXNode] = stubNodes()
         var performed: [(key: String, action: Proto.Action, window: UInt32?)] = []
+        var selected: [String] = []
         var snapshots = 0
         var streams: [AsyncStream<AXChange>.Continuation] = []
     }
@@ -69,6 +70,10 @@ private final class StubAccessibility: MirrorAccessibility, @unchecked Sendable 
         emit()
     }
 
+    func select(key: String, window: UInt32?) async throws {
+        state.withLock { $0.selected.append(key) }
+    }
+
     func changes() -> AsyncStream<AXChange> {
         let (stream, continuation) = AsyncStream.makeStream(of: AXChange.self)
         state.withLock { $0.streams.append(continuation) }
@@ -82,6 +87,7 @@ private final class StubAccessibility: MirrorAccessibility, @unchecked Sendable 
     func setNodes(_ nodes: [Proto.AXNode]) { state.withLock { $0.nodes = nodes } }
     var snapshotCount: Int { state.withLock { $0.snapshots } }
     var performed: [(key: String, action: Proto.Action, window: UInt32?)] { state.withLock { $0.performed } }
+    var selected: [String] { state.withLock { $0.selected } }
 }
 
 private final class StubCapture: MirrorCapture, @unchecked Sendable {
@@ -431,6 +437,47 @@ struct MacAppMirrorServerStubTests {
         let performed = mirror.accessibility.performed
         #expect(performed.map(\.key) == ["/Window:/Button:Add Order", "/Window:/CheckBox:Gift"])
         #expect(performed.allSatisfy { $0.action == .press && $0.window == stubWindowID })
+    }
+
+    @Test func aClickOnARowsTextSelectsTheRow() async throws {
+        // The app is never active: AppKit drops a click on a SwiftUI text in a List row (it doesn't accept
+        // the first mouse), so the server selects the row through Accessibility after the click.
+        let accessibility = StubAccessibility()
+        accessibility.setNodes(stubNodes() + [
+            .init(key: "/Window:/Outline:", role: "AXOutline", x: 200, y: 60, w: 180, h: 120, depth: 1),
+            .init(key: "/Window:/Outline:/Row:", role: "AXRow", x: 200, y: 60, w: 180, h: 40, depth: 2, selected: true),
+            .init(key: "/Window:/Outline:/Row:/Cell:", role: "AXCell", x: 200, y: 60, w: 180, h: 40, depth: 3, selected: true),
+            .init(key: "/Window:/Outline:/Row:/Cell:/StaticText:Ada", role: "AXStaticText", label: "Ada", x: 210, y: 70, w: 50, h: 16, depth: 4),
+            .init(key: "/Window:/Outline:/Row:#2", role: "AXRow", x: 200, y: 100, w: 180, h: 40, depth: 2),
+            .init(key: "/Window:/Outline:/Row:#2/Cell:", role: "AXCell", x: 200, y: 100, w: 180, h: 40, depth: 3),
+            .init(key: "/Window:/Outline:/Row:#2/Cell:/StaticText:Grace", role: "AXStaticText", label: "Grace", x: 210, y: 110, w: 50, h: 16, depth: 4),
+            .init(key: "/Window:/Outline:/Row:#2/Cell:/TextField:Note", role: "AXTextField", label: "Note", value: "", x: 280, y: 110, w: 90, h: 20, depth: 4),
+            // A table's column comes after its rows and covers them.
+            .init(key: "/Window:/Outline:/Column:", role: "AXColumn", x: 200, y: 60, w: 180, h: 120, depth: 2),
+        ])
+        let mirror = try await StubMirror.start(accessibility: accessibility)
+        defer { Task { await mirror.server.stop() } }
+        let viewer = mirror.viewer()
+        defer { viewer.close() }
+        _ = try #require(await viewer.first { $0.frame != nil })
+
+        func click(_ x: Double, _ y: Double, _ modifiers: [Proto.Modifier] = []) async throws {
+            try await viewer.send(.pointer(.init(window: stubWindowID, kind: .down, x: x, y: y, modifiers: modifiers)))
+            try await viewer.send(.pointer(.init(window: stubWindowID, kind: .up, x: x, y: y, modifiers: modifiers)))
+        }
+        try await click(220, 115)                     // Grace's name: her row
+        try await click(220, 75)                      // Ada's name: her row is selected already
+        try await click(300, 115)                     // the field in Grace's row: the field's own click
+        try await click(220, 115, [.cmd])         // a Cmd-click is the app's to read
+        try await click(350, 130)                     // the empty part of Grace's row: the row too
+        try await click(50, 150)                      // outside any row
+        try await viewer.send(.text(.init(window: stubWindowID, text: "done")))
+
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(5))
+        while mirror.input.events.last != "text done", clock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(mirror.input.events.filter { $0.hasPrefix("pointer up") }.count == 6)
+        #expect(accessibility.selected == ["/Window:/Outline:/Row:#2", "/Window:/Outline:/Row:#2"])
     }
 
     @Test func aChangedTreeIsPushedWithin100Milliseconds() async throws {

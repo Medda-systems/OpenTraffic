@@ -151,6 +151,22 @@ public final class AccessibilityTree: @unchecked Sendable {
         }
     }
 
+    /// Selects the row with this key: its table or outline's AXSelectedRows becomes just this row
+    /// (AXSelected on the row where the parent doesn't take that). AppKit and SwiftUI lists follow as
+    /// they do a click, binding included.
+    public func select(key: String, window: UInt32? = nil) async throws {
+        try await act(key: key, window: window, operation: "select row") { [self] element in
+            if let parent = copy(element, kAXParentAttribute).map({ $0 as! AXUIElement }) {
+                var settable: DarwinBoolean = false
+                if AXUIElementIsAttributeSettable(parent, kAXSelectedRowsAttribute as CFString, &settable) == .success, settable.boolValue {
+                    let result = AXUIElementSetAttributeValue(parent, kAXSelectedRowsAttribute as CFString, [element] as CFArray)
+                    if result == .success { return result }
+                }
+            }
+            return AXUIElementSetAttributeValue(element, kAXSelectedAttribute as CFString, kCFBooleanTrue)
+        }
+    }
+
     /// The AXIdentifier of the element with this key in the last snapshot of `window` (by default the
     /// window snapshotted last): SwiftUI's `accessibilityIdentifier`, AppKit's `identifier`. Nil when it has
     /// none or isn't in that snapshot. For the agent's context (`MacAppAgentContext`), not the mirror.
