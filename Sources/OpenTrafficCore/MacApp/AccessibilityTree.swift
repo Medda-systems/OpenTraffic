@@ -98,6 +98,9 @@ public final class AccessibilityTree: @unchecked Sendable {
         public var isMain: Bool
         public var isFocused: Bool
         public var isMinimized: Bool
+        /// Whether it has a close button (AXCloseButton): a window with a title bar, or an alert's
+        /// window, does; the title bar helper windows macOS lists among the app's windows don't.
+        public var hasCloseButton: Bool = true
     }
 
     /// The app's windows, front to back (AXWindows).
@@ -111,7 +114,8 @@ public final class AccessibilityTree: @unchecked Sendable {
                        role: copy(element, kAXRoleAttribute) as? String ?? "", subrole: copy(element, kAXSubroleAttribute) as? String,
                        frame: frame(element) ?? .zero,
                        isMain: main.map { CFEqual($0, element) } ?? false, isFocused: focused.map { CFEqual($0, element) } ?? false,
-                       isMinimized: copy(element, kAXMinimizedAttribute) as? Bool ?? false)
+                       isMinimized: copy(element, kAXMinimizedAttribute) as? Bool ?? false,
+                       hasCloseButton: copy(element, kAXCloseButtonAttribute) != nil)
             }
         }
     }

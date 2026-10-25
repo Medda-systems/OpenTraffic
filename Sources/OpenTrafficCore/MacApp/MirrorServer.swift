@@ -807,7 +807,7 @@ public final class MirrorServer: @unchecked Sendable {
     static func mirroredWindows(_ windows: [AccessibilityTree.Window], current: MirrorProtocol.WindowID?) -> [MirroredWindow] {
         let candidates = windows.filter { window in
             window.number != nil && !window.isMinimized && window.frame.width >= minimumWindowSide && window.frame.height >= minimumWindowSide
-                && (window.role.isEmpty || window.role == "AXWindow")
+                && (window.role.isEmpty || window.role == "AXWindow") && !isTitleBarHelper(window, among: windows)
         }
         let isDialog = { (window: AccessibilityTree.Window) in window.subrole == "AXDialog" || window.subrole == "AXSystemDialog" }
         guard let main = candidates.first(where: { current != nil && $0.number == current })
@@ -824,6 +824,20 @@ public final class MirrorServer: @unchecked Sendable {
                                                  x: window.frame.minX - origin.x, y: window.frame.minY - origin.y, kind: kind,
                                                  parent: kind == .alert ? mainID : nil)
             return MirroredWindow(info: info, frame: window.frame, root: root)
+        }
+    }
+
+    /// macOS (15 and later) keeps an invisible helper window over every titled window's title bar
+    /// buttons, for the tiling menu that shows when the pointer rests there: 66 by 20 points at the
+    /// window's top-left, one button, no close button, subrole AXDialog, titled "Window". It is in
+    /// AXWindows like a window; listed as one it would be an alert on the main window that never
+    /// closes and takes the focus. A short window without a close button over another window's
+    /// title bar is such a helper.
+    static func isTitleBarHelper(_ window: AccessibilityTree.Window, among windows: [AccessibilityTree.Window]) -> Bool {
+        guard !window.hasCloseButton, window.frame.height <= 32 else { return false }
+        return windows.contains { other in
+            other.number != window.number && other.frame.height > 32 && other.frame.contains(window.frame)
+                && window.frame.minY - other.frame.minY <= 16
         }
     }
 

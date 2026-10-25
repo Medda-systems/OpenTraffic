@@ -53,6 +53,24 @@ private typealias Proto = MirrorProtocol
         #expect(MirrorServer.mirroredWindows([alert, main], current: nil).first?.info.id == 1)
     }
 
+    @Test func theTitleBarHelperWindowOverAWindowsButtonsIsNotAWindow() {
+        let main = window(1, title: "Orbit Orders", main: true, frame: CGRect(x: 1750, y: 1172, width: 1020, height: 660))
+        var helper = window(2, title: "Window", subrole: "AXDialog", frame: CGRect(x: 1762, y: 1176, width: 66, height: 20))
+        helper.hasCloseButton = false
+        let stats = window(3, title: "Statistics", focused: true, frame: CGRect(x: 1750, y: 1172, width: 360, height: 260))
+        var statsHelper = helper
+        statsHelper.number = 4
+        // A real short panel (a close button) and a short window elsewhere are windows.
+        var panel = window(5, title: "Inspector", frame: CGRect(x: 1770, y: 1180, width: 200, height: 28))
+        panel.hasCloseButton = true
+        var strip = window(6, title: "", subrole: "AXDialog", frame: CGRect(x: 1750, y: 1900, width: 66, height: 20))
+        strip.hasCloseButton = false
+        let mirrored = MirrorServer.mirroredWindows([helper, main, statsHelper, stats, panel, strip], current: nil)
+        #expect(mirrored.map(\.info.id) == [1, 3, 5, 6])
+        #expect(mirrored.map(\.info.kind) == [.main, .window, .window, .alert])
+        #expect(MirrorServer.focusedWindow([helper, main, statsHelper, stats], mirrored: mirrored) == 3)
+    }
+
     @Test func sheetsAndPopoversBecomeSurfacesOfTheirWindow() {
         let parent = MirrorServer.MirroredWindow(info: .init(id: 2, title: "Statistics", w: 360, h: 260, x: 40, y: 40, kind: .window),
                                                  frame: CGRect(x: 1790, y: 1212, width: 360, height: 260), root: "/Window:Statistics")
