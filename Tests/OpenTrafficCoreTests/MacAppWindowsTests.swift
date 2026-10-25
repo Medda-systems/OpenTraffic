@@ -230,7 +230,7 @@ private final class NoInput: MirrorInput, @unchecked Sendable {
         log.withLock { $0.append("pointer \(pointer.kind.rawValue) window \(window.id) frame \(Int(window.frame.minX)),\(Int(window.frame.minY))") }
     }
     func type(text: String) throws {}
-    func send(_ key: Proto.Key) throws {}
+    func send(_ key: Proto.Key) throws { log.withLock { $0.append("key \(key.code.rawValue)") } }
     func replaceText(in window: InputSynthesizer.Window, field: CGRect, with text: String, timeout: Duration) async throws {
         log.withLock { $0.append("setText \(text) window \(window.id) field \(Int(field.minX)),\(Int(field.minY))") }
     }
@@ -388,6 +388,27 @@ struct MacAppWindowsStubTests {
         let deadline = clock.now.advanced(by: .seconds(3))
         while !capture.isStopped, clock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
         #expect(capture.isStopped)
+    }
+
+    @Test func escapeClosesAnOpenPopover() async throws {
+        let mirror = try await start([Self.main])
+        defer { Task { await mirror.stop() } }
+        let viewer = mirror.viewer
+        _ = try #require(await viewer.frame(window: mainID))
+        try await viewer.send(.key(.init(window: mainID, code: .escape)))   // no popover: the app gets the key
+        let mark = viewer.count
+        let popoverFrame = CGRect(x: mainFrame.minX + 200, y: mainFrame.minY + 60, width: 220, height: 100)
+        mirror.accessibility.state.withLock { state in
+            state.surfaces[mainID] = [.init(number: 60, key: "/Window:/Button:Tracking/Popover:", role: "AXPopover", frame: popoverFrame)]
+            state.nodes[60] = [.init(key: "/Window:", role: "AXPopover", x: 0, y: 0, w: 220, h: 100, depth: 0)]
+        }
+        mirror.accessibility.emit(.sheetCreated)
+        _ = try #require(await viewer.windows(after: mark) { $0.contains { $0.kind == .popover } })
+        try await viewer.send(.key(.init(window: mainID, code: .escape)))   // closes the popover instead
+        try await viewer.send(.key(.init(window: mainID, code: .escape, modifiers: [.cmd]))) // Cmd-Escape is the app's
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(mirror.accessibility.state.withLock { $0.closed } == [60])
+        #expect(mirror.input.log.withLock { $0 } == ["key Escape", "key Escape"])
     }
 
     @Test func secondWindowsAndAppModalAlertsAreListedCapturedAndFocusedOrClosedFromTheViewer() async throws {

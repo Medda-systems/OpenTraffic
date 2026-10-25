@@ -1693,7 +1693,15 @@ public final class MirrorServer: @unchecked Sendable {
             case .text(let text):
                 try app.input.type(text: text.text)
             case .key(let key):
-                try app.input.send(key)
+                // Escape closes an open popover, as on the Mac; posted, it would reach the app's key
+                // window (the app is never active), not the popover.
+                if key.code == .escape, key.modifiers.isEmpty,
+                   let popover = try? await loop.submit({ self.windows.last { $0.kind == .popover }?.id }).get() {
+                    try await app.accessibility.close(window: popover)
+                    runtime.refresh(after: Self.pressRefreshes)
+                } else {
+                    try app.input.send(key)
+                }
             case .setText(let setText):
                 guard let node = try await node(setText.key) else { return }
                 try await app.input.replaceText(in: target, field: CGRect(x: node.x, y: node.y, width: node.w, height: node.h),
