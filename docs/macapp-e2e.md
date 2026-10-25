@@ -1,0 +1,92 @@
+# Mac app sharing, end to end
+
+`script/macapp-e2e.mjs` runs the whole journey of sharing a Mac app the way a person would, before a
+person tries it: it builds the Orbit fixture (`Examples/macapp-orbit`), launches an isolated
+OpenTraffic copy, shares Orbit with the copy's own `opentraffic` command through OpenTunnel, and
+drives the shared page from headless Chrome through its public address. Every step saves a
+screenshot; the run stops at the first failure, names the step and exits 1. Node only, no npm
+packages; Chrome is driven over its DevTools protocol.
+
+## Prerequisites
+
+- **An isolated OpenTraffic copy**, never the OpenTraffic you use day to day. Build it once (and
+  again after changing OpenTraffic) with its own bundle identifier, outside `/tmp` and `~/Library`
+  (see [Benchmarks](macapp-benchmarks.md#against-a-real-share-of-the-orbit-fixture) for why):
+
+  ```sh
+  OPENTRAFFIC_CONFIGURATION=release OPENTRAFFIC_BUNDLE_ID=se.medda.opentraffic.e2e \
+    OPENTRAFFIC_DIST_DIR=/Users/Shared/OpenTraffic-e2e ./script/build_and_run.sh --build-only
+  ```
+
+  Keep the default signing (your Apple Development certificate): the permissions below then stay
+  with every rebuild. `--build` makes the script run this command itself.
+- **Accessibility and Screen Recording for that copy** (it shows as "OpenTraffic (e2e)" in System
+  Settings → Privacy & Security). Its `opentraffic permissions` walks through them.
+- **Google Chrome** (`CHROME` points at another Chromium binary), Xcode's Swift toolchain (the
+  fixture and a small display probe are compiled), and a network that reaches opentunnel.xyz.
+- **A healthy window server.** The first step checks that `CGGetActiveDisplayList` answers in well under
+  a second ([Hidden windows](macapp-window-hiding.md)); on a Mac where it takes seconds every timing is
+  the window server's. Run one display-creating test at a time: not next to `swift test`'s fixture
+  suites.
+- **The copy isn't running.** The script launches it with its own home and API socket in the work
+  folder and quits it at the end; it refuses to start when the copy already runs.
+
+## Running it
+
+```sh
+node script/macapp-e2e.mjs                       # about 2 minutes
+node script/macapp-e2e.mjs --work /tmp/ot-e2e    # keep everything in this folder
+OPENTRAFFIC_E2E=1 swift test --filter MacAppEndToEndTests   # the same, from swift test
+```
+
+Options: `--app <OpenTraffic.app>` (default `/Users/Shared/OpenTraffic-e2e/OpenTraffic.app`), `--build`
+(rebuild that copy first), `--via opentunnel|quick`, `--name <share>` (default "Orbit E2E"),
+`--steps a,b` or `--skip a,b` (step names as printed; the set-up steps always run), and `--keep`
+(leave the share live and the copy running, to look at it afterwards; stop it with the command the
+script prints). `swift test` passes options in `OPENTRAFFIC_E2E_ARGS`.
+
+The work folder (by default a new `ot-e2e-<time>` folder in the temporary folder) holds the fixture's
+scratch copy, the copy's home and socket, Chrome's profile (deleted at the end), `shots/` with one
+screenshot per step (plus the open sheet, alert and popover, the dark app, the 1100 px window and the
+phone view), and `summary.json` with every step's result and duration. At the end the share is stopped,
+which removes its OpenTunnel route, and removed with its comments, and the copy quits (SIGTERM to the
+process the script started).
+
+## The steps
+
+| Step | What it proves |
+| --- | --- |
+| display is healthy | `CGGetActiveDisplayList` answers in under a second |
+| build the fixture | a scratch copy of `Examples/macapp-orbit` builds (`package.sh`) |
+| build the OpenTraffic copy | `--build` only; otherwise the existing copy is used |
+| launch the copy | the copy starts with its own home and API socket and answers |
+| share the fixture | `opentraffic share <Orbit.app> --via opentunnel --name … --collab` goes live; status says the app runs with collaboration on; the public URL answers |
+| page loads with the collab toolbar and the window | at 1440 px the viewer connects, shows Orbit's window (pixels and 60+ elements, 30 orders), the bar names Orbit and the collaboration overlay and its toolbar are on the page |
+| the picker selects Add Order with a label naming it | with the comment tool, the element under the pointer is Add Order's; a comment is posted on it |
+| the pinned comment is in opentraffic comments with the element's label | `opentraffic comments` has it, labelled Button “Add Order” |
+| dark appearance | `opentraffic set --appearance dark` restarts the app dark (dark pixels); back to the viewer's choice it is light again. Skipped when the Mac uses Light (an app can only be dark while the Mac is) |
+| selecting a row shows its order | a click on a customer's name selects the row; the detail pane shows that order |
+| the toggle changes the app | Express shipping flips and stays flipped, and the order's total changes |
+| the stepper changes the quantity | the stepper's upper half adds one |
+| the segmented filter filters the list | Shipped lists the 10 shipped orders, All the 30 again |
+| typing a customer and Add Order adds the order | a click in New customer, typing, Add Order: a 31st order with that name |
+| scrolling the long list reaches its end | wheel events over the list bring the last order into view |
+| a sheet opens and closes | Edit Address… opens the sheet as its own surface with its own pixels; Cancel closes it |
+| an alert opens and is dismissed | Delete Order's alert shows; Cancel closes it and the order stays |
+| a popover opens and is dismissed | Tracking's popover shows; Escape closes it |
+| the app menu's action runs | Orders → Mark All Shipped from the viewer's menu bar: 0 open |
+| a context menu item runs | a right click on an order's name shows its context menu; Duplicate adds an order |
+| viewport resize resizes the window | at 1100 px the app's window is resized to the browser (not just scaled), and back at 1440 |
+| phone view at 390 px | the Simple view replaces the window: Add Order and the orders as list items with their text, nothing wider than the phone |
+| watch-only mode blocks input | `opentraffic set --control watch-only`: the bar says Watching only and a click changes nothing; `--control everyone` gives control back |
+| Reset Data restores the orders | `opentraffic restart --reset-data`: the 30 orders and 20 open again, on the same page |
+| Restart keeps the page connected | `opentraffic restart --app`: a new launch reaches the same page, which stays connected |
+| an edited label is rebuilt and shows in the browser | the fixture's `Add Order` becomes `Add New Order` in its sources; OpenTraffic rebuilds and relaunches it and the page shows the new label |
+| WebKit | skipped: there is no headless WebKit without npm packages, and Safari's WebDriver drives the user's own Safari |
+| no page errors | no JavaScript errors on the page |
+
+## Results
+
+25 October 2026, Mac15,12 (Apple M3, 16 GB), macOS 27.0, Chrome 155, release copy of OpenTraffic
+1.0.20+ (`se.medda.opentraffic.e2e`), OpenTunnel. Load average 13 to 30 from other work on the Mac.
+All steps passed in 68 s (the rebuild step 17 s of it; Orbit's debug build and relaunch).
