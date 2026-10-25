@@ -133,6 +133,11 @@ private struct PermissionStepCard: View {
                         Text("On").font(.callout.weight(.medium)).foregroundStyle(.green)
                     }
                 }
+                if permission.settingsListName != permission.title {
+                    Text("Called \(permission.settingsListName) in System Settings")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Text(purpose)
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -204,7 +209,7 @@ private struct PermissionStepCard: View {
     }
 
     private var hint: String {
-        let pane = "Privacy & Security > \(permission.title)"
+        let pane = "Privacy & Security > \(permission.settingsListName)"
         if !wasOpened { return "Opens \(pane). Switch on OpenTraffic there; macOS may ask for your password." }
         var text = "In \(pane), switch on OpenTraffic. Not in the list? Drag the icon below into it (or drag it from Finder), or click + and choose it."
         if permission == .screenRecording {

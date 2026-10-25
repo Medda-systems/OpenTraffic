@@ -41,7 +41,7 @@ The Mac app section of the share's Live Collaboration card has three choices, ke
 
 OpenTraffic needs two permissions to share a Mac app, both in System Settings → Privacy & Security:
 
-- **Accessibility**, to read the app's controls and press them.
+- **Accessibility** (called Device Control and Data Access on macOS 27), to read the app's controls and press them.
 - **Screen Recording** (called Screen & System Audio Recording on recent macOS), to show the app's window, and only that window.
 
 If you click **Share** without them, a **Permissions for Mac Apps** window walks you through them, one step at a time:

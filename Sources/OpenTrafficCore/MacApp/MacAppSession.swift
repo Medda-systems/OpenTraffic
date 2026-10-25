@@ -62,6 +62,17 @@ public final class MacAppSession {
             }
         }
 
+        /// The list in System Settings > Privacy & Security where it is switched on, as this Mac names
+        /// it: macOS 27 calls the Accessibility list "Device Control and Data Access".
+        public var settingsListName: String {
+            switch self {
+            case .accessibility:
+                ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 0))
+                    ? "Device Control and Data Access" : "Accessibility"
+            case .screenRecording: "Screen & System Audio Recording"
+            }
+        }
+
         /// The pane of System Settings where it is granted.
         public var settingsURL: URL {
             switch self {
