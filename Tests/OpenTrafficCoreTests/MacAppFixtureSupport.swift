@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import CryptoKit
 import Foundation
 import os
 import Testing
@@ -203,6 +204,17 @@ struct OrbitFixture {
     nonisolated static let app = folder.appendingPathComponent("dist/Orbit.app")
     nonisolated static let executable = app.appendingPathComponent("Contents/MacOS/Orbit")
     nonisolated static let bundleIdentifier = "se.medda.orbit"
+
+    /// Session folders for this checkout's fixture tests, in the temporary folder (per checkout, so
+    /// a leftover from an interrupted run is found and quit by the next run of this checkout only).
+    /// Not in `.build`: a checkout under Documents, Desktop or Downloads is behind macOS's folder
+    /// privacy, and the launched copy (ad hoc signed, unknown to the system) is denied the launch log
+    /// `open --stdout` makes it open there, so it never starts (LaunchServices error -10810).
+    nonisolated static func sessions(_ name: String) -> URL {
+        let checkout = Insecure.MD5.hash(data: Data(repository.path.utf8)).prefix(6).map { String(format: "%02x", $0) }.joined()
+        return URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("opentraffic-\(name)-\(checkout)", isDirectory: true)
+    }
 
     let running: NSRunningApplication
     let hider: MacAppWindowHider

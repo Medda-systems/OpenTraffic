@@ -349,9 +349,8 @@ struct MacAppSessionFixtureTests {
 
 private let sessionAssets = MirrorServer.Assets(page: Data("<!doctype html><title>Orbit</title>".utf8), script: Data(), style: Data())
 
-/// Session folders of the fixture tests: in this checkout's .build, so a leftover from an
-/// interrupted run is found (and its copy quit) by the next run of this checkout only.
-private let fixtureSessions = OrbitFixture.repository.appendingPathComponent(".build/macapp-session-tests", isDirectory: true)
+/// Session folders of the fixture tests (see `OrbitFixture.sessions`: per checkout, outside `.build`).
+private let fixtureSessions = OrbitFixture.sessions("macapp-session-tests")
 
 @MainActor
 private func startOrbitSession(restartsAutomatically: Bool = true) async throws -> MacAppSession {

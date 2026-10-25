@@ -821,7 +821,7 @@ private let page = ["Accept": "text/html", "Sec-Fetch-Mode": "navigate"]
 struct MacAppShareProxyFixtureTests {
     @Test func visitorsGetTheViewerWithTheOverlayAndDriveTheAppThroughTheProxy() async throws {
         try OrbitFixture.buildIfNeeded()
-        let sessions = OrbitFixture.repository.appendingPathComponent(".build/macapp-share-tests", isDirectory: true)
+        let sessions = OrbitFixture.sessions("macapp-share-tests")
         await MacAppSession.removeLeftovers(in: sessions)
         let app = MacApp(name: "Orbit", bundle: OrbitFixture.app, bundleIdentifier: OrbitFixture.bundleIdentifier,
                          projectDirectory: OrbitFixture.folder, isRunning: false)

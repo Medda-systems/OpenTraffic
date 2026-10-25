@@ -723,8 +723,8 @@ struct MacAppViewerOptionsFixtureTests {
 }
 
 private let fixtureAssets = MirrorServer.Assets(page: Data("<!doctype html><title>Orbit</title>".utf8), script: Data(), style: Data())
-/// In this checkout's .build, like the session fixture tests' folders.
-private let fixtureSessions = OrbitFixture.repository.appendingPathComponent(".build/macapp-session-tests", isDirectory: true)
+/// The session fixture tests' folders (see `OrbitFixture.sessions`).
+private let fixtureSessions = OrbitFixture.sessions("macapp-session-tests")
 
 @MainActor
 private func startOrbitSession(_ options: MacAppViewerOptions) async throws -> MacAppSession {
