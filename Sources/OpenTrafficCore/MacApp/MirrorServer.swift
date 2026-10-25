@@ -81,6 +81,13 @@ public protocol MirrorCapture: AnyObject, Sendable {
     func start() async throws
     func stop() async
     func fullFrame() async -> CapturedFrame?
+    /// The window's frame and its parent window's as Accessibility has them (global points), after
+    /// every refresh: a capture whose content is the parent window sends just the window's part.
+    func follow(frame: CGRect, parent: CGRect?)
+}
+
+extension MirrorCapture {
+    public func follow(frame: CGRect, parent: CGRect?) {}
 }
 
 /// Synthesized input for the app (`InputSynthesizer` in the product).
@@ -998,6 +1005,10 @@ public final class MirrorServer: @unchecked Sendable {
         guard generation == self.generation else { return }
         var texts: [String] = []
         self.mirrored = Dictionary(mirrored.map { ($0.info.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for window in mirrored {
+            let parent = window.info.parent.flatMap { id in mirrored.first { $0.info.id == id }?.frame }
+            captures[window.info.id]?.follow(frame: window.frame, parent: parent)
+        }
         let windows = mirrored.map(\.info)
         if windows != self.windows {
             self.windows = windows
@@ -1211,6 +1222,12 @@ public final class MirrorServer: @unchecked Sendable {
             return true
         }
         guard registered else { return }
+        if let (frame, parent) = try? await loop.submit({ () -> (CGRect, CGRect?)? in
+            guard let window = self.mirrored[id] else { return nil }
+            return (window.frame, window.info.parent.flatMap { self.mirrored[$0]?.frame })
+        }).get() {
+            capture.follow(frame: frame, parent: parent)
+        }
         var attempt = 0
         while true {
             attempt += 1

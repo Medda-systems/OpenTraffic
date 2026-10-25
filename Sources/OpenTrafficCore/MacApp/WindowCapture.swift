@@ -79,8 +79,18 @@ public final class WindowCapture: @unchecked Sendable {
     private var liveness: DispatchSourceTimer?
     private var configuration = SCStreamConfiguration()
     private var filter: SCContentFilter?
+    /// The size of what is sent, in points: the window's, or `crop`'s.
     private var pointWidth = 0
     private var pointHeight = 0
+    /// The window's size as the stream is configured for it.
+    private var windowWidth = 0
+    private var windowHeight = 0
+    /// The part of the window that is sent (window-local points), when the window server's window is
+    /// larger than what it shows: a sheet's window spans its parent window (macOS 26 and later).
+    private var crop: CGRect?
+    /// From `follow(frame:parent:)`.
+    private var frame: CGRect?
+    private var parentFrame: CGRect?
     private var scale = 2.0
     private var previous: [UInt8] = []
     private var previousWidth = 0
@@ -147,8 +157,9 @@ public final class WindowCapture: @unchecked Sendable {
             self.filter = filter
             self.configuration = configuration
             self.scale = scale
-            pointWidth = Int(size.width.rounded())
-            pointHeight = Int(size.height.rounded())
+            windowWidth = Int(size.width.rounded())
+            windowHeight = Int(size.height.rounded())
+            followCrop()
             needsFull = true
             self.stream = stream
         }
@@ -310,7 +321,7 @@ public final class WindowCapture: @unchecked Sendable {
         // The window's real size: the content is scaled down to fit the configured size until we follow it.
         let points = CGSize(width: contentRect.width / contentScale, height: contentRect.height / contentScale)
         let size = (width: Int(points.width.rounded()), height: Int(points.height.rounded()))
-        if size.width != pointWidth || size.height != pointHeight {
+        if size.width != windowWidth || size.height != windowHeight {
             return resize(to: size)
         }
 
@@ -318,9 +329,11 @@ public final class WindowCapture: @unchecked Sendable {
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         guard let base = CVPixelBufferGetBaseAddress(buffer) else { return }
         let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
-        let originX = Int((contentRect.minX * scaleFactor).rounded()), originY = Int((contentRect.minY * scaleFactor).rounded())
-        let width = min(Int((contentRect.width * scaleFactor).rounded()), CVPixelBufferGetWidth(buffer) - originX)
-        let height = min(Int((contentRect.height * scaleFactor).rounded()), CVPixelBufferGetHeight(buffer) - originY)
+        let area = crop ?? CGRect(x: 0, y: 0, width: contentRect.width / contentScale, height: contentRect.height / contentScale)
+        let originX = Int(((contentRect.minX + area.minX * contentScale) * scaleFactor).rounded())
+        let originY = Int(((contentRect.minY + area.minY * contentScale) * scaleFactor).rounded())
+        let width = min(Int((area.width * contentScale * scaleFactor).rounded()), CVPixelBufferGetWidth(buffer) - originX)
+        let height = min(Int((area.height * contentScale * scaleFactor).rounded()), CVPixelBufferGetHeight(buffer) - originY)
         guard width > 0, height > 0 else { return }
         let sent = process(pixels: UnsafeRawPointer(base) + originY * bytesPerRow + originX * 4, bytesPerRow: bytesPerRow, width: width, height: height)
         // Only partial frames arm a refresh: the window server's own whole-window re-renders (and the
@@ -432,8 +445,9 @@ public final class WindowCapture: @unchecked Sendable {
     private func resize(to size: (width: Int, height: Int)) {
         guard let stream, let filter, size.width > 0, size.height > 0 else { return }
         reconfiguring = true
-        pointWidth = size.width
-        pointHeight = size.height
+        windowWidth = size.width
+        windowHeight = size.height
+        followCrop()
         needsFull = true
         let configuration = Self.configuration(points: CGSize(width: size.width, height: size.height), scale: scale)
         self.configuration = configuration
@@ -457,6 +471,41 @@ public final class WindowCapture: @unchecked Sendable {
             }
             queue.async { self.reconfiguring = false }
         }
+    }
+
+    /// On `queue`: what is sent follows the captured content's size, cropped to the window's own
+    /// frame when the content is its parent window's.
+    private func followCrop() {
+        crop = Self.crop(content: CGSize(width: windowWidth, height: windowHeight), frame: frame, parent: parentFrame)
+        pointWidth = crop.map { Int($0.width.rounded()) } ?? windowWidth
+        pointHeight = crop.map { Int($0.height.rounded()) } ?? windowHeight
+    }
+
+    /// The window's frame and its parent window's, as Accessibility has them (global points), after
+    /// every refresh of the window list: a sheet's or popover's window captures as its whole parent
+    /// window (macOS 26 and later), so only the part at `frame` is sent.
+    public func follow(frame: CGRect, parent: CGRect?) {
+        queue.async { [self] in
+            guard frame != self.frame || parent != self.parentFrame else { return }
+            self.frame = frame
+            self.parentFrame = parent
+            guard windowWidth > 0 else { return }
+            let before = crop
+            followCrop()
+            if crop != before { needsFull = true }
+        }
+    }
+
+    /// The part of captured content of size `content` (points) that is the window at `frame`: nil when
+    /// the content is the window itself (its size, to a point or two), else `frame` within `parent`
+    /// when the content is the parent window.
+    static func crop(content: CGSize, frame: CGRect?, parent: CGRect?) -> CGRect? {
+        func same(_ a: CGSize, _ b: CGSize) -> Bool { abs(a.width - b.width) <= 2 && abs(a.height - b.height) <= 2 }
+        guard content.width > 0, content.height > 0, let frame, !same(content, frame.size), let parent, same(content, parent.size) else { return nil }
+        let local = CGRect(x: (frame.minX - parent.minX).rounded(), y: (frame.minY - parent.minY).rounded(),
+                           width: frame.width.rounded(), height: frame.height.rounded())
+        let inside = local.intersection(CGRect(origin: .zero, size: content))
+        return inside.isNull || inside.width < 1 || inside.height < 1 ? nil : inside
     }
 
     /// On `queue`: the window is gone, so stop the stream and finish `frames`.

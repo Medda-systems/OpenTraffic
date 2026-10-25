@@ -98,6 +98,22 @@ private typealias Rect = WindowCapture.TileRect
 // Each test takes a MacAppFixtureTurn (capture timing suffers when another Mac app test of this run
 // runs at the same time, and ScreenCaptureKit stalls while another test process keeps a virtual
 // display); the time limit allows for waiting for it.
+@Test func aSheetCapturedAsItsParentWindowIsCroppedToItsFrame() {
+    // A sheet's window captures as its whole parent window (1392 x 808 at -1500, 300; macOS 26 and
+    // later); the sheet is 380 x 154 inside it (Accessibility's frame), so only that part is sent.
+    let parent = CGRect(x: -1500, y: 300, width: 1392, height: 808)
+    let sheet = CGRect(x: -994, y: 327.4, width: 380, height: 154)
+    #expect(WindowCapture.crop(content: parent.size, frame: sheet, parent: parent) == CGRect(x: 506, y: 27, width: 380, height: 154))
+    // Content the window's own size (to a point or two): nothing to crop, parent or not.
+    #expect(WindowCapture.crop(content: CGSize(width: 381, height: 154), frame: sheet, parent: parent) == nil)
+    #expect(WindowCapture.crop(content: parent.size, frame: CGRect(x: -1499, y: 300, width: 1391, height: 807), parent: nil) == nil)
+    // Content of another size than the parent's (the window is being resized): not cropped.
+    #expect(WindowCapture.crop(content: CGSize(width: 1000, height: 700), frame: sheet, parent: parent) == nil)
+    // Partly outside the parent: what is inside; wholly outside: nothing.
+    #expect(WindowCapture.crop(content: parent.size, frame: CGRect(x: -150, y: 300, width: 300, height: 100), parent: parent) == CGRect(x: 1350, y: 0, width: 42, height: 100))
+    #expect(WindowCapture.crop(content: parent.size, frame: CGRect(x: 500, y: 300, width: 300, height: 100), parent: parent) == nil)
+}
+
 @Suite(.serialized, .enabled(if: WindowCapture.isPermitted, "needs Screen Recording permission"), .macAppFixtureTurn, .timeLimit(.minutes(10)))
 @MainActor
 struct LiveWindowCaptureTests {
