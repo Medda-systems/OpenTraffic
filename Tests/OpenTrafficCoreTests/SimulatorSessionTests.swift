@@ -665,7 +665,8 @@ struct SimulatorShareLifecycleTests {
         guard case .failed(let message) = session.state else { Issue.record("not failed: \(session.state)"); return }
         #expect(message.contains("didn't show iPhone 17"))
         #expect(world.calls.last == "stop YOUR-UDID real")
-        #expect(world.lastApp?.isRunning == false)
+        // Quitting the stub app finishes a moment after the start fails (later still on a busy Mac).
+        #expect(await waitFor { world.lastApp?.isRunning == false })
     }
 
     @Test func missingPermissionsStopTheStartBeforeAnythingRuns() async throws {

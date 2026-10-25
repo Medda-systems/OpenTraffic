@@ -73,7 +73,8 @@ private final class MockSecretStore: SecretStore, @unchecked Sendable {
     let store = MockSecretStore()
     let service = CredentialService(store: store, authenticator: MockAuthenticator())
     _ = try await service.unlock(key: "token", reason: "Unlock")
-    store.migrationDelayMicroseconds = 120_000
+    // Long enough to stay under way while a busy machine (a full test run) gets to the next step.
+    store.migrationDelayMicroseconds = 600_000
     let migration = Task { try await service.migrateLegacyToUserPresence(key: "token", reason: "Verify") }
     // Wait until it's really under way; a fixed pause loses the race on a busy machine.
     #expect(await eventually { store.migrationStarted })
@@ -91,7 +92,8 @@ private final class MockSecretStore: SecretStore, @unchecked Sendable {
     let store = MockSecretStore()
     let service = CredentialService(store: store, authenticator: MockAuthenticator())
     _ = try await service.unlock(key: "token", reason: "Unlock")
-    store.migrationDelayMicroseconds = 120_000
+    // Long enough to stay under way while a busy machine (a full test run) gets to the next step.
+    store.migrationDelayMicroseconds = 600_000
     let migration = Task { try await service.migrateLegacyToUserPresence(key: "token", reason: "Verify") }
     // Wait until it's really under way; a fixed pause loses the race on a busy machine.
     #expect(await eventually { store.migrationStarted })
