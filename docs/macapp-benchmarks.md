@@ -136,25 +136,35 @@ Copy the tables into Results below with the date, the machine and the build.
 
 ### Real app (Orbit fixture)
 
-Not yet measured: display subsystem degraded on 20 October 2026. On that day a
-`CGGetActiveDisplayList` call took 19-97 s, so no virtual display, Orbit copy or OpenTraffic test copy
-was started. Run the steps above when the probe answers in about 50 ms.
+25 October 2026, Mac15,12 (Apple M3, 8 cores, 16 GB), macOS 27.0, Node 22, one built-in display.
+The mirror server and the proxy ran in the test runner (`swift test -c release`, which has
+Accessibility and Screen Recording; the same `MacAppSession` and `CollabProxy` the app uses),
+serving `Examples/macapp-orbit/dist/Orbit.app` as an isolated copy with empty data; the restart
+command restarted the session. 30 presses and 30 keystrokes, 5 connects, 20 pings. The OpenTunnel
+column waits for an OpenTraffic test copy with the two permissions granted (the steps above).
 
 | Row (p50 / p95 ms) | mirror (local) | proxy (local) | OpenTunnel |
 | --- | --- | --- | --- |
-| connect: first full frame | not yet measured | not yet measured | not yet measured |
-| network: ping round trip | not yet measured | not yet measured | not yet measured |
-| press -> tree | not yet measured | not yet measured | not yet measured |
-| press -> tile over element | not yet measured | not yet measured | not yet measured |
-| keystroke -> tile over field | not yet measured | not yet measured | not yet measured |
-| restart -> first full frame | not yet measured | not yet measured | not yet measured |
-| idle kB/s, tiles/s | not yet measured | not yet measured | not yet measured |
-| scrolling kB/s, tiles/s | not yet measured | not yet measured | not yet measured |
+| connect: first full frame | 18.2 / 20.5 | 21.2 / 24.3 | not yet measured |
+| network: ping round trip | 0.6 / 1.4 | 0.9 / 2.2 | not yet measured |
+| press -> tree | 60.9 / 99.5 | 60.3 / 85 | not yet measured |
+| press -> tile over element | 36.5 / 94.4 | 35.9 / 68.9 | not yet measured |
+| keystroke -> tile over field | 44.8 / 64.2 | 47 / 70.4 | not yet measured |
+| restart -> first full frame | 1225 (n=1) | 964 (n=1) | not yet measured |
+| idle kB/s, tiles/s | 74, 0.4 (two full frames in 5 s) | 37, 0.2 | not yet measured |
+| scrolling kB/s, tiles/s | 2156, 20 (83 kB per tile) | 2144, 23 | not yet measured |
 
-What dominates: not known until the rows above are measured. Read it from the rows: press -> tree
-is the app plus the accessibility read; press -> tile minus press -> tree is capture and encoding
-(the tile usually comes after the tree); the tunnel row minus the local row, compared with the ping
-row, is the network.
+The first full frame of the 1020 by 660 point window is 184 kB (scale 2). Pressing costs about
+100 kB/s and typing about 85 kB/s. A debug build of the same host (`swift test`) gave press ->
+tile over element 47.7 / 86.4 ms direct and 41.5 / 76.9 ms through the proxy.
+
+What dominates: the tile comes before the tree. Press -> tile over element (36 ms) is the app's
+redraw plus ScreenCaptureKit's next frame and the JPEG tile; press -> tree (61 ms) adds the
+accessibility read of the whole window, which the tile doesn't wait for. The proxy adds nothing
+measurable on loopback. Two things to look at: when the app is idle the mirror still sends a full
+frame now and then (two in 5 s here, 184 kB each), and scrolling the long list sends 83 kB tiles
+at 20 per second (2 MB/s), which a tunnel can't carry; smaller tiles or a lower rate while
+scrolling would help there.
 
 ### Harness self-test (the stub, not product performance)
 
