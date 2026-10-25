@@ -124,9 +124,13 @@ defaults find). Run it with an isolated OpenTraffic copy, never the one you use 
      --json /tmp/ot-bench/bench.json
    ```
 
-6. Stop the share (`opentraffic-cli stop Orbit`), quit the copy, and remove what it left: the
-   OpenTunnel route it made under your address, the `se.medda.opentraffic.e2e` preferences and
-   `/tmp/ot-bench`.
+6. Stop the share (`opentraffic-cli stop Orbit`), quit the copy by its process
+   (`pkill -TERM -f /Users/Shared/OpenTraffic-e2e/OpenTraffic.app/Contents/MacOS/OpenTraffic`), and
+   remove what it left: the OpenTunnel route it made under your address, the
+   `se.medda.opentraffic.e2e` preferences and `/tmp/ot-bench`. Don't quit it with AppleScript
+   (`tell application id "se.medda.opentraffic.e2e" to quit`): when the copy isn't running, that
+   opens it first, without its own home folder and socket, and it takes over the API socket of the
+   OpenTraffic you use, which then can't be reached from `opentraffic` or MCP until it restarts.
 
 Copy the tables into Results below with the date, the machine and the build.
 
