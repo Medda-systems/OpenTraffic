@@ -697,8 +697,9 @@ struct MacAppBuildFixtureTests {
             print("MacAppBuild fixture: the new label and the selection were back \(took) after the edit; replay \(String(describing: session.lastReplay))")
             #expect(relabelled != nil, "the new label with the row selected again didn't show within 60 s")
             #expect(took < .seconds(60))
-            #expect(session.lastReplay?.stoppedAt == nil && (session.lastReplay?.replayed ?? 0) >= 2)
+            // The session records the replay, then says it runs: the report is there once viewers see `running`.
             #expect(await viewer.first(after: again.index, within: .seconds(5)) { $0.status?.state == .running } != nil)
+            #expect(session.lastReplay?.stoppedAt == nil && (session.lastReplay?.replayed ?? 0) >= 2, "replay \(String(describing: session.lastReplay))")
             #expect(session.recentLog.contains { $0.text.hasPrefix("Built Orbit in") })
 
             // A change that doesn't compile: the new build keeps running and the failure is logged.
