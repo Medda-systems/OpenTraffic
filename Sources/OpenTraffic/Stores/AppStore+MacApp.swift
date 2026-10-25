@@ -83,12 +83,15 @@ extension AppStore {
         }
     }
 
-    /// Asks macOS for a permission (its prompt the first time, which also lists OpenTraffic in
-    /// System Settings), opens the pane where it's turned on, and watches for the switch for a while.
-    func requestMacAppPermission(_ permission: MacAppSession.Permission) {
-        switch permission {
-        case .accessibility: AccessibilityTree.requestTrust()
-        case .screenRecording: WindowCapture.requestPermission()
+    /// Asks macOS for a permission (with `ask`: its prompt the first time, which also lists
+    /// OpenTraffic in System Settings), opens the pane where it's turned on, and watches for the
+    /// switch for a while.
+    func requestMacAppPermission(_ permission: MacAppSession.Permission, ask: Bool = true) {
+        if ask {
+            switch permission {
+            case .accessibility: AccessibilityTree.requestTrust()
+            case .screenRecording: WindowCapture.requestPermission()
+            }
         }
         NSWorkspace.shared.open(permission.settingsURL)
         macAppPermissionPolling?.cancel()

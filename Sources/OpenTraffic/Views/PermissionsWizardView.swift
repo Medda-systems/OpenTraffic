@@ -53,8 +53,11 @@ struct PermissionsWizardView: View {
                         isCurrent: missing.first == permission,
                         wasOpened: opened.contains(permission)
                     ) {
-                        opened.insert(permission)
-                        store.requestMacAppPermission(permission)
+                        // macOS's own prompt only the first time: it lists OpenTraffic in System
+                        // Settings, and its button opens System Settings too, which would race the
+                        // second opening.
+                        let first = opened.insert(permission).inserted
+                        store.requestMacAppPermission(permission, ask: first)
                     }
                 }
             }
@@ -189,7 +192,13 @@ private struct PermissionStepCard: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if wasOpened { AppDragTile() }
+            if wasOpened {
+                HStack(spacing: Spacing.s) {
+                    AppDragTile()
+                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL]) }
+                        .help("Shows this OpenTraffic in Finder, to drag it from there")
+                }
+            }
         }
         .padding(.top, Spacing.xs)
     }
@@ -197,7 +206,7 @@ private struct PermissionStepCard: View {
     private var hint: String {
         let pane = "Privacy & Security > \(permission.title)"
         if !wasOpened { return "Opens \(pane). Switch on OpenTraffic there; macOS may ask for your password." }
-        var text = "In \(pane), switch on OpenTraffic. Not in the list? Drag the icon below into it, or click + and choose it."
+        var text = "In \(pane), switch on OpenTraffic. Not in the list? Drag the icon below into it (or drag it from Finder), or click + and choose it."
         if permission == .screenRecording {
             text += " Already on and this step still waits? macOS applies it after OpenTraffic reopens: click Quit & Reopen."
         }
@@ -227,7 +236,9 @@ private struct AppDragTile: View {
         .frame(maxWidth: 320, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: Radius.small).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: Radius.small).strokeBorder(Color.secondary.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-        .onDrag { NSItemProvider(contentsOf: bundle) ?? NSItemProvider() }
+        // A link to the app, as Finder drags it: a provider of the file's contents hands the list a
+        // copy of the bundle, which isn't the app that asks for the permission.
+        .onDrag { NSItemProvider(object: bundle as NSURL) }
         .help("Drag into the list in System Settings")
         .accessibilityLabel("OpenTraffic app, drag into the list in System Settings")
     }
