@@ -454,6 +454,9 @@ public final class MacAppWindowHider {
     /// Accessibility is what moves the windows; without it nothing can be hidden.
     public static var isPermitted: Bool { AXIsProcessTrusted() }
 
+    /// Arguments every hidden launch gets (this launch's defaults only): no window animations.
+    static let launchArguments = ["-NSAutomaticWindowAnimationsEnabled", "NO"]
+
     /// How long an accessibility call to the shared app may take before it fails (AX's own default
     /// is 6 s).
     nonisolated static let messagingTimeout: Float = 2
@@ -511,6 +514,10 @@ public final class MacAppWindowHider {
                        windowTimeout: Duration = .seconds(10), output: URL? = nil) async throws -> NSRunningApplication {
         guard Self.isPermitted else { throw Failure.notTrusted }
         try await offscreenDisplay()
+        // A window the app opens later starts where AppKit puts it, on one of your screens, until it
+        // is moved; its opening animation (about a fifth of a second, longer on a busy Mac) would
+        // play there first. Without animations it is moved before it is ever drawn there.
+        let arguments = arguments + Self.launchArguments
         let app: NSRunningApplication
         if let output {
             app = try await Self.openHidden(bundle: bundle, environment: environment, arguments: arguments, output: output)
@@ -695,6 +702,9 @@ public final class MacAppWindowHider {
         }
     }
 
+    /// The off-screen display's bounds for the watchdog's queue (set from the main actor).
+    private let watchdogBounds = OSAllocatedUnfairLock<CGRect?>(initialState: nil)
+
     /// A weak reference the watchdog's queue may hold.
     private final class WeakHider: @unchecked Sendable {
         weak var hider: MacAppWindowHider?
@@ -707,18 +717,31 @@ public final class MacAppWindowHider {
     private func startWatchdog() {
         watchdog?.cancel()
         let seconds = Double(watchdogInterval.components.seconds) + Double(watchdogInterval.components.attoseconds) / 1e18
-        watchdog = Self.makeWatchdog(every: max(seconds, 0.005), watched: watched, owner: WeakHider(self))
+        watchdog = Self.makeWatchdog(every: max(seconds, 0.005), watched: watched, bounds: watchdogBounds, owner: WeakHider(self))
     }
 
     /// Nonisolated, so the timer's handler isn't taken to be main-actor code (Swift checks that at
     /// run time and traps when it runs on the watchdog's queue).
-    nonisolated private static func makeWatchdog(every seconds: Double, watched: OSAllocatedUnfairLock<Set<pid_t>>, owner: WeakHider) -> DispatchSourceTimer {
+    ///
+    /// A window it finds on a physical screen is moved right here, on its own queue: the main
+    /// thread can be busy (serving viewers, on a loaded Mac) and answer a notification late, and
+    /// until then the window shows on the person's screen. The sweep on the main actor follows,
+    /// for the moves it subscribes to.
+    nonisolated private static func makeWatchdog(every seconds: Double, watched: OSAllocatedUnfairLock<Set<pid_t>>,
+                                                 bounds: OSAllocatedUnfairLock<CGRect?>, owner: WeakHider) -> DispatchSourceTimer {
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "se.medda.opentraffic.window-watchdog", qos: .userInitiated))
         timer.schedule(deadline: .now(), repeating: seconds, leeway: .milliseconds(2))
         let state = WatchdogState()
         timer.setEventHandler {
             let pids = state.check(watched: watched.withLock { $0 })
             guard !pids.isEmpty else { return }
+            if let target = bounds.withLock({ $0 }), !target.isEmpty {
+                for pid in pids {
+                    let app = AXUIElementCreateApplication(pid)
+                    AXUIElementSetMessagingTimeout(app, messagingTimeout)
+                    _ = moveWindows(of: app, onto: target)
+                }
+            }
             Task { @MainActor in
                 for pid in pids { owner.hider?.sweepLater(pid) }
             }
@@ -733,6 +756,8 @@ public final class MacAppWindowHider {
         if let display { made = display } else { made = try await OffscreenDisplay.shared() }
         display = made
         try await made.ready()
+        let bounds = made.bounds
+        watchdogBounds.withLock { $0 = bounds }
         return made
     }
 
@@ -777,6 +802,7 @@ public final class MacAppWindowHider {
 
     private func sweepOnce(_ pid: pid_t) async throws {
         guard let watch = watches[pid], let bounds = display?.bounds, !bounds.isEmpty else { return }
+        watchdogBounds.withLock { $0 = bounds }
         let app = Elements(elements: [watch.app])
         let current = try await moves.run("moving windows to the off-screen display", timeout: OffscreenDisplay.callTimeout) {
             Elements(elements: Self.moveWindows(of: app.elements[0], onto: bounds))
