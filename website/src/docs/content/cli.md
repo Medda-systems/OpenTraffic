@@ -32,7 +32,7 @@ opentraffic stop --all
 | Command | Does |
 | --- | --- |
 | `list` (`ls`) | Your shares, their state, public URL, people, and open comments. The default command. |
-| `status <share>` | One share in detail: public and local URL, way of sharing, who can open it, collaboration and who's there, project, schedule, health of each hop, last error. For a Mac app, its state and viewers, and who may control it: with ask to control, who has control and who asks, with their number. |
+| `status <share>` | One share in detail: public and local URL, way of sharing, who can open it, collaboration and who's there, project, schedule, health of each hop, last error. For a Mac app, its state and viewers, and who may control it: with ask to control, who has control and who asks, with their number; when it rebuilds the app from its sources, whether a build runs or the last one failed, with the compiler's first error and the build log. |
 | `share <port\|host:port\|url> [options]` | Share a local server. See below. |
 | `share <app name\|App.app> [--via quick\|opentunnel] [--empty-data]` | Share a Mac app you're building (SwiftUI, AppKit, Catalyst), by its name as `services` lists it or its .app path: an isolated copy runs hidden on this Mac and viewers use its window in the browser, with live collaboration. `--empty-data` starts the copy without the app's data. Needs Accessibility and Screen Recording for OpenTraffic. See [Mac apps](/docs/mac-apps). |
 | `start <share>` / `stop <share>` / `stop --all` / `restart <share>` | Start, stop, restart. |
@@ -84,7 +84,7 @@ opentraffic stop --all
 | `screenshot <share> <comment> [--after] [-o FILE\|FOLDER/]` | Save the picture of what the comment points at; `--after`, the picture of it once fixed. A folder (ending in `/`) is made if need be, and the picture gets its usual name in it. |
 | `errors <share>` | Browser errors visitors ran into. |
 | `logs <share> [-n LINES] [-f]` | The share's log; `-f` keeps following it. |
-| `watch [share]` | Follow events as they happen: shares starting and stopping, people joining, comments, errors, a viewer asking to control a shared Mac app. |
+| `watch [share]` | Follow events as they happen: shares starting and stopping, people joining, comments, errors, a viewer asking to control a shared Mac app, a shared Mac app being rebuilt and whether its build failed or succeeded. |
 
 ### This Mac and OpenTraffic
 

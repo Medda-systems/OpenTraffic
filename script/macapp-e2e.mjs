@@ -759,6 +759,10 @@ case "press":
   for w in windows { if let b = find(w, 0, { attr($0, kAXRoleAttribute) as? String == "AXButton" && texts($0).contains(a[3]) }) {
     exit(AXUIElementPerformAction(b, kAXPressAction as CFString) == .success ? 0 : 1) } }
   exit(2)
+case "enabled":
+  for w in windows { if let b = find(w, 0, { attr($0, kAXRoleAttribute) as? String == "AXButton" && texts($0).contains(a[3]) }) {
+    exit(attr(b, kAXEnabledAttribute) as? Bool == true ? 0 : 1) } }
+  exit(2)
 case "close":
   for w in windows { if let b = attr(w, kAXCloseButtonAttribute) { _ = AXUIElementPerformAction(b as! AXUIElement, kAXPressAction as CFString) } }
 default: exit(64)
@@ -774,15 +778,27 @@ function cardProbe(...args) {
   return run(probe, args.map(String));
 }
 
-await step("the card's Allow and Take Back", async () => {
-  if (!CARD) throw new Skip("--card opens the copy's window and presses the card's buttons through Accessibility");
+// Opens the copy's window on the share and waits for its card. A window that opens on another Space
+// (a full-screen app is in front) shows Accessibility no content: the step is skipped then.
+async function showCard() {
   if (cardProbe("trusted").stdout.trim() !== "true") throw new Skip("this terminal has no Accessibility permission to press the card's buttons");
-  cli(["set", SHARE, "--control", "ask"]);
-  await openAsker();
-  await askForControl();
   const shown = cardProbe("show", copyPID, "opentraffic://show?name=" + encodeURIComponent(SHARE));
   assert(shown.status === 0, "couldn't open the copy's window: " + shown.stdout + shown.stderr);
   cleanups.push(async () => { cardProbe("close", copyPID); });
+  try {
+    await until(() => cardProbe("has", copyPID, "Live Collaboration").status === 0, "the card", 8_000, 300);
+  } catch {
+    cardProbe("close", copyPID);
+    throw new Skip("the copy's window opened on another Space (a full-screen app is in front), where Accessibility can't read it");
+  }
+}
+
+await step("the card's Allow and Take Back", async () => {
+  if (!CARD) throw new Skip("--card opens the copy's window and presses the card's buttons through Accessibility");
+  await showCard();
+  cli(["set", SHARE, "--control", "ask"]);
+  await openAsker();
+  await askForControl();
   await until(() => cardProbe("has", copyPID, `${ASKER} asks for control`).status === 0, `“${ASKER} asks for control” on the card`, 15_000, 300);
   assert(cardProbe("press", copyPID, "Allow").status === 0, "no Allow button on the card");
   await barIs(asker, "You have control", "Give Back", "the second page to get control from the card");
@@ -829,6 +845,96 @@ await step("an edited label is rebuilt and shows in the browser", async () => {
   assert(await page.eval(`window.__e2ePage === 1`), "the page reloaded");
   const banners = await page.eval(`[...new Set(window.__e2eBanner)]`);
   return `label changed after ${seconds} s; banners: ${banners.join(" / ") || "none"}`;
+});
+
+// A rebuild that fails: the host and viewers are told, viewers keep the previous version; a fix clears it.
+const ORDERS = path.join(FIXTURE, "Sources", "Orbit", "OrdersView.swift");
+const BROKEN = '\nlet e2eBrokenBuild: Int = "not a number" // macapp-e2e: a compile error\n';
+const buildStatus = () => cli(["status", SHARE], { json: true }).macApp?.build;
+const buildNote = () => page.eval(`(() => { const b = document.getElementById('otm-build'); return b && !b.hidden ? b.textContent : null; })()`);
+let buildWatcher = null, buildWatched = "", cardShown = false;
+const buildEvents = () => buildWatched.split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((e) => e && /^build\./.test(e.type));
+cleanups.push(async () => {
+  if (buildWatcher) buildWatcher.kill();
+  // Leave the scratch sources buildable for a --keep run.
+  try { const src = fs.readFileSync(ORDERS, "utf8"); if (src.includes(BROKEN)) fs.writeFileSync(ORDERS, src.replace(BROKEN, "")); } catch { /* gone */ }
+});
+
+await step("a broken build warns and keeps the previous version", async () => {
+  const source = fs.readFileSync(ORDERS, "utf8");
+  assert(source.includes('Button("Add New Order")'), "the rebuild step's Add New Order isn't in the sources (run it first)");
+  assert(buildStatus()?.state === "idle", "build before the change: " + JSON.stringify(buildStatus()));
+  buildWatcher = spawn(CLI, ["watch", SHARE, "--json"], { env: { ...env, OPENTRAFFIC_SOCKET: SOCKET }, stdio: ["ignore", "pipe", "ignore"] });
+  buildWatcher.stdout.on("data", (d) => { buildWatched += d; });
+  await sleep(500); // the watch has its cursor
+  const started = Date.now();
+  fs.writeFileSync(ORDERS, source.replace('Button("Add New Order")', 'Button("Add Fixed Order")') + BROKEN);
+  const failed = await until(() => { const b = buildStatus(); return b?.state === "failed" && b; }, "`opentraffic status --json` to report the failed build", 180_000, 500);
+  const seconds = ((Date.now() - started) / 1000).toFixed(1);
+  assert(/OrdersView\.swift:\d+:\d+: error: /.test(failed.message || ""), "the failure's message: " + failed.message);
+  assert(failed.log && fs.readFileSync(failed.log, "utf8").includes("error:"), "the build log " + failed.log + " has no error");
+  assert(/swift build/.test(failed.command || ""), "the build command: " + failed.command);
+  const text = cli(["status", SHARE]);
+  assert(/Build\s+failed · viewers see the previous version of Orbit/.test(text) && text.includes("error:") && text.includes("Log: "), "`opentraffic status` says: " + text);
+  // Viewers: a banner, and still the previous version.
+  const note = await until(buildNote, "the viewer's build banner", 10_000);
+  assert(note === "The host's latest changes to Orbit didn't build, so you see the previous version.", "the banner says: " + note);
+  assert(await page.eval(`!!${FIND("AXButton", "Add New Order")} && !${FIND("AXButton", "Add Fixed Order")}`), "the page doesn't show the previous version's Add New Order");
+  assert(await page.eval(`window.__e2ePage === 1 && document.getElementById('otm-dot').dataset.state === 'live'`), "the page reloaded or disconnected");
+  const events = await until(() => { const e = buildEvents(); return e.some((x) => x.type === "build.failed") && e; }, "`opentraffic watch` to report the failure", 10_000, 200);
+  assert(events[0].type === "build.started" && events[0].share === SHARE, "the first build event: " + JSON.stringify(events[0]));
+  const failure = events.find((e) => e.type === "build.failed");
+  assert(failure.build === "failed" && /error: /.test(failure.message || "") && failure.log === failed.log, "the failure event: " + JSON.stringify(failure));
+  return `failed after ${seconds} s: ${failed.message.replace(/^.*?(OrdersView)/, "$1").slice(0, 90)}; watch: ${events.map((e) => e.type).join(", ")}`;
+});
+
+await step("the card's build warning and Build Again", async () => {
+  if (!CARD) throw new Skip("--card opens the copy's window and presses the card's buttons through Accessibility");
+  const before = buildStatus();
+  assert(before?.state === "failed", "build before: " + JSON.stringify(before));
+  await showCard();
+  cardShown = true;
+  await until(() => cardProbe("has", copyPID, "Orbit didn't build").status === 0, "“Orbit didn't build” on the card", 15_000, 300);
+  assert(cardProbe("has", copyPID, "error: ").status === 0, "the card doesn't show the compiler's error");
+  assert(cardProbe("enabled", copyPID, "Show Log").status === 0, "no enabled Show Log on the card");
+  const watched = buildEvents().length;
+  assert(cardProbe("press", copyPID, "Build Again").status === 0, "no Build Again button on the card");
+  // It builds again (the card says Building… meanwhile) and, the sources still broken, fails again.
+  let sawBuilding = false;
+  const again = await until(() => {
+    if (!sawBuilding && cardProbe("has", copyPID, "Building Orbit…").status === 0) sawBuilding = true;
+    const b = buildStatus();
+    return b?.state === "failed" && b.log !== before.log && b;
+  }, "a new failed build after Build Again", 180_000, 300);
+  const events = buildEvents().slice(watched).map((e) => e.type);
+  assert(events.join(",") === "build.started,build.failed", "watch after Build Again: " + events.join(", "));
+  await until(() => cardProbe("has", copyPID, "Orbit didn't build").status === 0, "the warning back on the card", 10_000, 300);
+  assert(await buildNote(), "the viewer's banner went away");
+  return `${path.basename(before.log)} -> ${path.basename(again.log)}; card showed Building…: ${sawBuilding}`;
+});
+
+await step("fixing the build clears the warning and shows the new version", async () => {
+  const source = fs.readFileSync(ORDERS, "utf8");
+  assert(source.includes(BROKEN), "the sources aren't broken");
+  const watched = buildEvents().length;
+  const started = Date.now();
+  fs.writeFileSync(ORDERS, source.replace(BROKEN, ""));
+  await page.waitFor(`!!${FIND("AXButton", "Add Fixed Order")}`, "Add Fixed Order in the browser", 180_000);
+  const seconds = ((Date.now() - started) / 1000).toFixed(1);
+  await until(async () => (await buildNote()) === null, "the viewer's build banner to go", 10_000);
+  assert(await page.eval(`window.__e2ePage === 1`), "the page reloaded");
+  const b = buildStatus();
+  assert(b?.state === "idle" && !b.message, "build after the fix: " + JSON.stringify(b));
+  assert(!/Build\s+failed/.test(cli(["status", SHARE])), "`opentraffic status` still says it failed");
+  const events = await until(() => { const e = buildEvents().slice(watched); return e.some((x) => x.type === "build.succeeded") && e; }, "`opentraffic watch` to report the good build", 10_000, 200);
+  assert(events.map((e) => e.type).join(",") === "build.started,build.succeeded", "watch after the fix: " + events.map((e) => e.type).join(", "));
+  if (cardShown) {
+    await until(() => cardProbe("has", copyPID, "Orbit didn't build").status === 2, "the card's warning to go", 10_000, 300);
+    cardProbe("close", copyPID);
+  }
+  buildWatcher.kill();
+  buildWatcher = null;
+  return `new label after ${seconds} s; watch: ${events.map((e) => e.type).join(", ")}`;
 });
 
 await step("WebKit", async () => {

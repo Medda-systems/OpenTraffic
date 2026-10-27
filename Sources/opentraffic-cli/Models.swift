@@ -43,6 +43,20 @@ struct SharedMacApp: Decodable {
     let error: String?
     /// Who may control the app (newer versions of OpenTraffic).
     let control: MacAppControl?
+    /// Rebuilding it from its sources (newer versions; nil when the share doesn't rebuild it).
+    let build: MacAppBuild?
+}
+
+/// Rebuilding a shared Mac app when its sources change.
+struct MacAppBuild: Decodable {
+    /// "idle", "building", or "failed".
+    let state: String
+    /// `failed`: why, with the compiler's first error.
+    let message: String?
+    /// The latest build's full output.
+    let log: String?
+    /// What builds it.
+    let command: String?
 }
 
 /// Who may control a shared Mac app: the mode, and with ask to control, who has it and who asks.
@@ -226,6 +240,8 @@ struct Event: Decodable {
     let error: ErrorGroup?
     /// `control.requested`: who asks.
     let viewer: ControlViewer?
+    /// `build.*`: how the build went.
+    let build: MacAppBuild?
 
     struct ShareRef: Decodable {
         let name: String

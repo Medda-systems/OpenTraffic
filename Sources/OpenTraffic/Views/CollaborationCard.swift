@@ -232,6 +232,12 @@ struct CollaborationCard: View {
         }
         .font(.callout)
         .onAppear { store.refreshMacAppPermissions() }
+        if store.isActive(tunnel.id), let build = status?.build {
+            MacAppBuildStatus(build: build, app: macAppName, command: store.macAppSessions[tunnel.id]?.buildPlan?.summary,
+                              canShowLog: store.macAppSessions[tunnel.id]?.buildLog != nil,
+                              showLog: { store.showMacAppBuildLog(tunnel.id) },
+                              buildAgain: { store.buildMacAppAgain(tunnel.id) })
+        }
         macAppOptions(status)
         if let warning = status?.warning {
             InlineMessage(severity: .info, message: warning)
@@ -433,6 +439,61 @@ struct CollaborationCard: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .help("What \(name) can do here. Roles follow their browser.")
+    }
+}
+
+/// Rebuilding a shared Mac app from its sources, on its card: Building… while a build runs, and a
+/// warning with the compiler's first error, Show Log and Build Again after one failed (viewers then
+/// see the previous version). Nothing once a build succeeds.
+struct MacAppBuildStatus: View {
+    let build: MacAppSession.BuildState
+    let app: String
+    /// What builds it, for the tooltip.
+    var command: String?
+    var canShowLog = true
+    let showLog: () -> Void
+    let buildAgain: () -> Void
+
+    var body: some View {
+        switch build {
+        case .idle:
+            EmptyView()
+        case .building:
+            HStack(spacing: Spacing.s) {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Building \(app)…")
+                    Text("Viewers keep the running version until the new one starts.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+            .font(.callout)
+            .help(command.map { "Running \($0)" } ?? "")
+            .accessibilityElement(children: .combine)
+        case .failed(let message):
+            InlineMessage(severity: .warning,
+                          message: "\(Self.shortened(message)) Viewers see the previous version until a build succeeds.",
+                          title: "\(app) didn't build") {
+                Button("Show Log", action: showLog)
+                    .disabled(!canShowLog)
+                    .help("Open the build's full output")
+                Button("Build Again", action: buildAgain)
+                    .help(command.map { "Run \($0) again" } ?? "Build the app again")
+            }
+        }
+    }
+
+    /// The build's message with file names instead of whole paths
+    /// (`…: /Users/me/Orbit/Sources/Orbit/OrdersView.swift:12:5: error: …` → `OrdersView.swift:12:5: error: …`).
+    static func shortened(_ message: String) -> String {
+        let folders = try! NSRegularExpression(pattern: #"(?:/[^\s/:]+)+/(?=[^\s/:]+:\d+)"#)
+        let text = folders.stringByReplacingMatches(in: message, range: NSRange(message.startIndex..., in: message), withTemplate: "")
+        return text.hasSuffix(".") ? text : text + "."
     }
 }
 

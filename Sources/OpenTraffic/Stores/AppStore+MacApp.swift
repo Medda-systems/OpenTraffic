@@ -375,6 +375,27 @@ extension AppStore {
         }
     }
 
+    /// Build Again on the card: builds the app from its sources now (changed or not) and starts the new
+    /// build when it succeeds.
+    func buildMacAppAgain(_ id: UUID) {
+        guard let session = macAppSessions[id], session.buildPlan != nil else { return }
+        appendMacAppLog("Building \(session.name) again.", for: id)
+        session.rebuild(because: "You asked for a new build.")
+    }
+
+    /// Show Log on the card: the latest build's full output, in the app that opens logs (Console).
+    func showMacAppBuildLog(_ id: UUID) {
+        guard let log = macAppSessions[id]?.buildLog, FileManager.default.fileExists(atPath: log.path) else { return }
+        NSWorkspace.shared.open(log)
+    }
+
+    /// Whether the share's Live Collaboration card is in front of the host: OpenTraffic is active
+    /// with the share's Overview showing.
+    func isMacAppCardVisible(_ id: UUID) -> Bool {
+        NSApp.isActive && selectedID == id && detailTab == .overview
+            && NSApp.windows.contains { $0.isVisible && $0.isKeyWindow && !$0.isMiniaturized && $0.occlusionState.contains(.visible) }
+    }
+
     /// An agent finished a comment on the share: build and restart now if it changed the sources
     /// (the watcher usually has already).
     func rebuildMacAppIfChanged(_ id: UUID) {
@@ -463,7 +484,19 @@ extension AppStore {
         case .appearance(let appearance):
             macAppStatus[id, default: MacAppShareStatus()].appearance = appearance
         case .build(let build):
+            let before = macAppStatus[id]?.build ?? .idle
             macAppStatus[id, default: MacAppShareStatus()].build = build
+            // `opentraffic watch`, webhooks and the event API hear of it; a failure brings the host to
+            // the card unless it's in front of them.
+            let running = switch macAppStatus[id]?.state { case .running?, .restarting?, .crashed?, .failed?: isActive(id); default: false }
+            if let kind = APIMacAppBuild.event(from: before, to: build, running: running), let share = apiShareRef(id) {
+                apiEvents.append(kind, share: share, build: apiMacAppBuild(id))
+            }
+            if case .failed(let message) = build, !isMacAppCardVisible(id) {
+                TunnelNotifications.post(title: "\(macAppSessions[id]?.name ?? shareName(id)) didn't build",
+                                         body: "Viewers of \(shareName(id)) see the previous version. \(message)",
+                                         identifier: "macapp-build-\(id.uuidString)", tunnelID: id)
+            }
         case .message:
             break
         }

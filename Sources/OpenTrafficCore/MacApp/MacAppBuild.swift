@@ -243,6 +243,12 @@ public enum MacAppBuild {
         return Array(lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.suffix(failureLineLimit))
     }
 
+    /// A line without terminal escape sequences (colors, `ESC[1;31m`).
+    static func plain(_ line: String) -> String {
+        guard line.contains("\u{1B}") else { return line }
+        return line.replacingOccurrences(of: "\u{1B}\\[[0-9;?]*[ -/]*[@-~]", with: "", options: .regularExpression)
+    }
+
     /// Whether an output line is worth the share's log (the full output is in the build's own log
     /// file): errors and the result (`** BUILD SUCCEEDED **`, `Build complete!`, a script's `Built …`).
     public static func isNotable(_ line: String) -> Bool {
@@ -289,7 +295,10 @@ public enum MacAppBuild {
         try? err.fileHandleForWriting.close()
 
         let readers = (0..<2).map { _ in
-            LineReader { text in
+            LineReader { raw in
+                // The compiler colors its diagnostics even into a pipe: plain text for the log, the
+                // card and the error lines (`file:line:col: error:` must read as such).
+                let text = plain(raw)
                 guard !text.isEmpty else { return }
                 collector.add(line: text)
                 line(text)

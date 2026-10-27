@@ -349,6 +349,12 @@ extension AppStore {
         return apiShare(definitions.first { $0.id == id } ?? definition)
     }
 
+    /// Rebuilding a shared Mac app from its sources, while the share runs and rebuilds it.
+    func apiMacAppBuild(_ id: UUID) -> APIMacAppBuild? {
+        guard isActive(id), let session = macAppSessions[id], let plan = session.buildPlan else { return nil }
+        return APIMacAppBuild(macAppStatus[id]?.build ?? session.buildState, log: session.buildLog, command: plan.summary)
+    }
+
     /// The Mac app a share publishes and how its copy is doing, for `APIShare.macApp`.
     func apiMacAppInfo(_ definition: TunnelDefinition) -> APIShareMacApp? {
         guard let path = definition.macApp else { return nil }
@@ -362,7 +368,7 @@ extension AppStore {
         return APIShareMacApp(
             path: path, name: name, data: (definition.macAppData ?? .copy).rawValue,
             state: described?.state, viewers: status?.viewers, warning: status?.warning, error: described?.error,
-            control: control
+            control: control, build: apiMacAppBuild(definition.id)
         )
     }
 

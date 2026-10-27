@@ -357,6 +357,10 @@ public final class MirrorServer: @unchecked Sendable {
     private var captures: [MirrorProtocol.WindowID: any MirrorCapture] = [:]
     private var scale: Double?
     private var status = MirrorProtocol.Status(state: .running)
+    /// Whether the app is being rebuilt and whether its latest build failed (`setBuild`); it outlives launches.
+    private var build = MirrorProtocol.Build()
+    /// A build ran: greetings say how it went, so a page that missed the end (between launches) catches up.
+    private var builds = false
     /// The latest `menu` message, encoded once (nil until the menus were read, or without menus).
     private var menuText: String?
     /// The host's options (control mode, window size).
@@ -470,6 +474,18 @@ public final class MirrorServer: @unchecked Sendable {
         loop.execute {
             self.status = status
             guard self.live, let text = try? MirrorProtocol.ServerMessage.status(status).jsonString() else { return }
+            for client in self.clients.values { client.sendText(text, flush: true) }
+        }
+    }
+
+    /// Tells every viewer whether the app is being rebuilt and whether its latest build failed (they see
+    /// the previous version then); new viewers get it too while either is so.
+    public func setBuild(_ build: MirrorProtocol.Build) {
+        loop.execute {
+            guard build != self.build else { return }
+            self.build = build
+            self.builds = true
+            guard self.live, let text = try? MirrorProtocol.ServerMessage.build(build).jsonString() else { return }
             for client in self.clients.values { client.sendText(text, flush: true) }
         }
     }
@@ -1404,6 +1420,9 @@ public final class MirrorServer: @unchecked Sendable {
         client.resetFrames()
         client.sendText(hello, flush: false)
         if status.state != .running, let text = try? MirrorProtocol.ServerMessage.status(status).jsonString() {
+            client.sendText(text, flush: false)
+        }
+        if builds, let text = try? MirrorProtocol.ServerMessage.build(build).jsonString() {
             client.sendText(text, flush: false)
         }
         // Without a `control` message everyone controls, so it is only sent when that isn't so.

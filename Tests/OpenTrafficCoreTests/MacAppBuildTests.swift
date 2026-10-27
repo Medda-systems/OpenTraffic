@@ -188,6 +188,17 @@ struct MacAppBuildCommandTests {
             "error: Build failed",
         ]) == ["/x/OrdersView.swift:61:17: error: cannot find 'Buton' in scope",
                "error: SwiftCompile normal arm64 /x/OrdersView.swift failed with a nonzero exit code.", "error: Build failed"])
+        // Swift colors its diagnostics even into a pipe (SwiftPM 6.4): without the colors, they read the same.
+        let colored = [
+            "error: SwiftCompile normal arm64 failed with a nonzero exit code. Command line:     cd /x",
+            "/x/OrdersView.swift:224:27: \u{1B}[1;31merror: \u{1B}[1;39mcannot convert value of type 'String' to specified type 'Int'\u{1B}[0;0m",
+            "    \u{1B}[0;36m|\u{1B}[0;0m                           `- \u{1B}[1;31merror: \u{1B}[1;39mcannot convert value of type 'String' to specified type 'Int'\u{1B}[0;0m",
+            "error: Build failed",
+        ].map(MacAppBuild.plain)
+        #expect(colored[1] == "/x/OrdersView.swift:224:27: error: cannot convert value of type 'String' to specified type 'Int'")
+        #expect(MacAppBuild.failureLines(colored).first == colored[1])
+        #expect(MacAppBuild.failureLines(colored).count == 3)
+        #expect(MacAppBuild.plain("no colors") == "no colors")
         #expect(MacAppBuild.Outcome.failed(step: "swift build -c debug", lines: ["x.swift:1:1: error: oops"]).message
                 == "The build failed (swift build -c debug): x.swift:1:1: error: oops")
         #expect(MacAppBuild.isNotable("** BUILD SUCCEEDED **"))

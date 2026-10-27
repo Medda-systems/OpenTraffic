@@ -262,6 +262,7 @@ struct Context {
             rows.append(("App", (app.path as NSString).abbreviatingWithTildeInPath))
             rows.append(("Data", app.data == "empty" ? "started empty" : "a copy of the app's data"))
             if let control = app.control { rows.append(contentsOf: controlRows(control, app: app.name, share: share.name)) }
+            if let build = app.build { rows.append(contentsOf: buildRows(build, app: app.name)) }
             if let warning = app.warning { rows.append(("", style.yellow(warning))) }
             if let error = app.error { rows.append(("", style.red(error))) }
         } else {
@@ -330,6 +331,31 @@ struct Context {
             rows.append(("", style.dim("Answer with `opentraffic control \"\(share)\" allow \(first)` or `deny \(first)`.")))
         }
         return rows
+    }
+
+    /// Rebuilding a shared Mac app, for `status`: building, or the failure and its log.
+    func buildRows(_ build: MacAppBuild, app: String) -> [(String, String)] {
+        let command = build.command.map { style.dim(" (\($0))") } ?? ""
+        switch build.state {
+        case "building":
+            return [("Build", style.cyan("building") + " · viewers keep the running version until it's done" + command)]
+        case "failed":
+            var rows = [("Build", style.red("failed") + " · viewers see the previous version of \(app) until a build succeeds")]
+            if let message = build.message { rows.append(("", style.red(message))) }
+            if let log = build.log { rows.append(("", style.dim("Log: \((log as NSString).abbreviatingWithTildeInPath)"))) }
+            return rows
+        default:
+            return [("Build", "rebuilt when its sources change" + command)]
+        }
+    }
+
+    /// A `build.*` event, for `watch`.
+    func buildLine(_ type: String, build: MacAppBuild?, share name: String) -> String {
+        switch type {
+        case "build.started": "\(style.cyan("⚙")) Building \(name)…"
+        case "build.failed": "\(style.red("✗")) \(name) didn't build: \(build?.message ?? "the build failed")" + style.dim(" (viewers see the previous version)")
+        default: "\(style.green("✓")) \(name) built: starting the new version"
+        }
     }
 
     /// After a share starts: its URL, or why it isn't live yet.
@@ -750,7 +776,8 @@ struct Context {
             for event in body.events where filter == nil || event.share.name.lowercased() == filter {
                 if json {
                     let object: [String: Any?] = ["type": event.type, "share": event.share.name, "at": event.at.formatted(.iso8601), "person": event.peer?.name ?? event.viewer?.name,
-                                                  "viewer": event.viewer?.viewer, "comment": event.comment?.text, "error": event.error?.message]
+                                                  "viewer": event.viewer?.viewer, "comment": event.comment?.text, "error": event.error?.message,
+                                                  "build": event.build?.state, "message": event.build?.message, "log": event.build?.log]
                     say(String(decoding: JSON.encode(object), as: UTF8.self))
                     continue
                 }
@@ -774,6 +801,7 @@ struct Context {
                 case "control.requested":
                     "\(style.yellow("✋")) \(event.viewer?.name ?? "A viewer") asks to control \(name)"
                         + style.dim(" (`opentraffic control \"\(event.share.name)\" allow\(event.viewer?.viewer.map { " \($0)" } ?? "")`)")
+                case "build.started", "build.failed", "build.succeeded": buildLine(event.type, build: event.build, share: name)
                 default: "\(event.type) \(name)"
                 }
                 say("\(style.dim(Format.time(event.at)))  \(line)")

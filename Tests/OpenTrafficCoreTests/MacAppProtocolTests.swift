@@ -38,6 +38,8 @@ private let everyServerMessage: [MP.ServerMessage] = [
     .control(MP.Control(mode: .askToControl, you: false)),
     .control(MP.Control(mode: .askToControl, you: false, requested: true, holder: "Ada")),
     .control(MP.Control(mode: .watchOnly, you: true)),
+    .build(MP.Build(building: true, failed: false)),
+    .build(MP.Build(building: false, failed: true)),
 ]
 
 private let everyClientMessage: [MP.ClientMessage] = [
@@ -64,7 +66,7 @@ private let everyClientMessage: [MP.ClientMessage] = [
         #expect(try object(text)["t"] as? String == message.type)
     }
     // Every message type the contract names is covered above.
-    #expect(Set(everyServerMessage.map(\.type)) == ["hello", "windows", "tree", "frame", "cursor", "status", "menu", "control"])
+    #expect(Set(everyServerMessage.map(\.type)) == ["hello", "windows", "tree", "frame", "cursor", "status", "menu", "control", "build"])
 }
 
 @Test func everyClientMessageRoundTrips() throws {
@@ -98,6 +100,8 @@ private let everyClientMessage: [MP.ClientMessage] = [
         (#"{"t":"control","mode":"everyone","you":true,"requested":false,"holder":null}"#, .control(MP.Control(mode: .everyone, you: true))),
         (#"{"t":"control","mode":"askToControl","you":false,"requested":false,"holder":null,"refused":true}"#,
          .control(MP.Control(mode: .askToControl, you: false, refused: true))),
+        (#"{"t":"build","building":false,"failed":true}"#, .build(MP.Build(failed: true))),
+        (#"{"t":"build","building":true,"failed":true}"#, .build(MP.Build(building: true, failed: true))),
     ]
     for (json, expected) in examples {
         let decoded = try MP.ServerMessage.decode(json)

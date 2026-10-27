@@ -146,6 +146,15 @@ body[data-appearance="dark"] .otm-menu hr { border-top-color: rgba(255, 255, 255
 }
 .otm-banner[hidden] { display: none; }
 .otm-banner[data-state="crashed"] { background: #7f1d1d; }
+/* The host's latest changes didn't build: viewers see the version from before them. Below the run
+   state's banner when both show. */
+.otm-build {
+  position: fixed; top: 52px; left: 50%; transform: translateX(-50%); z-index: 10; max-width: calc(100vw - 32px);
+  padding: 6px 12px; border-radius: 10px; box-sizing: border-box; box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
+  background: #78350f; color: #fef3c7; font: 500 12px/1.35 var(--otm-font); text-align: center;
+}
+.otm-build[hidden] { display: none; }
+.otm-banner:not([hidden]) + .otm-build { top: 96px; }
 
 /* The desk and the windows on it. */
 .otm-desk[hidden], .otm-simple[hidden] { display: none; }

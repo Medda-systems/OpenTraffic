@@ -141,13 +141,18 @@ private final class MacAppBackend: OpenTrafficAPIBackend, @unchecked Sendable {
         holder: APIControlViewer(viewer: 3, name: "Ada", since: since, connected: true),
         requests: [APIControlViewer(viewer: 5, name: "Bob", since: since.addingTimeInterval(60))]
     )
+    /// Its latest rebuild failed.
+    static let build = APIMacAppBuild(
+        state: "failed", message: "The build failed (swift build --product Orbit): OrdersView.swift:41:17: error: cannot find 'fee' in scope",
+        log: "/Users/me/Library/Application Support/OpenTraffic/Mac App Sessions/1/logs/build-2.log", command: "swift build --product Orbit && sh package.sh"
+    )
 
     let share = APIShare(
         id: shareID, name: "Orbit", provider: "opentunnel", kind: "opentunnel", state: "running",
         localURL: "http://127.0.0.1/", publicURL: "https://orbit.opentunnel.xyz", collaboration: true, people: [],
         openComments: 0, comments: 0,
         macApp: APIShareMacApp(path: "/Users/me/code/Orbit/build/Orbit.app", name: "Orbit", data: "copy", state: "running", viewers: 2, warning: "Orbit dropped an entitlement.",
-                               control: control)
+                               control: control, build: build)
     )
 
     func listShares() async -> [APIShare] { [share] }
@@ -476,4 +481,55 @@ private func json(_ response: APIResponse) throws -> [String: Any] {
     #expect((object["viewer"] as? [String: Any])?["name"] as? String == "Bob")
     #expect((object["viewer"] as? [String: Any])?["viewer"] as? Int == 5)
     #expect(APIEvent.Kind.allCases.contains(.controlRequested))
+}
+
+@Test func shareStatusShowsHowTheRebuildGoes() async throws {
+    let router = APIRouter(backend: MacAppBackend(), events: APIEventLog())
+    let share = try json(await router.respond(method: "GET", uri: "/v1/shares/Orbit", body: Data(), client: "test"))
+    let macApp = try #require(share["macApp"] as? [String: Any])
+    #expect(macApp["control"] is [String: Any])
+    let build = try #require(macApp["build"] as? [String: Any])
+    #expect(build["state"] as? String == "failed")
+    #expect((build["message"] as? String)?.contains("error: cannot find 'fee' in scope") == true)
+    #expect((build["log"] as? String)?.hasSuffix("/logs/build-2.log") == true)
+    #expect(build["command"] as? String == "swift build --product Orbit && sh package.sh")
+    // MCP's list_shares has it too.
+    let mcp = MCPServer(backend: MacAppBackend(), events: APIEventLog())
+    let listed = try #require(await mcp.handle(["jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": ["name": "list_shares", "arguments": [:]]], client: "test")?["result"])
+    #expect(listed["structuredContent"]?["shares"]?.arrayValue?.first?["macApp"]?["build"]?["state"] == "failed")
+    // It decodes again; a share from an older OpenTraffic has none.
+    #expect(try APIJSON.decoder().decode(APIShare.self, from: APIJSON.encode(MacAppBackend().share)).macApp?.build == MacAppBackend.build)
+    #expect(try APIJSON.decoder().decode(APIShareMacApp.self, from: Data(#"{"path":"/a/Orbit.app","name":"Orbit","data":"copy"}"#.utf8)).build == nil)
+    // The session's build states as the API names them.
+    let log = URL(fileURLWithPath: "/tmp/build-1.log")
+    #expect(APIMacAppBuild(.idle, log: nil, command: "swift build") == APIMacAppBuild(state: "idle", command: "swift build"))
+    #expect(APIMacAppBuild(.building, log: log, command: nil) == APIMacAppBuild(state: "building", log: "/tmp/build-1.log"))
+    #expect(APIMacAppBuild(.failed("The build failed."), log: log, command: nil) == APIMacAppBuild(state: "failed", message: "The build failed.", log: "/tmp/build-1.log"))
+    let idle = try #require(try JSONSerialization.jsonObject(with: APIJSON.encode(APIMacAppBuild(state: "idle"))) as? [String: Any])
+    #expect(idle["state"] as? String == "idle")
+}
+
+@Test func buildsStartFailAndSucceedAsEvents() throws {
+    // Which change is which event.
+    func event(_ old: MacAppSession.BuildState, _ new: MacAppSession.BuildState, running: Bool = true) -> APIEvent.Kind? {
+        APIMacAppBuild.event(from: old, to: new, running: running)
+    }
+    #expect(event(.idle, .building) == .buildStarted)
+    #expect(event(.failed("x"), .building) == .buildStarted)
+    #expect(event(.building, .failed("x")) == .buildFailed)
+    #expect(event(.building, .idle) == .buildSucceeded)
+    // A share that stops while it builds: the build ends, but nothing succeeded.
+    #expect(event(.building, .idle, running: false) == nil)
+    #expect(event(.idle, .idle) == nil)
+    #expect(event(.failed("x"), .idle) == nil)
+
+    let events = APIEventLog()
+    let share = APIShareRef(id: MacAppBackend.shareID, name: "Orbit", publicURL: nil)
+    events.append(.buildFailed, share: share, build: MacAppBackend.build)
+    let failed = try #require(events.events(since: 0).events.first)
+    let object = try #require(try JSONSerialization.jsonObject(with: APIJSON.encode(failed)) as? [String: Any])
+    #expect(object["type"] as? String == "build.failed")
+    #expect((object["build"] as? [String: Any])?["state"] as? String == "failed")
+    #expect(((object["build"] as? [String: Any])?["message"] as? String)?.hasPrefix("The build failed") == true)
+    #expect(Set(APIEvent.Kind.allCases.map(\.rawValue)).isSuperset(of: ["build.started", "build.failed", "build.succeeded"]))
 }

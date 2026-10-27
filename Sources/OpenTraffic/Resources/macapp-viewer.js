@@ -85,6 +85,7 @@
   const nameEl = $("otm-name");
   const iconEl = $("otm-icon");
   const banner = $("otm-banner");
+  const buildNote = $("otm-build");
   const simpleRoot = $("otm-simple");
   const simpleWins = $("otm-s-windows");
   const thumb = $("otm-thumb");
@@ -97,6 +98,7 @@
     order: [], // window ids, main first
     bounds: { x: 0, y: 0, w: 1, h: 1 },
     socket: null, attempt: 0, retry: null, status: "running", statusMessage: null,
+    build: { building: false, failed: false }, // the host rebuilds the app; its latest build failed
     activeWindow: null, // the window keys go to when no field has focus
     tabbed: false, // the top-level windows show one at a time, as tabs
     tab: null, // the top-level window shown while tabbed
@@ -176,6 +178,7 @@
       case "status": return setStatus(m.state, m.message);
       case "menu": return applyMenu(m);
       case "control": return applyControl(m);
+      case "build": return applyBuild(m);
       // (windowAction is client to server only.)
       default: return; // unknown and reserved messages are ignored
     }
@@ -2115,6 +2118,22 @@
     banner.textContent = text;
     banner.dataset.state = state.status;
     banner.hidden = false;
+  }
+
+  // The host changed the app and it didn't build: this page shows the version from before the change
+  // until a build succeeds.
+  function applyBuild(m) {
+    state.build = { building: m.building === true, failed: m.failed === true };
+    if (!buildNote) return;
+    document.body.dataset.build = state.build.failed ? "failed" : state.build.building ? "building" : "ok";
+    if (!state.build.failed) {
+      buildNote.hidden = true;
+      buildNote.textContent = "";
+      return;
+    }
+    buildNote.textContent = "The host's latest changes to " + state.appName + " didn't build, so you see the previous version."
+      + (state.build.building ? " Building again…" : "");
+    buildNote.hidden = false;
   }
 
   applyView();

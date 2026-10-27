@@ -280,7 +280,9 @@ struct MCPServer: Sendable {
 
     A Mac app you're building is shared with `share` and `mac_app` (its .app path or name); viewers use its \
     window in the browser and pin comments to its controls. After rebuilding it to fix a comment, call \
-    `restart_mac_app` so the share shows the new build. When the user set the share to ask to control, \
+    `restart_mac_app` so the share shows the new build (a share that rebuilds the app when its sources \
+    change does that itself: check `list_shares`' `macApp.build`, and fix the error when its state is \
+    failed). When the user set the share to ask to control, \
     `list_shares` shows who asks (`macApp.control.requests`) and who has control; `control_mac_app` allows or \
     denies a request, or takes control back, but only when the user asks you to.
 
@@ -318,7 +320,7 @@ struct MCPServer: Sendable {
     static let tools: [JSONValue] = [
         tool(
             "list_shares", "List shares",
-            "Lists OpenTraffic's shares (tunnels to local servers): state, local and public URL, whether live collaboration is on, who is in the session, and comment counts. A Mac app share's `macApp` says how its app runs and who may control it (`control`: the mode, the viewer who has control, and viewers asking for it).",
+            "Lists OpenTraffic's shares (tunnels to local servers): state, local and public URL, whether live collaboration is on, who is in the session, and comment counts. A Mac app share's `macApp` says how its app runs, who may control it (`control`: the mode, the viewer who has control, and viewers asking for it), and how rebuilding it from its sources goes (`build`: idle, building, or failed with the compiler's first error and the build log's path; viewers see the previous version while it's failed).",
             readOnly: true
         ),
         tool(

@@ -13,7 +13,7 @@ the background. Environment:
 
 | Tool | Does |
 | --- | --- |
-| `list_shares` | Shares with state, URLs, people in the session, comment counts; for a Mac app share, how its app runs and who may control it. |
+| `list_shares` | Shares with state, URLs, people in the session, comment counts; for a Mac app share, how its app runs, who may control it, and whether its rebuild failed (`macApp.build`). |
 | `share` | Publishes a local `port` or `url` (`provider`: `quick`, `tailscale`, `ngrok`, `opentunnel`; `name`; `collaboration`, default on), or a Mac app you're building (`mac_app`: its .app path or name; `mac_app_data`: `copy` or `empty`; see [Mac apps](/docs/mac-apps)). |
 | `start_share`, `stop_share` | By id or name. |
 | `restart_mac_app` | Starts a shared Mac app again from its latest build on the same URL, after rebuilding it to show a fix (`reset_data`: over from its starting data). |

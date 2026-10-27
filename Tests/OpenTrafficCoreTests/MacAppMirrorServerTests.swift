@@ -300,6 +300,7 @@ private extension Viewer.Item {
     var windows: [Proto.WindowInfo]? { if case .message(.windows(let w)) = self { w } else { nil } }
     var status: Proto.Status? { if case .message(.status(let s)) = self { s } else { nil } }
     var cursor: Proto.CursorShape? { if case .message(.cursor(let c)) = self { c } else { nil } }
+    var build: Proto.Build? { if case .message(.build(let b)) = self { b } else { nil } }
 }
 
 /// A raw HTTP exchange over a socket (URLSession won't send arbitrary Upgrade requests): the status line.
@@ -601,6 +602,36 @@ struct MacAppMirrorServerStubTests {
         #expect(await viewer.first { $0.cursor == .default } != nil)
         let cursors = viewer.items.compactMap(\.item.cursor)
         #expect(cursors == [.text, .pointer, .default])
+    }
+
+    @Test func aFailedBuildIsToldToViewersAndToViewersWhoComeLater() async throws {
+        let mirror = try await StubMirror.start()
+        defer { Task { await mirror.server.stop() } }
+        let viewer = mirror.viewer()
+        defer { viewer.close() }
+        let first = try #require(await viewer.first { $0.frame != nil })
+        // Nothing about builds before one runs.
+        #expect(!viewer.items.contains { $0.item.build != nil })
+
+        mirror.server.setBuild(.init(building: true))
+        #expect(await viewer.first { $0.build == .init(building: true) } != nil)
+        mirror.server.setBuild(.init(failed: true))
+        #expect(await viewer.first { $0.build == .init(failed: true) } != nil)
+        // The same state again isn't sent again.
+        mirror.server.setBuild(.init(failed: true))
+        // A viewer that joins now hears it right after hello (it sees the previous version).
+        let late = mirror.viewer()
+        defer { late.close() }
+        let lateBuild = try #require(await late.first { $0.build != nil })
+        #expect(lateBuild.index == 1 && lateBuild.received.item.build == .init(failed: true))
+        // A good build: the banner goes for everyone, and later viewers are told so too.
+        mirror.server.setBuild(.init())
+        #expect(await viewer.first { $0.build == .init() } != nil)
+        #expect(await late.first { $0.build == .init() } != nil)
+        #expect(viewer.items.dropFirst(first.index).compactMap(\.item.build) == [.init(building: true), .init(failed: true), .init()])
+        let later = mirror.viewer()
+        defer { later.close() }
+        #expect(await later.first { $0.build != nil }?.received.item.build == .init())
     }
 
     @Test func reservedAndUnknownMessagesBecomeEventsAndNothingBreaks() async throws {

@@ -138,3 +138,37 @@ import Testing
     #expect(context.controlRows(MacAppControl(mode: "watchOnly", holder: nil, requests: []), app: "Orbit", share: "Orbit").map(\.1) == ["viewers only watch"])
     #expect(context.controlRows(MacAppControl(mode: "everyone", holder: nil, requests: []), app: "Orbit", share: "Orbit").map(\.1) == ["every viewer"])
 }
+
+@Test func readsAndShowsHowARebuildGoes() throws {
+    let share = Data(#"""
+    {"id":"22222222-3333-4444-5555-666666666666","name":"Orbit","provider":"opentunnel","kind":"opentunnel","state":"running",
+     "localURL":"http://127.0.0.1/","publicURL":"https://orbit.opentunnel.xyz","collaboration":true,"people":[],"openComments":0,"comments":0,
+     "macApp":{"path":"/Users/me/code/Orbit/build/Orbit.app","name":"Orbit","data":"copy","state":"running","viewers":1,
+       "control":{"mode":"everyone","requests":[]},
+       "build":{"state":"failed","message":"The build failed (swift build): OrdersView.swift:41:17: error: cannot find 'fee' in scope","log":"/tmp/logs/build-2.log","command":"swift build && sh package.sh"}}}
+    """#.utf8)
+    let build = try #require(try JSON.decoder.decode(Share.self, from: share).macApp?.build)
+    #expect(build.state == "failed" && build.log == "/tmp/logs/build-2.log" && build.command == "swift build && sh package.sh")
+
+    let context = Context(invocation: Invocation(command: "status", arguments: ["Orbit"]), client: Client(location: AppLocation(environment: [:])), style: Style(color: false))
+    let failed = context.buildRows(build, app: "Orbit")
+    #expect(failed.map(\.0) == ["Build", "", ""])
+    #expect(failed[0].1 == "failed · viewers see the previous version of Orbit until a build succeeds")
+    #expect(failed[1].1 == "The build failed (swift build): OrdersView.swift:41:17: error: cannot find 'fee' in scope")
+    #expect(failed[2].1 == "Log: /tmp/logs/build-2.log")
+    #expect(context.buildRows(MacAppBuild(state: "building", message: nil, log: nil, command: "swift build"), app: "Orbit").map(\.1)
+        == ["building · viewers keep the running version until it's done (swift build)"])
+    #expect(context.buildRows(MacAppBuild(state: "idle", message: nil, log: nil, command: nil), app: "Orbit").map(\.1) == ["rebuilt when its sources change"])
+
+    // `watch`.
+    let event = Data(#"""
+    {"seq":7,"type":"build.failed","at":"2026-10-27T11:00:00Z","share":{"name":"Orbit"},"build":{"state":"failed","message":"The build failed (swift build): x.swift:1:1: error: oops"}}
+    """#.utf8)
+    let decoded = try JSON.decoder.decode(Event.self, from: event)
+    #expect(context.buildLine(decoded.type, build: decoded.build, share: "Orbit") == "✗ Orbit didn't build: The build failed (swift build): x.swift:1:1: error: oops (viewers see the previous version)")
+    #expect(context.buildLine("build.started", build: nil, share: "Orbit") == "⚙ Building Orbit…")
+    #expect(context.buildLine("build.succeeded", build: nil, share: "Orbit") == "✓ Orbit built: starting the new version")
+    // Older versions of OpenTraffic don't say.
+    let old = #"{"path":"/Users/me/code/Orbit/build/Orbit.app","name":"Orbit","data":"copy"}"#
+    #expect(try JSON.decoder.decode(SharedMacApp.self, from: Data(old.utf8)).build == nil)
+}

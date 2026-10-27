@@ -43,9 +43,10 @@ Options: `--app <OpenTraffic.app>` (default `/Users/Shared/OpenTraffic-e2e/OpenT
 (rebuild that copy first), `--via opentunnel|quick`, `--name <share>` (default "Orbit E2E"),
 `--steps a,b` or `--skip a,b` (step names as printed; the set-up steps always run), `--keep`
 (leave the share live and the copy running, to look at it afterwards; stop it with the command the
-script prints), and `--card` (also press Allow and Take Back on the share's Live Collaboration card:
-it opens the copy's window on your screen, and needs Accessibility for the terminal that runs the
-script). `swift test` passes options in `OPENTRAFFIC_E2E_ARGS`.
+script prints), and `--card` (also press Allow and Take Back, and Build Again after a failed build,
+on the share's Live Collaboration card: it opens the copy's window on your screen, and needs
+Accessibility for the terminal that runs the script; when a full-screen app is in front, the window
+opens on another Space where Accessibility can't read it, and those steps are skipped). `swift test` passes options in `OPENTRAFFIC_E2E_ARGS`.
 
 The work folder (by default a new `ot-e2e-<time>` folder in the temporary folder) holds the fixture's
 scratch copy, the copy's home and socket, Chrome's profile (deleted at the end), `shots/` with one
@@ -89,6 +90,9 @@ process the script started).
 | Reset Data restores the orders | `opentraffic restart --reset-data`: the 30 orders and 20 open again, on the same page |
 | Restart keeps the page connected | `opentraffic restart --app`: a new launch reaches the same page, which stays connected |
 | an edited label is rebuilt and shows in the browser | the fixture's `Add Order` becomes `Add New Order` in its sources; OpenTraffic rebuilds and relaunches it and the page shows the new label |
+| a broken build warns and keeps the previous version | the label becomes `Add Fixed Order` and a compile error goes into the same file; `opentraffic status --json` reports `macApp.build` `failed` with the compiler's `OrdersView.swift:<line>:<col>: error:`, its log (which has the error) and the command, the text status says so, the page shows the build banner and still the previous version's `Add New Order`, and `opentraffic watch --json` reports `build.started` then `build.failed` |
+| the card's build warning and Build Again | `--card` only: the card shows "Orbit didn't build" with the error and an enabled Show Log; Accessibility presses Build Again, the card says Building…, and (the sources still broken) a new build fails again with a new log, `build.started` and `build.failed` again |
+| fixing the build clears the warning and shows the new version | the compile error is removed: the page shows `Add Fixed Order` without reloading, the banner goes, the status is `idle` again, `watch` reports `build.started` then `build.succeeded`, and (with `--card`) the card's warning goes |
 | WebKit | skipped: there is no headless WebKit without npm packages, and Safari's WebDriver drives the user's own Safari |
 | no page errors | no JavaScript errors on the page |
 
@@ -102,3 +106,8 @@ All steps passed in 68 s (the rebuild step 17 s of it; Orbit's debug build and r
 passed in 69 s (load average about 14). Asking, allow, take back and deny took 2 to 3 s each, the
 card's Allow and Take Back 8 s (opening the window and reading it through Accessibility), the rebuild
 10 s.
+
+27 October 2026, the same Mac, with the failed-then-fixed rebuild: all steps passed in 88 s without
+`--card` (the broken build reported in 4 s, the fix shown in 13 s), and in 177 s with `--card` under a
+load average of 40 to 48 from other work (the failure in 5.5 s, Build Again's second failure 10 s, the
+fix shown in 22 s).

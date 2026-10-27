@@ -242,6 +242,8 @@ public final class MacAppSession {
     /// How the app is built from its sources, once `watchSources` was called.
     public private(set) var buildPlan: MacAppBuild.Plan?
     public private(set) var buildState: BuildState = .idle
+    /// The full output of the latest build from the sources (Show Log on the card), once one ran.
+    public private(set) var buildLog: URL?
     /// How the last replay after a rebuild went.
     public private(set) var lastReplay: ReplayReport?
 
@@ -282,6 +284,8 @@ public final class MacAppSession {
     private var builds: Task<Void, Never>?
     /// Sources changed again while a build ran: build once more after it.
     private var buildAgain = false
+    /// The latest finished build failed (it stays so while the next one runs).
+    private var lastBuildFailed = false
     private var buildCount = 0
 
     public init(options: Options, hider: MacAppWindowHider = MacAppWindowHider(), simulator environment: SimulatorEnvironment = .live()) {
@@ -709,6 +713,7 @@ public final class MacAppSession {
         try? FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
         let logFile = logs.appendingPathComponent("build-\(buildCount).log")
         note("\(reason) Building \(name): \(plan.summary)")
+        buildLog = logFile
         setBuildState(.building)
         let started = ContinuousClock.now
         let outcome = await MacAppBuild.run(plan, log: logFile, timeout: options.buildTimeout) { [logSink, logLines] text in
@@ -734,18 +739,27 @@ public final class MacAppSession {
                 // relaunch logged it and set the state; the viewers see the failure.
             }
         case .failed(_, let lines):
+            // The card shows it as a warning of its own (`buildState`), and viewers a banner.
             for line in lines { note("build: " + line) }
+            note("\(name) didn't build, so viewers still see the previous version. \(outcome.message) (log: \(logFile.path))")
             setBuildState(.failed(outcome.message))
-            warn("\(name) didn't build, so viewers still see the previous version. \(outcome.message) (log: \(logFile.path))")
         case .timedOut, .cancelled:
+            note("\(outcome.message) Viewers still see the previous version of \(name).")
             setBuildState(.failed(outcome.message))
-            warn("\(outcome.message) Viewers still see the previous version of \(name).")
         }
     }
 
     private func setBuildState(_ state: BuildState) {
         guard state != buildState else { return }
+        let failedBefore = if case .failed = buildState { true } else { lastBuildFailed }
         buildState = state
+        switch state {
+        case .building: lastBuildFailed = failedBefore
+        case .failed: lastBuildFailed = true
+        case .idle: lastBuildFailed = false
+        }
+        // Viewers: a banner while they see the version from before a failed build.
+        server?.setBuild(MirrorProtocol.Build(building: state == .building, failed: lastBuildFailed))
         eventSink.yield(.build(state))
     }
 

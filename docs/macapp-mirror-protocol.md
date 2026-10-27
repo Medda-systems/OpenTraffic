@@ -267,6 +267,24 @@ A viewer without control sends no input (`act`, `pointer`, `text`, `key`, `setTe
 (no optimistic presses, read-only fields, no menus or close buttons), and it says why: watching only,
 or a Request Control button in `askToControl`.
 
+### `build`
+
+```json
+{"t":"build","building":false,"failed":true}
+```
+
+The host's app is rebuilt from its sources when they change (the share's project builds it, then the
+new build starts on the same address). `building` is true while a build runs; `failed` is true when
+the latest build failed, so viewers see the version from before the change, and stays true while the
+next build runs, until one succeeds. Sent to every viewer when either changes, and after `hello` (and
+`status`) once a build has run (so a page that reconnects catches up). Without one, assume both
+`false`.
+
+While `failed` is true, show a small banner saying the app's latest changes didn't build and the
+viewer sees the previous version ("Building again…" while `building` too); hide it when `failed` is
+false. It never says why: the compiler's messages name the host's files and are for the host (its
+card, `opentraffic status`).
+
 ## Client to server
 
 The server applies a connection's messages in order. It never takes raw accessibility handles from

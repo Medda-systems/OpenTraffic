@@ -51,9 +51,12 @@ public struct APIShareMacApp: Codable, Equatable, Sendable {
     public let error: String?
     /// Who may control the app: the mode, who has control and who asks for it.
     public let control: APIMacAppControl?
+    /// Rebuilding it when its sources change: whether a build runs or the latest one failed (and why).
+    /// Nil when the share doesn't rebuild the app (no project found, a Simulator app, not running).
+    public let build: APIMacAppBuild?
 
     public init(path: String, name: String, data: String, state: String? = nil, viewers: Int? = nil, warning: String? = nil, error: String? = nil,
-                control: APIMacAppControl? = nil) {
+                control: APIMacAppControl? = nil, build: APIMacAppBuild? = nil) {
         self.path = path
         self.name = name
         self.data = data
@@ -62,6 +65,7 @@ public struct APIShareMacApp: Codable, Equatable, Sendable {
         self.warning = warning
         self.error = error
         self.control = control
+        self.build = build
     }
 
     /// The API's name for a session state, and the message that comes with it.
@@ -73,6 +77,45 @@ public struct APIShareMacApp: Codable, Equatable, Sendable {
         case .crashed(let message): ("crashed", message)
         case .failed(let message): ("failed", message)
         case .stopped: ("stopped", nil)
+        }
+    }
+}
+
+/// Rebuilding a shared Mac app from its sources (`APIShareMacApp.build`, and the `build.*` events).
+public struct APIMacAppBuild: Codable, Equatable, Sendable {
+    /// "idle" (no build runs; the latest, if any, succeeded), "building", or "failed" (viewers see the
+    /// version from before the change until a build succeeds).
+    public let state: String
+    /// `failed`: why, with the compiler's first error (`The build failed (swift build): Orders.swift:12:5: error: …`).
+    public let message: String?
+    /// The latest build's full output, once one ran.
+    public let log: String?
+    /// What builds it (`swift build … && sh package.sh`, `xcodebuild -scheme Orbit … build`).
+    public let command: String?
+
+    public init(state: String, message: String? = nil, log: String? = nil, command: String? = nil) {
+        self.state = state
+        self.message = message
+        self.log = log
+        self.command = command
+    }
+
+    public init(_ state: MacAppSession.BuildState, log: URL?, command: String?) {
+        switch state {
+        case .idle: self.init(state: "idle", log: log?.path, command: command)
+        case .building: self.init(state: "building", log: log?.path, command: command)
+        case .failed(let message): self.init(state: "failed", message: message, log: log?.path, command: command)
+        }
+    }
+
+    /// The event a change from `old` to `new` makes: a build started, failed, or succeeded (`building`
+    /// to `idle` while the app still runs; a share stopping mid-build is no success).
+    public static func event(from old: MacAppSession.BuildState, to new: MacAppSession.BuildState, running: Bool) -> APIEvent.Kind? {
+        switch (old, new) {
+        case (_, .building) where old != .building: .buildStarted
+        case (_, .failed): .buildFailed
+        case (.building, .idle) where running: .buildSucceeded
+        default: nil
         }
     }
 }

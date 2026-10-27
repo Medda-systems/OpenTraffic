@@ -37,7 +37,7 @@ The Mac app section of the share's Live Collaboration card has three choices, ke
 - **Window size:** **Fit the viewer's browser** (the default) resizes the app's main window to fill the first viewer's browser (or the browser of the person you gave control), as far as the app's minimum size and OpenTraffic's off-screen display allow. Everyone else sees it scaled down. **The app's own size** leaves the window as the app made it.
 - **Appearance:** **First viewer's** (the default) shows the app light or dark as the first viewer's browser prefers; or pick **This Mac's**, **Light**, or **Dark**. Changing it restarts the copy with the same data. Dark only works while your Mac uses the Dark appearance; otherwise the app stays light, and the card says so.
 
-From the terminal: `opentraffic set Orbit --control watch-only` (`everyone`, `watch-only`, `ask`), `--appearance viewer|mac|light|dark` and `--window-size fit|app`. With ask to control, `opentraffic status Orbit` shows who has control and who asks, each with a number, `opentraffic watch` tells you when someone asks, and `opentraffic control Orbit allow` (or `allow 3`, `allow Ada`), `deny`, and `take-back` answer as the card does.
+From the terminal: `opentraffic set Orbit --control watch-only` (`everyone`, `watch-only`, `ask`), `--appearance viewer|mac|light|dark` and `--window-size fit|app`. With ask to control, `opentraffic status Orbit` shows who has control and who asks, each with a number, `opentraffic watch` tells you when someone asks (and when the app is rebuilt, or its build fails), and `opentraffic control Orbit allow` (or `allow 3`, `allow Ada`), `deny`, and `take-back` answer as the card does.
 
 ## Permissions
 
@@ -77,7 +77,7 @@ If the app quits by itself, viewers see that it did, and OpenTraffic opens it ag
 When you or an agent save a change to the app's code, OpenTraffic builds the app, starts the new build on the same address, and puts viewers back where they were:
 
 1. A second after the last change, it builds the project the app comes from: `xcodebuild` with the scheme that makes the app and the configuration you built (Debug) for an Xcode project or workspace, or `swift build` for a Swift package, followed by the package's own `package.sh` when it has one. Build folders (`.build`, `DerivedData`, `build`, `dist`), `.git`, and Xcode's per-user files don't count as changes.
-2. While it builds, viewers keep using the running copy. If the build fails, they keep it: the errors are in the share's **Logs**, and the card shows a warning. The whole build output is in the session's `logs/build-<n>.log`.
+2. While it builds, the card says **Building…** and viewers keep using the running copy. If the build fails, they keep it, and a small banner tells them the latest changes didn't build, so they see the previous version. The card shows a warning with the compiler's first error, **Show Log** (the whole build output, the session's `logs/build-<n>.log`) and **Build Again**; you get a notification when the card isn't in front of you. The errors are in the share's **Logs** too. The warning and the banner go away once a build succeeds.
 3. When it built, the copy restarts with the new build and its data. Viewers see that it's restarting, then OpenTraffic repeats what they did since the share started or was last restarted by hand (clicks, presses, typing, menu commands), finding each element again by its accessibility path, so they land on the same screen with the same row selected. If an element is gone in the new build, it stops there.
 
 Repeating what viewers did also repeats what changed the app's data: an order they added is added again. Use **Reset Data** to start over.
@@ -106,7 +106,7 @@ opentraffic services                          # web servers, then the Mac apps y
 opentraffic share Orbit                       # share it by name, on a temporary URL
 opentraffic share dist/Orbit.app --via opentunnel --empty-data --name "Orbit review"
 opentraffic set Orbit --control watch-only    # viewers watch; --control ask, or everyone again
-opentraffic status Orbit                      # with --control ask: who has control, who asks
+opentraffic status Orbit                      # who has control, who asks; whether the last build failed, and why
 opentraffic control Orbit allow               # give control to whoever asked first (or: allow 3, deny Ada)
 opentraffic control Orbit take-back           # only you control it again
 opentraffic restart Orbit --app               # after a rebuild: the new build, same address
@@ -116,8 +116,8 @@ opentraffic stop Orbit
 
 - A name is matched against the apps `services` lists, ignoring case. When two builds have the same name, the running one wins; otherwise give the path.
 - Mac apps are shared with `--via quick` (the default) or `--via opentunnel`, always with live collaboration. Sharing the same app the same way again starts that share. `--save` isn't supported.
-- [REST API](/docs/rest-api): `POST /v1/shares` with `macApp` (the path or name) and `macAppData` (`copy` or `empty`); `PATCH /v1/shares/{ref}` with `macAppControl`, `macAppAppearance` and `macAppWindowSize`; `POST /v1/shares/{ref}/restart-app` and `/reset-data`; `POST /v1/shares/{ref}/control` with `action` `allow`, `deny` or `take-back` (and a `viewer`) answers requests to control, which a share's `macApp.control` lists and the `control.requested` event announces; `GET /v1/services` lists the apps under `apps`. A share without the permissions is refused with 409 `missing_permissions`; a restart whose app doesn't come back fails with 502 `restart_failed`.
-- [MCP](/docs/mcp): the `share` tool takes `mac_app` and `mac_app_data`, `restart_mac_app` restarts the app (`reset_data` to start over), and `control_mac_app` allows, denies, or takes back control.
+- [REST API](/docs/rest-api): `POST /v1/shares` with `macApp` (the path or name) and `macAppData` (`copy` or `empty`); `PATCH /v1/shares/{ref}` with `macAppControl`, `macAppAppearance` and `macAppWindowSize`; `POST /v1/shares/{ref}/restart-app` and `/reset-data`; `POST /v1/shares/{ref}/control` with `action` `allow`, `deny` or `take-back` (and a `viewer`) answers requests to control, which a share's `macApp.control` lists and the `control.requested` event announces; a share's `macApp.build` says whether the app is being rebuilt or its last build failed (`state` `idle`, `building` or `failed`, with the `message`, the `log` and the `command`), and `build.started`, `build.failed` and `build.succeeded` events announce each build; `GET /v1/services` lists the apps under `apps`. A share without the permissions is refused with 409 `missing_permissions`; a restart whose app doesn't come back fails with 502 `restart_failed`.
+- [MCP](/docs/mcp): the `share` tool takes `mac_app` and `mac_app_data`, `restart_mac_app` restarts the app (`reset_data` to start over), `control_mac_app` allows, denies, or takes back control, and `list_shares` reports a failed rebuild in `macApp.build`.
 
 ## iPhone apps in the Simulator
 

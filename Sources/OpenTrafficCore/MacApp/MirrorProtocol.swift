@@ -408,6 +408,23 @@ public enum MirrorProtocol {
         }
     }
 
+    /// `{"t":"build","building":false,"failed":true}`: the app is rebuilt from its sources on the host
+    /// (`building`: a build runs now) and the latest build failed (`failed`), so viewers see the
+    /// version from before the change. Sent when either changes and, unless both are false, to new
+    /// viewers after `hello`. Never says why: compiler messages name the host's files.
+    public struct Build: Codable, Equatable, Sendable {
+        public var building: Bool
+        public var failed: Bool
+        public init(building: Bool = false, failed: Bool = false) { self.building = building; self.failed = failed }
+
+        private enum CodingKeys: String, CodingKey { case building, failed }
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            building = try c.decodeIfPresent(Bool.self, forKey: .building) ?? false
+            failed = try c.decodeIfPresent(Bool.self, forKey: .failed) ?? false
+        }
+    }
+
     // MARK: Client to server payloads
 
     /// `{"t":"act"}`: perform an accessibility action on the node with this key in the window's latest
@@ -560,6 +577,8 @@ public enum MirrorProtocol {
         case menu(Menu)
         /// Who may control the app, and whether this viewer may now.
         case control(Control)
+        /// Whether the app is being rebuilt, and whether its latest build failed.
+        case build(Build)
 
         public var type: String {
             switch self {
@@ -571,6 +590,7 @@ public enum MirrorProtocol {
             case .status: "status"
             case .menu: "menu"
             case .control: "control"
+            case .build: "build"
             }
         }
 
@@ -585,6 +605,7 @@ public enum MirrorProtocol {
             case "status": self = .status(try Status(from: decoder))
             case "menu": self = .menu(try Menu(from: decoder))
             case "control": self = .control(try Control(from: decoder))
+            case "build": self = .build(try Build(from: decoder))
             default: throw MirrorProtocolError.unknownMessage(type)
             }
         }
@@ -601,6 +622,7 @@ public enum MirrorProtocol {
             case .status(let payload): try payload.encode(to: encoder)
             case .menu(let payload): try payload.encode(to: encoder)
             case .control(let payload): try payload.encode(to: encoder)
+            case .build(let payload): try payload.encode(to: encoder)
             }
         }
 

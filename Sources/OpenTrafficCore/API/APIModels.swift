@@ -553,6 +553,12 @@ public struct APIEvent: Codable, Equatable, Sendable {
         case errorReported = "error.reported"
         /// A viewer of a Mac app share asks for control (`viewer`); answer with allow or deny.
         case controlRequested = "control.requested"
+        /// A shared Mac app's sources changed and it is being rebuilt (`build`).
+        case buildStarted = "build.started"
+        /// The rebuild failed (`build.message`); viewers see the previous version.
+        case buildFailed = "build.failed"
+        /// The rebuild succeeded; the new version starts.
+        case buildSucceeded = "build.succeeded"
     }
 
     public let seq: Int
@@ -567,6 +573,8 @@ public struct APIEvent: Codable, Equatable, Sendable {
     public let error: CollabErrorGroup?
     /// For `control.requested`: who asks.
     public let viewer: APIControlViewer?
+    /// For `build.*`: the build's state, its message when it failed, and its log.
+    public let build: APIMacAppBuild?
 }
 
 /// Recent events for long polling, MCP's `wait_for_feedback`, and webhooks. Thread-safe.
@@ -623,9 +631,9 @@ public final class APIEventLog: @unchecked Sendable {
 
     @discardableResult
     public func append(_ type: APIEvent.Kind, share: APIShareRef, comment: APIComment? = nil, commentId: String? = nil, peer: APIPerson? = nil, error: CollabErrorGroup? = nil,
-                       viewer: APIControlViewer? = nil, at: Date = Date()) -> APIEvent {
+                       viewer: APIControlViewer? = nil, build: APIMacAppBuild? = nil, at: Date = Date()) -> APIEvent {
         let (event, wake, notify) = lock.withLock { () -> (APIEvent, [CheckedContinuation<Void, Never>], [@Sendable (APIEvent) -> Void]) in
-            let event = APIEvent(seq: nextSeq, id: UUID().uuidString.lowercased(), type: type, at: at, share: share, comment: comment, commentId: commentId, peer: peer, error: error, viewer: viewer)
+            let event = APIEvent(seq: nextSeq, id: UUID().uuidString.lowercased(), type: type, at: at, share: share, comment: comment, commentId: commentId, peer: peer, error: error, viewer: viewer, build: build)
             nextSeq += 1
             events.append(event)
             if events.count > Self.capacity { events.removeFirst(events.count - Self.capacity) }

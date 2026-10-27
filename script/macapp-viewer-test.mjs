@@ -448,6 +448,22 @@ await check("status shows a banner for anything but running", async () => {
   await waitFor(`document.getElementById('otm-banner').hidden`, "banner gone");
 });
 
+await check("a failed build shows a banner until a build succeeds", async () => {
+  const note = `document.getElementById('otm-build')`;
+  await stubSend({ t: "build", building: true, failed: false });
+  await waitFor(`${note}.hidden && document.body.dataset.build === 'building'`, "no banner while it only builds");
+  await stubSend({ t: "build", building: false, failed: true });
+  await waitFor(`!${note}.hidden && ${note}.textContent === "The host's latest changes to Orbit didn't build, so you see the previous version."`, "the failed build's banner");
+  await stubSend("restarting");
+  await waitFor(`!document.getElementById('otm-banner').hidden && ${note}.getBoundingClientRect().top > document.getElementById('otm-banner').getBoundingClientRect().bottom`, "the build banner below the run state's");
+  await shot("4b-build-failed");
+  await stubSend("running");
+  await stubSend({ t: "build", building: true, failed: true });
+  await waitFor(`${note}.textContent.endsWith(' Building again…')`, "building again");
+  await stubSend({ t: "build", building: false, failed: false });
+  await waitFor(`${note}.hidden && document.body.dataset.build === 'ok'`, "the banner gone after a good build");
+});
+
 await check("reconnects after a drop; the same boot keeps the layer", async () => {
   await evaluate(`${byKey(ADD)}.__mark2 = 1, true`);
   await stubPost("/__stub/close");

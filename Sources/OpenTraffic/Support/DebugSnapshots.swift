@@ -68,6 +68,25 @@ enum DebugSnapshots {
             }
             store.pendingMacAppShare = waiting
             store.missingMacAppPermissions = granted
+            // A shared Mac app's rebuild on its card: Building…, then a failed build's warning.
+            let failure = MacAppSession.BuildState.failed(
+                "The build failed (swift build --product Orbit): /Users/me/code/Orbit/Sources/Orbit/OrdersView.swift:41:17: error: cannot find 'shippingFee' in scope"
+            )
+            for (state, build) in [("building", MacAppSession.BuildState.building), ("failed", failure)] {
+                for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                    render(
+                        Card(title: "Live Collaboration") {
+                            MacAppBuildStatus(build: build, app: "Orbit", command: "swift build --product Orbit && sh package.sh", showLog: {}, buildAgain: {})
+                        }
+                        .padding(20)
+                        .frame(width: 640)
+                        .background(Color(nsColor: .windowBackgroundColor)),
+                        size: NSSize(width: 640, height: 220),
+                        appearance: appearance,
+                        to: URL(fileURLWithPath: folder).appending(path: "macapp-build-\(state)-\(name).png")
+                    )
+                }
+            }
             if let request = ProcessInfo.processInfo.environment["OPENTRAFFIC_SNAPSHOTS_SHARE"].flatMap(\.nilIfBlank) {
                 await shareMacApp(request, store: store, folder: URL(fileURLWithPath: folder))
                 return

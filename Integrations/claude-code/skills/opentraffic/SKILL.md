@@ -29,7 +29,10 @@ the user to switch them on: OpenTraffic has opened a window on their Mac that wa
 Comments on a Mac app are pinned to its controls: `label` reads like `Button “Add Order”`, and `context.selector`
 is the element's accessibility path, not a CSS selector. Find the view in the Swift sources by its label text or
 its `accessibilityIdentifier`. After a fix, build the app the way the project does, then call `restart_mac_app` so
-the share shows the new build on the same link. Don't open or quit the shared copy yourself.
+the share shows the new build on the same link. Don't open or quit the shared copy yourself. When OpenTraffic
+rebuilds the app itself after a change, `list_shares` (or `opentraffic status <share>`) shows how it went in
+`macApp.build`: if its `state` is `failed`, viewers still see the previous version; fix the error in `message`
+(the whole output is in the `log` file) and the next save builds again.
 
 When the user set the share to ask to control, `list_shares` shows who asks (`macApp.control.requests`, each with
 a `viewer` number and `name`) and who has control. Allow or deny a request, or take control back, with
