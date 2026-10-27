@@ -53,7 +53,8 @@ extension AppStore {
     // MARK: Sharing
 
     /// One-step sharing of an Electron app, like a web server: reuse its saved share or create one.
-    func share(_ app: ElectronApp, kind: TunnelKind = .quick, data: ElectronHostSession.DataSource = .copy) {
+    /// `name` names a new share (default: the app's); a share of the app that exists keeps its own.
+    func share(_ app: ElectronApp, kind: TunnelKind = .quick, data: ElectronHostSession.DataSource = .copy, name: String? = nil) {
         let kind: TunnelKind = kind == .opentunnel ? .opentunnel : .quick
         // A finished app's data holds real logins: its copy always starts empty.
         let data: ElectronHostSession.DataSource = app.isPackaged ? .empty : data
@@ -74,8 +75,8 @@ extension AppStore {
         }
         do {
             var definition = switch kind {
-            case .opentunnel: try addOpenTunnel(name: app.name, localURL: localURL, collaboration: true)
-            default: try addQuick(name: app.name, localURL: localURL, collaboration: true)
+            case .opentunnel: try addOpenTunnel(name: name ?? app.name, localURL: localURL, collaboration: true)
+            default: try addQuick(name: name ?? app.name, localURL: localURL, collaboration: true)
             }
             guard let index = definitions.firstIndex(where: { $0.id == definition.id }) else { return }
             definitions[index].electronApp = app.id

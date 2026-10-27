@@ -650,3 +650,11 @@ public extension String {
         return trimmed.isEmpty ? nil : trimmed
     }
 }
+
+public extension Collection<TunnelDefinition> {
+    /// The share already called `name` (compared without case), other than the ones `sharedAgain`
+    /// matches: sharing an app that was shared before reuses its share, which keeps its own name.
+    func share(named name: String, except sharedAgain: (TunnelDefinition) -> Bool = { _ in false }) -> TunnelDefinition? {
+        first { $0.name.caseInsensitiveCompare(name) == .orderedSame && !sharedAgain($0) }
+    }
+}

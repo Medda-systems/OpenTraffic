@@ -307,3 +307,18 @@ func aFinishedAppRunsSandboxedFromItsAsar() async throws {
     #expect(ElectronDiscovery.pickLoopbackHost([ListeningSocket(pid: 1, host: "*", port: 3000)], projectRoot: nil, directory: { _ in nil }) == "127.0.0.1")
     #expect(ElectronDiscovery.pickLoopbackHost([ListeningSocket(pid: 1, host: "[::1]", port: 3000)], projectRoot: nil, directory: { _ in nil }) == "::1")
 }
+
+@Test func aNamedShareOfAnAppRefusesANameAnotherShareHas() {
+    // `opentraffic share dist/Orbit.app --name NAME`: the name is free unless another share has it;
+    // the app's own earlier share (same app, same way of sharing) is shared again under its own name.
+    let app = "/Users/me/code/orbit/dist/Orbit.app"
+    let definitions = [
+        TunnelDefinition(name: "Website", kind: .quick, localURL: "http://localhost:3000"),
+        TunnelDefinition(name: "Orbit Demo", kind: .opentunnel, localURL: "http://127.0.0.1/", electronApp: app),
+    ]
+    let sameShare: (TunnelDefinition) -> Bool = { $0.electronApp == app && $0.kind == .opentunnel }
+    #expect(definitions.share(named: "website", except: sameShare)?.name == "Website")
+    #expect(definitions.share(named: "Orbit Demo", except: sameShare) == nil)
+    #expect(definitions.share(named: "ORBIT DEMO", except: { $0.electronApp == app && $0.kind == .quick })?.name == "Orbit Demo")
+    #expect(definitions.share(named: "Electron Orbit E2E", except: sameShare) == nil)
+}

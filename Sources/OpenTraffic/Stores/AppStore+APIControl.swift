@@ -166,12 +166,22 @@ extension AppStore {
         guard let app = detectedElectronApps.first(where: { $0.bundle.map { ElectronDiscovery.realURL($0).path } == ElectronDiscovery.realURL(bundle).path }) else {
             throw OpenTrafficAPIError.notFound("\(bundle.lastPathComponent) isn't a running Electron app of yours. Open it first; apps you only installed can't be shared.")
         }
-        let kind: TunnelKind = request.provider?.lowercased() == "opentunnel" ? .opentunnel : .quick
+        let kind: TunnelKind
+        switch request.provider?.lowercased() {
+        case nil, "quick", "cloudflare", "temporary": kind = .quick
+        case "opentunnel": kind = .opentunnel
+        default: throw OpenTrafficAPIError.badRequest("Electron apps are shared with quick or opentunnel.")
+        }
+        // Like a Mac app: `name` names a new share; one this app had keeps its own.
+        let name = request.name?.nilIfBlank
+        if let name, let other = definitions.share(named: name, except: { $0.electronApp == app.id && $0.kind == kind }) {
+            throw OpenTrafficAPIError.conflict("A share named “\(other.name)” already exists. Pick another name, or remove it first.")
+        }
         if let blocker = await apiBlocker(for: kind, funnel: false) {
             throw OpenTrafficAPIError(status: 409, code: "not_ready", message: blocker)
         }
         try confirmAPIPublishing("share \(app.name) publicly with \(kind.provider.title) and live collaboration", client: client)
-        share(app, kind: kind)
+        share(app, kind: kind, name: name)
         guard let definition = definitions.first(where: { $0.electronApp == app.id && $0.kind == kind }) else {
             throw OpenTrafficAPIError.badRequest("Couldn't share \(app.name).")
         }
@@ -208,7 +218,7 @@ extension AppStore {
         }
         try apiCheckMacAppSupport()
         let name = request.name?.nilIfBlank
-        if let name, let other = definitions.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame && !($0.macApp == app.id && $0.kind == kind) }) {
+        if let name, let other = definitions.share(named: name, except: { $0.macApp == app.id && $0.kind == kind }) {
             throw OpenTrafficAPIError.conflict("A share named “\(other.name)” already exists. Pick another name, or remove it first.")
         }
         if let blocker = await apiBlocker(for: kind) {
