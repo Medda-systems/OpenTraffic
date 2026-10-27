@@ -28,7 +28,7 @@ People who open the link drive the copy through the app's own handlers, so it ru
 - It can't use the keychain.
 - It reaches the internet, but of the local services on your Mac only those the app uses: its dev server, anything else its project runs, and ports named in its environment or `.env` files. Anything else is asked for once in the share's Live Collaboration card, like the [localhost bridge](/docs/localhost-bridge). A service you allow is your real one, not a copy; OpenTraffic warns when it looks like a database.
 
-**Reset Data** in the card starts the copy over from its original data, and **Restart** restarts it. Stopping the share deletes the copy.
+**Reset Data** in the card starts the copy over from its original data, and **Restart** restarts it (from the terminal: `opentraffic restart <share> --reset-data` and `--app`). Stopping the share deletes the copy.
 
 ## Changes reach people live
 

@@ -50,11 +50,12 @@ enum Commands {
         CommandSpec(name: "start", group: "Shares", usage: "start <share>", summary: "Start a saved share; prints its public URL", flags: ["copy"], arguments: 1...1),
         CommandSpec(name: "stop", group: "Shares", usage: "stop <share> | stop --all", summary: "Stop a share, or every running one", flags: ["all"], arguments: 0...1),
         CommandSpec(
-            name: "restart", group: "Shares", usage: "restart <share> [--app | --reset-data]", summary: "Restart a share, or just its Mac app",
+            name: "restart", group: "Shares", usage: "restart <share> [--app | --reset-data]", summary: "Restart a share, or just its Mac app or Electron app",
             details: """
-            Options (Mac app shares):
+            Options (Mac app and Electron app shares):
               --app          Start just the app again, from its latest build, on the same address;
                              viewers stay connected. Run it after rebuilding the app to show a fix
+                             (an Electron app: its main process, sandboxed, with its latest code)
               --reset-data   Start the app over from the data it started with
             """,
             flags: ["app", "reset-data"], arguments: 1...1

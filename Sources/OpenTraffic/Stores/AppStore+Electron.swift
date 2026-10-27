@@ -237,17 +237,33 @@ extension AppStore {
         electronSessions[id]?.deny(port: port)
     }
 
-    /// Starts the share's app over from its original data.
-    func resetElectronData(_ id: UUID) {
-        guard let session = electronSessions[id] else { return }
+    /// Starts the share's app over from its original data. The task ends once the app runs again
+    /// (nil) or with what went wrong; nil when the share's app isn't running.
+    @discardableResult
+    func resetElectronData(_ id: UUID) -> Task<String?, Never>? {
+        guard let session = electronSessions[id] else { return nil }
         appendElectronLog("Resetting the app's data.", for: id)
-        Task.detached { try? session.reset() }
+        return Self.electronRestart(session) { try session.reset() }
     }
 
-    func restartElectronApp(_ id: UUID) {
-        guard let session = electronSessions[id] else { return }
+    /// Starts the share's app's main process again, with its latest code (see `resetElectronData`).
+    @discardableResult
+    func restartElectronApp(_ id: UUID) -> Task<String?, Never>? {
+        guard let session = electronSessions[id] else { return nil }
         appendElectronLog("Restarting the app's main process.", for: id)
-        Task.detached { try? session.restart() }
+        return Self.electronRestart(session) { try session.restart() }
+    }
+
+    private static func electronRestart(_ session: ElectronHostSession, _ restart: @escaping @Sendable () throws -> Void) -> Task<String?, Never> {
+        Task.detached {
+            do {
+                try restart()
+                _ = try await session.waitUntilReady()
+                return nil
+            } catch {
+                return error.localizedDescription
+            }
+        }
     }
 
     /// Started again by itself after a crash, up to three times a minute.

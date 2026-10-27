@@ -302,7 +302,17 @@ extension AppStore {
     func apiRestartMacApp(_ reference: String, resetData: Bool) async throws -> APIShare {
         let definition = try apiDefinition(reference)
         let id = definition.id
-        guard definition.macApp != nil else { throw OpenTrafficAPIError.badRequest("“\(definition.name)” doesn't share a Mac app.") }
+        // An Electron app's sandboxed main process, like the Restart and Reset Data buttons on its card.
+        if definition.electronApp != nil {
+            guard let work = resetData ? resetElectronData(id) : restartElectronApp(id) else {
+                throw OpenTrafficAPIError.conflict("“\(definition.name)” isn't running. Start it first.")
+            }
+            if let failure = await work.value {
+                throw OpenTrafficAPIError(status: 502, code: "restart_failed", message: failure)
+            }
+            return apiShare(definitions.first { $0.id == id } ?? definition)
+        }
+        guard definition.macApp != nil else { throw OpenTrafficAPIError.badRequest("“\(definition.name)” doesn't share a Mac app or an Electron app.") }
         guard let work = resetData ? resetMacAppData(id) : restartMacApp(id) else {
             throw OpenTrafficAPIError.conflict("“\(definition.name)” isn't running. Start it first.")
         }
