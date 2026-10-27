@@ -49,12 +49,14 @@ function createWindow() {
     show: false,
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, sandbox: true },
   });
-  win.once("ready-to-show", () => win.show());
+  // ORBIT_HIDDEN: for unattended runs (script/electron-e2e.mjs), no window or Dock icon on this Mac.
+  win.once("ready-to-show", () => { if (!process.env.ORBIT_HIDDEN) win.show(); });
   win.webContents.on("did-finish-load", () => win.webContents.send("hello", { greeting: "Welcome to Orbit" }));
   if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL);
   else win.loadFile(path.join(__dirname, "renderer", "index.html"));
 }
 
+if (process.env.ORBIT_HIDDEN) app.dock?.hide();
 app.whenReady().then(() => {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: "Orbit", submenu: [{ role: "about" }, { type: "separator" }, { role: "quit" }] },
