@@ -183,17 +183,28 @@
     },
     sendSync: function (channel) {
       var body = JSON.stringify({ client: client, page: location.pathname, channel: String(channel), args: encode(Array.prototype.slice.call(arguments, 1)) });
-      try {
+      // Like Electron, it waits for the main process: while that restarts (new code, a reset) the
+      // proxy answers with an error page, so it asks again for a few seconds.
+      var deadline = Date.now() + 8000;
+      for (;;) {
         var xhr = new XMLHttpRequest();
-        xhr.open("POST", PREFIX + "ipc-sync?client=" + encodeURIComponent(client), false);
-        xhr.setRequestHeader("content-type", "application/json");
-        xhr.send(body);
-        var reply = JSON.parse(xhr.responseText);
-        if (reply.ok) return decode(reply.value);
-        console.error("[OpenTraffic] ipcRenderer.sendSync('" + channel + "') failed:", reply.error && reply.error.message);
-      } catch (e) {
-        console.error("[OpenTraffic] ipcRenderer.sendSync('" + channel + "') failed:", e);
+        try {
+          xhr.open("POST", PREFIX + "ipc-sync?client=" + encodeURIComponent(client), false);
+          xhr.setRequestHeader("content-type", "application/json");
+          xhr.send(body);
+        } catch (e) { /* the network failed: as below */ }
+        var reply = null;
+        if (xhr.status === 200) { try { reply = JSON.parse(xhr.responseText); } catch (e) { /* not the main process */ } }
+        if (reply) {
+          if (reply.ok) return decode(reply.value);
+          console.error("[OpenTraffic] ipcRenderer.sendSync('" + channel + "') failed:", reply.error && reply.error.message);
+          return undefined;
+        }
+        if (Date.now() > deadline) break;
+        var pause = Date.now() + 150;
+        while (Date.now() < pause) { /* a synchronous call can't wait any other way */ }
       }
+      console.error("[OpenTraffic] ipcRenderer.sendSync('" + channel + "') failed: the app's main process didn't answer (HTTP " + xhr.status + ").");
       return undefined;
     },
     sendToHost: function () {},
