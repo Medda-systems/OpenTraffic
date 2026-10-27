@@ -586,8 +586,11 @@
 
   function openLink(url) {
     if (!/^(https?|mailto):/i.test(url)) return;
+    // Not "noopener": with it window.open always returns null, so an opened tab looked blocked too.
+    // The new tab loses its opener right away instead.
     var opened = null;
-    try { opened = w.open(url, "_blank", "noopener"); } catch (e) { /* blocked */ }
+    try { opened = w.open(url, "_blank"); } catch (e) { /* blocked */ }
+    if (opened) { try { opened.opener = null; } catch (e) { /* cross-origin already */ } }
     if (!opened) toast(appName + " wants to open a link", null, null, el("a", { href: url, target: "_blank", rel: "noopener", text: url }));
   }
 
