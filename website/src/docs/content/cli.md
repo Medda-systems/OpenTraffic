@@ -90,7 +90,7 @@ opentraffic stop --all
 
 | Command | Does |
 | --- | --- |
-| `services` | Web servers running on this Mac, their page title, process, how long they've been up, and which share publishes them; then the Mac apps you're building (running debug builds and recent builds), with their project folder. |
+| `services` | Web servers running on this Mac, their page title, process, how long they've been up, and which share publishes them; then the Mac apps you're building (running debug builds, recent builds, and apps you chose with **Choose App…** or shared before), with their project folder. |
 | `projects` / `project start\|stop <name>` | Projects: shares that start and stop together. |
 | `domains` | Domains in your Cloudflare account. |
 | `doctor` | Checks OpenTraffic, its API, and whether each way of sharing is ready (and why not). |

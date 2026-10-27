@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import OpenTrafficCore
+import UniformTypeIdentifiers
 
 /// What a shared Mac app is doing, for its Live Collaboration card.
 struct MacAppShareStatus: Equatable {
@@ -40,13 +41,19 @@ extension AppStore {
 
     // MARK: Discovery
 
-    /// Finds the Mac apps being built on this Mac (running debug builds and recent Xcode builds) and
-    /// your apps in booted simulators. Running ones come first, Mac apps before simulator apps.
+    /// Finds the Mac apps being built on this Mac (running debug builds and recent Xcode builds), your
+    /// apps in booted simulators, and the apps you chose or shared before that discovery doesn't list.
+    /// Running ones come first, Mac apps before simulator apps, apps you chose last.
     func scanMacApps() async {
+        let paths = Self.rememberedMacAppPaths
         async let macApps = Task.detached(priority: .utility) { await MacAppDiscovery.scan() }.value
         async let simulatorApps = Task.detached(priority: .utility) { SimulatorDiscovery.scan() }.value
+        async let rememberedApps = Task.detached(priority: .utility) { MacAppDiscovery.remembered(paths) }.value
         let found = await macApps + simulatorApps
-        var apps = found.filter(\.isRunning) + found.filter { !$0.isRunning }
+        let foundIDs = Set(found.map(\.id))
+        let remembered = await rememberedApps.filter { !foundIDs.contains($0.id) }
+        let all = found + remembered
+        var apps = all.filter(\.isRunning) + all.filter { !$0.isRunning }
         // Captures for the website list only the apps they name (OPENTRAFFIC_DEMO_MAC_APPS=Orbit),
         // never the projects on this Mac.
         if DemoCapture.demoPorts != nil {
@@ -54,6 +61,99 @@ extension AppStore {
             apps = apps.filter { names.contains($0.name) }
         }
         if apps != detectedMacApps { detectedMacApps = apps }
+        let rememberedIDs = Set(remembered.map(\.id))
+        if rememberedIDs != rememberedMacAppIDs { rememberedMacAppIDs = rememberedIDs }
+    }
+
+    // MARK: Apps you chose
+
+    /// The .app paths chosen with Choose App… or shared, newest first: listed under Mac Apps until
+    /// they're removed, even when they don't run (discovery alone only lists those that run, or recent
+    /// Xcode builds).
+    private static let rememberedMacAppsKey = "rememberedMacApps"
+    private static let rememberedMacAppsLimit = 12
+
+    static var rememberedMacAppPaths: [String] {
+        UserDefaults.standard.stringArray(forKey: rememberedMacAppsKey) ?? []
+    }
+
+    /// Keeps a Mac app under Mac Apps from now on (simulator apps aren't kept: their copy moves).
+    func rememberMacApp(_ app: MacApp) {
+        guard app.simulator == nil else { return }
+        let path = app.bundle.path
+        let paths = [path] + Self.rememberedMacAppPaths.filter { $0 != path }
+        UserDefaults.standard.set(Array(paths.prefix(Self.rememberedMacAppsLimit)), forKey: Self.rememberedMacAppsKey)
+        guard !detectedMacApps.contains(where: { $0.id == app.id }) else { return }
+        detectedMacApps.append(app)
+        rememberedMacAppIDs.insert(app.id)
+    }
+
+    /// Remove from List: the app isn't kept under Mac Apps anymore (its saved shares stay).
+    func forgetMacApp(_ app: MacApp) {
+        UserDefaults.standard.set(Self.rememberedMacAppPaths.filter { $0 != app.bundle.path }, forKey: Self.rememberedMacAppsKey)
+        guard rememberedMacAppIDs.remove(app.id) != nil else { return }
+        detectedMacApps.removeAll { $0.id == app.id }
+    }
+
+    /// The folder Choose App… opened last (else /Applications).
+    private static let chooseMacAppFolderKey = "chooseMacAppFolder"
+
+    /// Choose App… under Mac Apps (and Share a Mac App… in the main window): an open panel for any .app,
+    /// with the Share ▾ choices under its file list. The pick is checked as `opentraffic share <path>` checks
+    /// it (`MacAppDiscovery.resolve`); a refusal says why, with Choose Another App…. An app that may be
+    /// shared is remembered under Mac Apps and shared as a listed one is (the permissions window first
+    /// when a permission is off).
+    func chooseMacAppToShare() {
+        let choice = MacAppChoiceAccessory(
+            kind: effectiveDefaultShareKind == .opentunnel ? .opentunnel : .quick,
+            canShare: cloudflaredPath != nil,
+            canShareWithOpenTunnel: openTunnelBlocker == nil
+        )
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.treatsFilePackagesAsDirectories = false
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.prompt = Vocabulary.share
+        panel.message = "Choose a Mac app you built. Viewers use a separate copy of it, with a copy of its data."
+        let folder = UserDefaults.standard.string(forKey: Self.chooseMacAppFolderKey).flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil }
+        panel.directoryURL = URL(fileURLWithPath: folder ?? "/Applications", isDirectory: true)
+        panel.accessoryView = choice
+        panel.isAccessoryViewDisclosed = true
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        UserDefaults.standard.set(url.deletingLastPathComponent().path, forKey: Self.chooseMacAppFolderKey)
+        let kind = choice.kind
+        let data = choice.data
+        Task {
+            let path = url.path
+            let result = await Task.detached { Result { try MacAppDiscovery.resolve(path: path) } }.value
+            switch result {
+            case .success(let app):
+                if let shared = definitions.first(where: { $0.macApp == app.id && (isActive($0.id) || runtime(for: $0.id).state == .stopping) }) {
+                    notice = AppNotice(.info, "\(app.name) is already shared as “\(shared.name)”.")
+                    return
+                }
+                rememberMacApp(app)
+                share(app, kind: kind, data: data)
+            case .failure(let error):
+                NSApp.activate(ignoringOtherApps: true)
+                let alert = Self.macAppRefusalAlert(app: url.deletingPathExtension().lastPathComponent, reason: error.localizedDescription)
+                if alert.runModal() == .alertFirstButtonReturn { chooseMacAppToShare() }
+            }
+        }
+    }
+
+    /// A pick Choose App… can't share: why, with Choose Another App… (the default) and Cancel.
+    static func macAppRefusalAlert(app: String, reason: String) -> NSAlert {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "OpenTraffic can't share “\(app)”"
+        alert.informativeText = reason
+        alert.addButton(withTitle: "Choose Another App…")
+        alert.addButton(withTitle: "Cancel")
+        return alert
     }
 
     /// Detected Mac apps that aren't shared right now.
@@ -182,6 +282,8 @@ extension AppStore {
             return
         }
         pendingMacAppShare = nil
+        // Shared once, listed under Mac Apps from now on, running or not.
+        rememberMacApp(app)
         // The address is the mirror server's, decided when the session starts.
         let localURL = "http://127.0.0.1/"
         if let index = definitions.firstIndex(where: { $0.macApp == app.id && $0.kind == kind }) {

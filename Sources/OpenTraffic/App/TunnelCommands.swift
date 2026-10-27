@@ -20,6 +20,7 @@ struct TunnelCommands: Commands {
                 .keyboardShortcut("n")
             Button("Import from Cloudflare…") { router.show(sheet: .newTunnel(.importExisting)) }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
+            Button("Share a Mac App…") { store.chooseMacAppToShare() }
         }
 
         CommandMenu("Tunnel") {

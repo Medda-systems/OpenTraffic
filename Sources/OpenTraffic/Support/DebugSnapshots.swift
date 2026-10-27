@@ -87,6 +87,7 @@ enum DebugSnapshots {
                     )
                 }
             }
+            await renderMacAppsSection(store: store, folder: URL(fileURLWithPath: folder))
             if let request = ProcessInfo.processInfo.environment["OPENTRAFFIC_SNAPSHOTS_SHARE"].flatMap(\.nilIfBlank) {
                 await shareMacApp(request, store: store, folder: URL(fileURLWithPath: folder))
                 return
@@ -124,6 +125,92 @@ enum DebugSnapshots {
             }
             exit(0)
         }
+    }
+
+    // MARK: Mac Apps in the menu bar
+
+    /// The popover's Mac Apps section with no app found, then with a running Xcode build and an app
+    /// chosen before (`macapps-empty-*`, `macapps-list-*`, shown briefly in floating panels and captured
+    /// with `screencapture -l`), Choose App…'s refusal alert (`macapps-refusal-*`) and the Share choices
+    /// under its open panel (`macapps-choice-*`). `OPENTRAFFIC_SNAPSHOTS_ONLY=macapps` ends the run there.
+    private static func renderMacAppsSection(store: AppStore, folder: URL) async {
+        let detected = store.detectedMacApps
+        let remembered = store.rememberedMacAppIDs
+        let home = ElectronSandbox.realHomeDirectory
+        let project = URL(fileURLWithPath: home + "/code/Orbit")
+        let orbit = MacApp(
+            name: "Orbit", bundle: URL(fileURLWithPath: home + "/Library/Developer/Xcode/DerivedData/Orbit-abc/Build/Products/Debug/Orbit.app"),
+            bundleIdentifier: "com.example.orbit", projectDirectory: project, isRunning: true, pid: 1
+        )
+        let preview = MacApp(
+            name: "Orbit Preview", bundle: project.appending(path: "dist/Orbit Preview.app"),
+            bundleIdentifier: "com.example.orbit.preview", projectDirectory: project, isRunning: false
+        )
+        let section = {
+            VStack(alignment: .leading, spacing: Spacing.xxs) { MacAppsSection(store: store) }
+                .padding(Spacing.s).frame(width: 360, alignment: .leading)
+                .background(Color(nsColor: .windowBackgroundColor))
+        }
+        // Offscreen renders leave SwiftUI's text out: the section shows for real, briefly, in a panel.
+        for (state, apps) in [("empty", [MacApp]()), ("list", [orbit, preview])] {
+            for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                store.detectedMacApps = apps
+                store.rememberedMacAppIDs = [preview.id]
+                let shown = borderlessPanel(section(), appearance: appearance)
+                // A scan of this Mac in the meantime would replace the sample apps.
+                for _ in 0..<12 {
+                    store.detectedMacApps = apps
+                    store.rememberedMacAppIDs = [preview.id]
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                capture(shown, name: "macapps-\(state)-\(name)", folder: folder)
+                shown.orderOut(nil)
+            }
+        }
+        store.detectedMacApps = detected
+        store.rememberedMacAppIDs = remembered
+        for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+            let alert = AppStore.macAppRefusalAlert(app: "Slack", reason: "Slack is an Electron app: share it from Electron Apps instead.")
+            alert.window.appearance = NSAppearance(named: appearance)
+            alert.layout()
+            if let content = alert.window.contentView { renderView(content, appearance: appearance, to: folder.appending(path: "macapps-refusal-\(name).png")) }
+            let choice = MacAppChoiceAccessory(kind: .opentunnel, canShare: true, canShareWithOpenTunnel: true)
+            renderView(choice, appearance: appearance, to: folder.appending(path: "macapps-choice-\(name).png"))
+        }
+        if ProcessInfo.processInfo.environment["OPENTRAFFIC_SNAPSHOTS_ONLY"] == "macapps" { exit(0) }
+    }
+
+    /// A view on its own in a borderless floating panel at the top right, sized to fit, for `capture`.
+    private static func borderlessPanel(_ view: some View, appearance: NSAppearance.Name) -> NSPanel {
+        let host = NSHostingView(rootView: view)
+        let panel = NSPanel(contentRect: NSRect(origin: .zero, size: host.fittingSize), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
+        panel.appearance = NSAppearance(named: appearance)
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.contentView = host
+        if let screen = NSScreen.main { panel.setFrameTopLeftPoint(NSPoint(x: screen.visibleFrame.maxX - 400, y: screen.visibleFrame.maxY - 10)) }
+        panel.orderFrontRegardless()
+        return panel
+    }
+
+    /// An AppKit view as it draws in a window of the appearance.
+    private static func renderView(_ view: NSView, appearance: NSAppearance.Name, to url: URL) {
+        let size = view.frame.size == .zero ? view.fittingSize : view.frame.size
+        let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -6000, y: -6000), size: size), styleMask: [.titled], backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: appearance)
+        let container = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+        container.material = .windowBackground
+        container.state = .active
+        view.frame = container.bounds
+        view.autoresizingMask = [.width, .height]
+        container.addSubview(view)
+        window.contentView = container
+        window.orderFrontRegardless()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        guard let bitmap = container.bitmapImageRepForCachingDisplay(in: container.bounds) else { return }
+        container.cacheDisplay(in: container.bounds, to: bitmap)
+        try? bitmap.representation(using: .png, properties: [:])?.write(to: url)
+        window.orderOut(nil)
     }
 
     // MARK: A live Mac app share

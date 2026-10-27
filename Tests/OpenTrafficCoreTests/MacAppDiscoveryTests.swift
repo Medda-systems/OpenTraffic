@@ -187,6 +187,28 @@ private struct Workbench {
     #expect(refusal("/System/Applications/Calculator.app")?.contains("part of macOS or made by Apple") == true)
 }
 
+@Test func appsYouChoseOrSharedBeforeAreListedEvenWhenNotRunning() async throws {
+    let bench = try Workbench()
+    defer { bench.remove() }
+    let tool = try bench.project("code/Tool")
+    let idle = try bench.app("code/Tool/dist/Idle.app", identifier: "com.example.idle") // a package script's build, not running
+    let running = try bench.app("code/Tool/.build/debug/Tool.app", identifier: "com.example.tool")
+    let loose = try bench.app("Downloads/Loose.app", identifier: "com.example.loose")
+    let electron = try bench.app("code/Tool/dist/Desk.app", identifier: "com.example.desk", electron: true)
+    let gone = bench.root.appendingPathComponent("code/Gone/dist/Gone.app").path
+    let context = bench.context(processes: [(42, bench.executable(of: running))])
+    // Not running and outside DerivedData: scan alone doesn't list it.
+    #expect(!(await MacAppDiscovery.scan(context)).contains { $0.bundle.path == idle.path })
+
+    let apps = MacAppDiscovery.remembered(
+        [idle.path, gone, electron.path, running.path, idle.path + "/", "~/Downloads/Loose.app"], context: context)
+    // In the order given, each once; the one that's gone and the one resolve refuses are left out.
+    #expect(apps.map(\.bundle.path) == [idle.path, running.path, loose.path])
+    #expect(apps[0].projectDirectory?.path == tool.path && !apps[0].isRunning && apps[0].pid == nil)
+    #expect(apps[1].isRunning && apps[1].pid == 42)
+    #expect(MacAppDiscovery.remembered([], context: context).isEmpty)
+}
+
 @Test func onlyYourSigningTeamsMakeASignedAppYours() {
     let teams: Set<String> = ["ABCDE12345"]
     #expect(MacAppDiscovery.refusal("Orbit", project: nil, signer: .init(.team("ABCDE12345")), ownTeams: teams) == nil)

@@ -34,7 +34,7 @@ Shares are named by id or by name (case-insensitive); percent-encode names with 
 | Method | Path | Body / query | Returns |
 | --- | --- | --- | --- |
 | GET | `/v1/status` | | `{version, shares, running, providers: [{name, ready, detail, warning?}], publishesWithoutAsking}` |
-| GET | `/v1/services` | | `{services: [{port, url, title, process, statusCode, upSince, sharedAs}], apps: [{kind: "macapp", name, bundle, bundleIdentifier, projectDirectory, running, builtAt, sharedAs, device?}]}`: web servers, and the Mac apps being built on this Mac (`device`, like `iPhone 17 Simulator`, for an iPhone app in a booted Simulator, which can't be shared yet) |
+| GET | `/v1/services` | | `{services: [{port, url, title, process, statusCode, upSince, sharedAs}], apps: [{kind: "macapp", name, bundle, bundleIdentifier, projectDirectory, running, builtAt, sharedAs, device?}]}`: web servers, and the Mac apps being built on this Mac or chosen and shared before (`device`, like `iPhone 17 Simulator`, for an iPhone app in a booted Simulator, which can't be shared yet) |
 | GET | `/v1/shares` | | `{shares: [Share]}` |
 | POST | `/v1/shares` | see below | `Share` (waits ≤ 30 s for the URL) |
 | GET | `/v1/shares/{ref}` | | `Share` |

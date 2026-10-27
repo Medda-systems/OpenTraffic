@@ -70,8 +70,9 @@ public struct MacAppRefusal: Error, LocalizedError, Equatable, Sendable {
 }
 
 /// Finds the Mac apps you are building: running debug builds and recent Xcode builds, each with the
-/// project folder it comes from. Installed apps, apps by other developers, Electron apps, OpenTraffic
-/// itself and the copies OpenTraffic runs for share sessions are never offered.
+/// project folder it comes from, plus the apps you chose or shared before (`remembered`). Installed
+/// apps, apps by other developers, Electron apps, OpenTraffic itself and the copies OpenTraffic runs
+/// for share sessions are never offered.
 public enum MacAppDiscovery {
     /// Where to look and what counts as yours; `current` is this Mac, tests pass their own.
     public struct Context: Sendable {
@@ -147,6 +148,21 @@ public enum MacAppDiscovery {
             throw MacAppRefusal(reason)
         }
         return app(bundle: bundle, info: info, project: project, pid: runningPID(of: bundle, context: context))
+    }
+
+    /// The apps at `paths` (chosen with Choose App… or shared before) that can still be shared, in the
+    /// order given and each once, by `resolve`'s rules: an app that's gone or that `resolve` refuses is
+    /// left out. Unlike builds `scan` finds, they're listed whether they run or not, wherever they were
+    /// built (a `swift build` or a package script's `dist/`).
+    public static func remembered(_ paths: [String], context: Context = .current) -> [MacApp] {
+        guard !paths.isEmpty else { return [] }
+        var context = context
+        if context.processes == nil { context.processes = userProcesses() } // looked at once, not per app
+        var seen = Set<String>()
+        return paths.compactMap { path in
+            guard let app = try? resolve(path: path, context: context), seen.insert(app.id).inserted else { return nil }
+            return app
+        }
     }
 
     // MARK: Running apps

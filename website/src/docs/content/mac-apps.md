@@ -2,10 +2,13 @@
 
 A Mac app you're building with SwiftUI, AppKit, or Catalyst shows up in the menu bar under **Mac Apps**, below your web servers and Electron apps, as `Orbit` with `Mac app · ~/code/orbit` under it. **Share** works as it does for a web page: one click, the link is on your clipboard, and live collaboration is on. People who open it use the real app in their browser, with cursors and comments pinned to its buttons and labels, and nothing to install.
 
-The list has two kinds of app:
+The list has three kinds of app:
 
 - **Debug builds that are running:** built by Xcode, built into a project's `.build` or `dist` folder, or any app that isn't signed or is signed ad hoc, as long as it isn't in Applications.
 - **Recent Xcode builds:** the newest debug build of each app from the last 30 days, while its project still exists. It doesn't have to be running.
+- **Apps you chose or shared before:** an app you picked with **Choose App…** or shared once stays in the list, running or not, wherever it was built (a `swift build`, or a script that leaves it in `dist/`). Right-click it, or open **Share ▾**, and choose **Remove from List** when you no longer want it there; its saved shares stay.
+
+**Mac Apps** is always there, even when it finds nothing: it then says how apps get there and has a **Choose App…** button. Below a list, **Choose App…** sits under the apps, like **Show More**. It opens a file dialog, starting in Applications or in the folder you chose from last time, with the **Share ▾** choices under it: **Share at** a temporary public URL or a lasting OpenTunnel address, and **Share with Empty Data**. Pick the .app and click **Share**. OpenTraffic checks it as `opentraffic share <path>` does; when it can't share the app, it says why (an Electron app, OpenTraffic itself, an app by another developer) and offers **Choose Another App…**. The same dialog opens from **Share a Mac App…** in the File menu and in the main window when it has no shares yet.
 
 iPhone apps you built in Xcode and installed in a booted Simulator are listed too, as `Orbit · iPhone 17 Simulator`, and share the same way: see [iPhone apps in the Simulator](/docs/mac-apps#iphone-apps-in-the-simulator).
 

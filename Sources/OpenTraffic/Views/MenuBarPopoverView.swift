@@ -9,7 +9,6 @@ struct MenuBarPopoverView: View {
     @Bindable var store: AppStore
     @State private var showingAllServices = false
     @State private var showingAllApps = false
-    @State private var showingAllMacApps = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -198,61 +197,20 @@ struct MenuBarPopoverView: View {
             }
             showMoreButton(total: apps.count, expanded: $showingAllApps)
         }
-        if !macApps.isEmpty || store.pendingMacAppShare != nil {
-            sectionTitle("Mac Apps")
-                .padding(.top, Spacing.s)
-            if let pending = store.pendingMacAppShare, !store.missingMacAppPermissions.isEmpty {
-                MacAppPermissionsMessage(store: store, waitingApp: pending.app.name) {
-                    withAnimation(.snappy) { store.cancelPendingMacAppShare() }
-                }
-                .padding(Spacing.s)
-                .background(Color.yellow.opacity(0.10), in: RoundedRectangle(cornerRadius: Radius.medium))
-                .padding(.bottom, Spacing.xs)
-            }
-            let visible = showingAllMacApps ? macApps : Array(macApps.prefix(Self.collapsedCount))
-            ForEach(visible) { app in
-                MacAppRow(
-                    app: app,
-                    isSuggested: apps.isEmpty && app.id == macApps.first?.id,
-                    canShare: store.cloudflaredPath != nil,
-                    canShareWithOpenTunnel: store.openTunnelBlocker == nil,
-                    defaultKind: store.effectiveDefaultShareKind == .opentunnel ? .opentunnel : .quick
-                ) { kind, data in
-                    withAnimation(.snappy) { store.share(app, kind: kind, data: data) }
-                }
-            }
-            showMoreButton(total: macApps.count, expanded: $showingAllMacApps)
-        }
+        // Always there, so Mac app sharing can be found even when no app is listed.
+        MacAppsSection(store: store, suggestsFirst: apps.isEmpty)
     }
 
-    @ViewBuilder
     private func showMoreButton(total: Int, expanded: Binding<Bool>) -> some View {
-        if total > Self.collapsedCount {
-            Button {
-                withAnimation(.snappy) { expanded.wrappedValue.toggle() }
-            } label: {
-                Label(
-                    expanded.wrappedValue ? "Show Fewer" : "Show \(total - Self.collapsedCount) More",
-                    systemImage: expanded.wrappedValue ? "chevron.up" : "chevron.down"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.borderless)
-            .padding(.horizontal, Spacing.s)
-            .padding(.top, Spacing.xxs)
-        }
+        ShowMoreButton(total: total, collapsedCount: Self.collapsedCount, expanded: expanded)
     }
 
-    private static let collapsedCount = 5
+    /// Each list shows this many before Show More.
+    static let collapsedCount = 5
     private static let topAnchor = "popover-top"
 
     private func sectionTitle(_ title: String) -> some View {
-        Text(title)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, Spacing.s)
-            .padding(.vertical, Spacing.xs)
+        PopoverSectionTitle(title: title)
     }
 
     // MARK: Footer
@@ -293,6 +251,128 @@ struct MenuBarPopoverView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, Spacing.l)
         .padding(.vertical, Spacing.m)
+    }
+}
+
+/// A list's heading in the popover: Localhost, Electron Apps, Mac Apps.
+private struct PopoverSectionTitle: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, Spacing.s)
+            .padding(.vertical, Spacing.xs)
+    }
+}
+
+/// A small secondary button under a list (Show More, Choose App…).
+private struct PopoverListButton: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, Spacing.s)
+        .padding(.top, Spacing.xxs)
+    }
+}
+
+/// Show More under a list longer than `collapsedCount`; Show Fewer once it's open.
+private struct ShowMoreButton: View {
+    let total: Int
+    let collapsedCount: Int
+    @Binding var expanded: Bool
+
+    var body: some View {
+        if total > collapsedCount {
+            PopoverListButton(
+                title: expanded ? "Show Fewer" : "Show \(total - collapsedCount) More",
+                systemImage: expanded ? "chevron.up" : "chevron.down"
+            ) {
+                withAnimation(.snappy) { expanded.toggle() }
+            }
+        }
+    }
+}
+
+/// Mac Apps in the menu bar, always there so a host knows where Mac apps are shared from: the apps
+/// being built (running debug builds, recent Xcode builds, and the apps the host chose or shared
+/// before, which can be removed from the list), then Choose App… for any other .app. With none found,
+/// a line on how apps get here.
+struct MacAppsSection: View {
+    @Bindable var store: AppStore
+    /// The first app's Share is the prominent one (no Electron app is listed above).
+    var suggestsFirst = true
+    @State private var showingAll = false
+
+    var body: some View {
+        let apps = store.shareableMacApps
+        let canShare = store.cloudflaredPath != nil
+        let canShareWithOpenTunnel = store.openTunnelBlocker == nil
+        PopoverSectionTitle(title: "Mac Apps")
+            .padding(.top, Spacing.s)
+        if let pending = store.pendingMacAppShare, !store.missingMacAppPermissions.isEmpty {
+            MacAppPermissionsMessage(store: store, waitingApp: pending.app.name) {
+                withAnimation(.snappy) { store.cancelPendingMacAppShare() }
+            }
+            .padding(Spacing.s)
+            .background(Color.yellow.opacity(0.10), in: RoundedRectangle(cornerRadius: Radius.medium))
+            .padding(.bottom, Spacing.xs)
+        }
+        if apps.isEmpty {
+            Text(store.isScanningLocalServices && store.detectedMacApps.isEmpty
+                 ? "Looking for Mac apps you're building…"
+                 : "No Mac apps found. Run your app from Xcode (a recent Debug build shows too), or choose one you built.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, Spacing.s)
+                .padding(.bottom, Spacing.xxs)
+        } else {
+            // The apps being built, and the ones chosen or shared before.
+            let visible = showingAll ? apps : Array(apps.prefix(MenuBarPopoverView.collapsedCount))
+            ForEach(visible) { app in
+                MacAppRow(
+                    app: app,
+                    isSuggested: suggestsFirst && app.id == apps.first?.id,
+                    canShare: canShare,
+                    canShareWithOpenTunnel: canShareWithOpenTunnel,
+                    defaultKind: store.effectiveDefaultShareKind == .opentunnel ? .opentunnel : .quick,
+                    remove: store.rememberedMacAppIDs.contains(app.id) ? { withAnimation(.snappy) { store.forgetMacApp(app) } } : nil
+                ) { kind, data in
+                    withAnimation(.snappy) { store.share(app, kind: kind, data: data) }
+                }
+            }
+            ShowMoreButton(total: apps.count, collapsedCount: MenuBarPopoverView.collapsedCount, expanded: $showingAll)
+        }
+        // Other groups (installed apps) go here, below the apps being built and above Choose App….
+        Group {
+            if apps.isEmpty {
+                // The way in when nothing is listed: a real button under the hint.
+                Button("Choose App…", action: choose)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .padding(.horizontal, Spacing.s)
+                    .padding(.vertical, Spacing.xxs)
+            } else {
+                PopoverListButton(title: "Choose App…", systemImage: "plus.app", action: choose)
+            }
+        }
+        .disabled(!canShare && !canShareWithOpenTunnel)
+        .help("Share any Mac app you built: choose its .app")
+    }
+
+    private func choose() {
+        // After the button's action returns: the open panel takes the menu bar window's place.
+        Task { @MainActor in store.chooseMacAppToShare() }
     }
 }
 
@@ -496,6 +576,8 @@ private struct MacAppRow: View {
     let canShare: Bool
     var canShareWithOpenTunnel = false
     var defaultKind: TunnelKind = .quick
+    /// Remove from List, for an app listed because the host chose or shared it.
+    var remove: (() -> Void)?
     let share: (TunnelKind, MacAppSession.DataSource) -> Void
 
     var body: some View {
@@ -527,6 +609,10 @@ private struct MacAppRow: View {
                 Group {
                     Button("Show in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([app.bundle]) }
                     Button("Copy Path", systemImage: "doc.on.doc") { Pasteboard.copy(app.bundle.path) }
+                    if let remove {
+                        Divider()
+                        Button("Remove from List", systemImage: "minus.circle", action: remove)
+                    }
                 }
                 .untintedMenuItems()
             }
@@ -539,6 +625,10 @@ private struct MacAppRow: View {
                     Divider()
                     Button("Share with Empty Data", systemImage: "tray") { share(defaultKind, .empty) }
                         .disabled(defaultKind == .quick ? !canShare : !canShareWithOpenTunnel)
+                    if let remove {
+                        Divider()
+                        Button("Remove from List", systemImage: "minus.circle", action: remove)
+                    }
                 }
                 .untintedMenuItems()
             } label: {

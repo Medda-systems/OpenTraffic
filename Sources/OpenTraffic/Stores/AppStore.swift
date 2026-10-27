@@ -227,8 +227,12 @@ final class AppStore {
     @ObservationIgnored var electronCrashes: [UUID: [Date]] = [:]
     /// People viewing each shared Electron app right now.
     var electronViewers: [UUID: Int] = [:]
-    /// Mac apps being built on this Mac, ready to share (running debug builds, recent Xcode builds).
+    /// Mac apps being built on this Mac, ready to share (running debug builds, recent Xcode builds),
+    /// then the apps the host chose with Choose App… or shared before.
     var detectedMacApps: [MacApp] = []
+    /// The ids of detected Mac apps listed only because the host chose or shared them (they can be
+    /// removed from the list).
+    var rememberedMacAppIDs: Set<String> = []
     /// Shared Mac apps' isolated copies, the tasks reading their logs and events, and copies still
     /// quitting (OpenTraffic waits for those before it quits, and before it starts another copy).
     @ObservationIgnored var macAppSessions: [UUID: MacAppSession] = [:]

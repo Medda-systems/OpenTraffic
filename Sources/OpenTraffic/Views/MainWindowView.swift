@@ -90,10 +90,11 @@ struct MainWindowView: View {
         ContentUnavailableView {
             Label("Share a Local Server", systemImage: "point.3.connected.trianglepath.dotted")
         } description: {
-            Text("Give a dev server on this Mac a public URL. Use a temporary address for quick demos, or a hostname on your own Cloudflare domain.")
+            Text("Give a dev server on this Mac a public URL. Use a temporary address for quick demos, or a hostname on your own Cloudflare domain. A Mac app you built can be shared too: people use it in their browser.")
         } actions: {
             Button("New Tunnel…") { store.present(.newTunnel(.quick)) }
                 .buttonStyle(.borderedProminent)
+            Button("Share a Mac App…") { store.chooseMacAppToShare() }
             Button("Import from Cloudflare…") { store.present(.newTunnel(.importExisting)) }
         }
     }
