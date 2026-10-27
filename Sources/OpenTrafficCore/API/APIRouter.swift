@@ -147,6 +147,13 @@ struct APIRouter: Sendable {
         case ["restart-app"], ["reset-data"]:
             try allow("POST")
             return .json(try await backend.restartMacApp(share, resetData: rest == ["reset-data"], client: client))
+        case ["control"]:
+            try allow("POST")
+            let change = try Self.decode(APIMacAppControlChange.self, from: body)
+            guard let action = APIMacAppControl.Action(api: change.action) else {
+                throw OpenTrafficAPIError.badRequest("action must be allow, deny, or take-back")
+            }
+            return .json(try await backend.controlMacApp(share, action: action, viewer: change.viewer, client: client))
         case ["protection"]:
             switch method {
             case "GET": return .json(try await backend.protection(share))

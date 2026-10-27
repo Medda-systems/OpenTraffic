@@ -446,8 +446,15 @@ extension AppStore {
         case .control(let control):
             let before = Set(macAppStatus[id]?.control?.requests.map(\.viewer) ?? [])
             macAppStatus[id, default: MacAppShareStatus()].control = control
-            // Someone new asks: the card shows Allow; a notification brings the host to it.
-            if let request = control.requests.last(where: { !before.contains($0.viewer) }) {
+            // Someone new asks: the card shows Allow; a notification brings the host to it, and
+            // `opentraffic watch`, webhooks and the event API hear of it.
+            let new = control.requests.filter { !before.contains($0.viewer) }
+            if let share = apiShareRef(id) {
+                for request in new {
+                    apiEvents.append(.controlRequested, share: share, viewer: APIControlViewer(viewer: request.viewer, name: request.name, since: request.since))
+                }
+            }
+            if let request = new.last {
                 let who = request.name ?? "A viewer"
                 TunnelNotifications.post(title: "\(who) asks to control \(shareName(id))",
                                          body: "Allow it on the share's Live Collaboration card.",

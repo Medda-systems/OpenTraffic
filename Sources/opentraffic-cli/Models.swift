@@ -41,6 +41,27 @@ struct SharedMacApp: Decodable {
     let viewers: Int?
     let warning: String?
     let error: String?
+    /// Who may control the app (newer versions of OpenTraffic).
+    let control: MacAppControl?
+}
+
+/// Who may control a shared Mac app: the mode, and with ask to control, who has it and who asks.
+struct MacAppControl: Decodable {
+    /// "everyone", "watchOnly", or "askToControl".
+    let mode: String
+    let holder: ControlViewer?
+    /// Oldest first.
+    let requests: [ControlViewer]
+}
+
+/// A viewer asking for control of a shared Mac app, or the one who has it.
+struct ControlViewer: Decodable {
+    /// Its number on the share (what `control … allow` takes); nil for a holder whose page is away.
+    let viewer: Int?
+    let name: String?
+    let since: Date
+    /// The holder: whether its page is connected.
+    let connected: Bool?
 }
 
 /// A Mac app being built on this Mac, as `GET /v1/services` lists it.
@@ -203,6 +224,8 @@ struct Event: Decodable {
     let comment: Comment?
     let peer: Person?
     let error: ErrorGroup?
+    /// `control.requested`: who asks.
+    let viewer: ControlViewer?
 
     struct ShareRef: Decodable {
         let name: String

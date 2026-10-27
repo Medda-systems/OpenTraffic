@@ -13,10 +13,11 @@ the background. Environment:
 
 | Tool | Does |
 | --- | --- |
-| `list_shares` | Shares with state, URLs, people in the session, comment counts. |
+| `list_shares` | Shares with state, URLs, people in the session, comment counts; for a Mac app share, how its app runs and who may control it. |
 | `share` | Publishes a local `port` or `url` (`provider`: `quick`, `tailscale`, `ngrok`, `opentunnel`; `name`; `collaboration`, default on), or a Mac app you're building (`mac_app`: its .app path or name; `mac_app_data`: `copy` or `empty`; see [Mac apps](/docs/mac-apps)). |
 | `start_share`, `stop_share` | By id or name. |
 | `restart_mac_app` | Starts a shared Mac app again from its latest build on the same URL, after rebuilding it to show a fix (`reset_data`: over from its starting data). |
+| `control_mac_app` | For a Mac app share set to ask to control: `allow` a viewer who asks, `deny` a request, or `take_back` control. `list_shares` shows who asks (`macApp.control.requests`) and who has control. |
 | `get_feedback` | Comments (`status`: `open`, `resolved`, `all`). Each says whether it's `open`, `working` (and who's on it), `resolved`, or `confirmed`, and carries `context` (selector, styles, component, source file), suggested `edits` to apply as given, and `area` for a comment on a region. |
 | `claim_comment`, `release_comment` | Say you're working on a comment (with optional `progress`), or stop. The session sees the app at the element; other apps' claims are refused. A claim lapses after 15 minutes unless claimed again. |
 | `resolve_comment`, `reply_to_comment` | Replies and fixes show the app's name; the commenter is told it's fixed and can confirm or reopen it. |
@@ -35,6 +36,7 @@ smaller `timeout_seconds`.
 | `share` | `port`, `url`, or `mac_app` | `provider`, `name`, `collaboration` (default true), `mac_app_data` (`copy` or `empty`; default `copy`) |
 | `start_share` / `stop_share` | `share` | None |
 | `restart_mac_app` | `share` | `reset_data` (default false) |
+| `control_mac_app` | `share`, `action` (`allow`, `deny`, `take_back`) | `viewer`: a request's number or name (default: the oldest request) |
 | `get_feedback` | `share` | `status` (default `open`) |
 | `resolve_comment` | `share`, `comment_id` | `resolved` (default true) |
 | `claim_comment` | `share`, `comment_id` | `progress` (at most 120 characters) |

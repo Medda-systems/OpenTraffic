@@ -103,7 +103,7 @@
     lastLocal: 0, // when the viewer last clicked or typed
     simple: false, // the Simple view is showing (its elements carry the ids, not the layer's)
     viewPref: null, // "simple", "window" or null (by width)
-    control: { mode: "everyone", you: true, requested: false, holder: null }, // the host's control mode, for this viewer
+    control: { mode: "everyone", you: true, requested: false, holder: null, refused: false }, // the host's control mode, for this viewer
     asked: false, // this page asked for control (so "Give Back" makes sense; the host's page never asks)
     viewportSent: null, // the last viewport message, as JSON
     device: null, // { name, screen: { x, y, w, h, r } | null } for an iPhone app in the Simulator
@@ -624,7 +624,7 @@
 
   function applyControl(m) {
     const mode = m.mode === "watchOnly" || m.mode === "askToControl" ? m.mode : "everyone";
-    const c = { mode, you: m.you !== false, requested: m.requested === true, holder: typeof m.holder === "string" && m.holder ? m.holder : null };
+    const c = { mode, you: m.you !== false, requested: m.requested === true, holder: typeof m.holder === "string" && m.holder ? m.holder : null, refused: m.refused === true };
     const was = state.control;
     state.control = c;
     if (mode === "askToControl" && c.you && state.asked) writeSession(HAD_CONTROL, "1");
@@ -662,6 +662,10 @@
         text = "Asked the host…";
         button = "Cancel";
         title = "Waiting for the host to give you control of " + app + ".";
+      } else if (c.refused) {
+        text = "The host said not now";
+        button = "Request Control";
+        title = "The host turned down your request to control " + app + ". You can ask again.";
       } else {
         text = c.holder ? c.holder + " has control" : "Watching";
         button = "Request Control";

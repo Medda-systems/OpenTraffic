@@ -32,7 +32,7 @@ opentraffic stop --all
 | Command | Does |
 | --- | --- |
 | `list` (`ls`) | Your shares, their state, public URL, people, and open comments. The default command. |
-| `status <share>` | One share in detail: public and local URL, way of sharing, who can open it, collaboration and who's there, project, schedule, health of each hop, last error. |
+| `status <share>` | One share in detail: public and local URL, way of sharing, who can open it, collaboration and who's there, project, schedule, health of each hop, last error. For a Mac app, its state and viewers, and who may control it: with ask to control, who has control and who asks, with their number. |
 | `share <port\|host:port\|url> [options]` | Share a local server. See below. |
 | `share <app name\|App.app> [--via quick\|opentunnel] [--empty-data]` | Share a Mac app you're building (SwiftUI, AppKit, Catalyst), by its name as `services` lists it or its .app path: an isolated copy runs hidden on this Mac and viewers use its window in the browser, with live collaboration. `--empty-data` starts the copy without the app's data. Needs Accessibility and Screen Recording for OpenTraffic. See [Mac apps](/docs/mac-apps). |
 | `start <share>` / `stop <share>` / `stop --all` / `restart <share>` | Start, stop, restart. |
@@ -40,6 +40,7 @@ opentraffic stop --all
 | `remove <share> [--yes]` (`rm`) | Remove a share with its settings and comments. Asks first on a terminal; scripts pass `--yes`. |
 | `rename <share> <new name>` | Rename. |
 | `set <share> [options]` | `--url PORT\|URL` (stop it first), `--collab on\|off`, `--errors on\|off`, `--branch on\|off`, `--autostart on\|off`, `--project NAME` / `--no-project`, `--host-header on\|off`, `--stop-after never\|15m\|1h\|4h`; for a Mac app, `--control everyone\|watch-only\|ask`, `--appearance viewer\|mac\|light\|dark`, `--window-size fit\|app`. |
+| `control <share> allow [viewer]` / `deny [viewer]` / `take-back` | A Mac app share set to ask to control (`--control ask`), as the card's **Allow**, **Not Now** and **Take Back**: give control to a viewer who asks (by the number `status` shows, or their name; without one, whoever asked first), turn a request down (their page says so), or take control back. |
 | `protect <share> password [--user NAME]` | Protect a share with a generated password; prints it. Temporary and OpenTunnel shares get OpenTraffic's sign-in page (any username works there). |
 | `protect <share> google\|github [email …]` | Sign in with Google or GitHub (ngrok), optionally only for these emails. |
 | `protect <share> email <email …>` | One-time email codes for a custom domain (Cloudflare Access). |
@@ -83,7 +84,7 @@ opentraffic stop --all
 | `screenshot <share> <comment> [--after] [-o FILE\|FOLDER/]` | Save the picture of what the comment points at; `--after`, the picture of it once fixed. A folder (ending in `/`) is made if need be, and the picture gets its usual name in it. |
 | `errors <share>` | Browser errors visitors ran into. |
 | `logs <share> [-n LINES] [-f]` | The share's log; `-f` keeps following it. |
-| `watch [share]` | Follow events as they happen: shares starting and stopping, people joining, comments, errors. |
+| `watch [share]` | Follow events as they happen: shares starting and stopping, people joining, comments, errors, a viewer asking to control a shared Mac app. |
 
 ### This Mac and OpenTraffic
 

@@ -120,6 +120,10 @@ final class AppAPIBackend: OpenTrafficAPIBackend {
         try await store.apiRestartMacApp(share, resetData: resetData)
     }
 
+    func controlMacApp(_ share: String, action: APIMacAppControl.Action, viewer: String?, client: String) async throws -> APIShare {
+        try await store.apiControlMacApp(share, action: action, viewer: viewer)
+    }
+
     func projects() async -> [APIProject] {
         await store.apiProjects()
     }

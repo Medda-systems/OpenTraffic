@@ -16,11 +16,12 @@ done
 Event types: `share.started`, `share.stopped`, `session.joined`, `session.left`, `comment.created`,
 `comment.updated` (also when a comment is resolved, confirmed, or reopened: see its `status`), `comment.deleted`,
 `comment.claimed` (an app started working on it: `comment.claimedBy`), `comment.released` (it stopped without
-resolving it, or its claim lapsed), `error.reported`.
+resolving it, or its claim lapsed), `error.reported`, `control.requested` (a viewer of a Mac app share set to ask to
+control asks for it: `viewer`).
 
 ## Event object
 
-Each event has a monotonically increasing `seq`, unique `id`, `type`, ISO 8601 `at`, and `share` reference (`id`, `name`, optional `publicURL`). Depending on type, it may include `comment`, `commentId`, `peer`, or `error`.
+Each event has a monotonically increasing `seq`, unique `id`, `type`, ISO 8601 `at`, and `share` reference (`id`, `name`, optional `publicURL`). Depending on type, it may include `comment`, `commentId`, `peer`, `error`, or `viewer` (`control.requested`: the viewer's `viewer` number, the `name` its page gave, and `since`; answer with `POST /v1/shares/{ref}/control`).
 
 ## Reconnect and deduplicate
 

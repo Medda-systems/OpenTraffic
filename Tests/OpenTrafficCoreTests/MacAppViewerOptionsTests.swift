@@ -348,6 +348,7 @@ struct MacAppViewerOptionsStubTests {
         try await eventually("Ada's request") { await mirror.server.controlState().requests.count == 1 }
         let request = try #require(await mirror.server.controlState().requests.first)
         #expect(request.name == "Ada Lovelace")
+        #expect(abs(request.since.timeIntervalSinceNow) < 10)
         #expect(mirror.events.withLock { $0 }.contains { if case .control(let s) = $0 { s.requests.map(\.viewer) == [request.viewer] } else { false } })
 
         // Bob asks too and is turned down: he may ask again.
@@ -355,23 +356,29 @@ struct MacAppViewerOptionsStubTests {
         try await bob.waitForControl(.init(mode: .askToControl, you: false, requested: true))
         let bobID = try #require(await mirror.server.controlState().requests.last?.viewer)
         mirror.server.denyControl(viewer: bobID)
-        try await bob.waitForControl(.init(mode: .askToControl, you: false, requested: false))
+        // His page is told it was turned down, until he asks again.
+        try await bob.waitForControl(.init(mode: .askToControl, you: false, requested: false, refused: true))
+        #expect(await mirror.server.controlState().requests.map(\.viewer) == [request.viewer])
 
         // The host allows Ada: her input applies, Bob's doesn't, and Bob sees who has control.
         mirror.server.allowControl(viewer: request.viewer)
         try await ada.waitForControl(.init(mode: .askToControl, you: true, holder: "Ada Lovelace"))
-        try await bob.waitForControl(.init(mode: .askToControl, you: false, holder: "Ada Lovelace"))
+        try await bob.waitForControl(.init(mode: .askToControl, you: false, holder: "Ada Lovelace", refused: true))
         try await bob.send(.text(.init(window: mainID, text: "bob")))
         try await ada.send(.text(.init(window: mainID, text: "ada")))
         try await eventually("Ada's text") { mirror.input.events == ["text ada"] }
         try await sync(bob, mirror, marker: 2)
         #expect(mirror.input.events == ["text ada"])
-        #expect(await mirror.server.controlState().holder == .init(viewer: request.viewer, name: "Ada Lovelace", connected: true))
+        let holder = try #require(await mirror.server.controlState().holder)
+        #expect(holder.viewer == request.viewer && holder.name == "Ada Lovelace" && holder.connected)
+        #expect(holder.since >= request.since)
 
         // Ada's page drops and comes back with the same browser id: control is hers again at once.
         ada.close()
         try await eventually("Ada away") { await mirror.server.controlState().holder?.connected == false }
-        try await bob.waitForControl(.init(mode: .askToControl, you: false, holder: "Ada Lovelace"))
+        try await bob.waitForControl(.init(mode: .askToControl, you: false, holder: "Ada Lovelace", refused: true))
+        // Away, she keeps control since the host gave it.
+        #expect(await mirror.server.controlState().holder?.since == holder.since)
         let back = mirror.viewer()
         defer { back.close() }
         try await back.waitForControl(.init(mode: .askToControl, you: false, holder: "Ada Lovelace"))
@@ -384,12 +391,16 @@ struct MacAppViewerOptionsStubTests {
         // The host takes control back: nobody but the host controls the app.
         mirror.server.revokeControl()
         try await back.waitForControl(.init(mode: .askToControl, you: false))
-        try await bob.waitForControl(.init(mode: .askToControl, you: false))
+        try await bob.waitForControl(.init(mode: .askToControl, you: false, refused: true))
         try await back.send(.text(.init(window: mainID, text: "late")))
         try await sync(back, mirror, marker: 3)
         try await Task.sleep(for: .milliseconds(200))
         #expect(mirror.input.events == ["text ada", "text again"])
         #expect(await mirror.server.controlState().holder == nil)
+
+        // Bob asks again: the refusal is gone while he waits.
+        try await bob.send(.requestControl(.init(name: "Bob", client: nil)))
+        try await bob.waitForControl(.init(mode: .askToControl, you: false, requested: true))
     }
 
     @Test func aViewerGivesControlBackAndAModeChangeDropsGrantsAndRequests() async throws {

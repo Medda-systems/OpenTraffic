@@ -490,6 +490,9 @@ public protocol OpenTrafficAPIBackend: Sendable {
     /// Starts a Mac app share's app again on the same address (a rebuilt app is copied again first),
     /// or with `resetData` over from the data it started with. Answers once it's back.
     func restartMacApp(_ share: String, resetData: Bool, client: String) async throws -> APIShare
+    /// Ask to control, as on the share's card: allows or denies a viewer's request (`viewer` is its
+    /// number or name; nil: the oldest), or takes control back. Answers with the share as it is then.
+    func controlMacApp(_ share: String, action: APIMacAppControl.Action, viewer: String?, client: String) async throws -> APIShare
     func projects() async -> [APIProject]
     func startProject(_ name: String, client: String) async throws -> APIProject
     func stopProject(_ name: String) async throws -> APIProject
@@ -525,6 +528,7 @@ extension OpenTrafficAPIBackend {
     public func localServices() async -> [APILocalService] { [] }
     public func macApps() async -> [APIMacApp] { [] }
     public func restartMacApp(_ share: String, resetData: Bool, client: String) async throws -> APIShare { throw unsupported }
+    public func controlMacApp(_ share: String, action: APIMacAppControl.Action, viewer: String?, client: String) async throws -> APIShare { throw unsupported }
     public func projects() async -> [APIProject] { [] }
     public func startProject(_ name: String, client: String) async throws -> APIProject { throw unsupported }
     public func stopProject(_ name: String) async throws -> APIProject { throw unsupported }
@@ -547,6 +551,8 @@ public struct APIEvent: Codable, Equatable, Sendable {
         /// An app stopped working on a comment without resolving it, or its claim ran out.
         case commentReleased = "comment.released"
         case errorReported = "error.reported"
+        /// A viewer of a Mac app share asks for control (`viewer`); answer with allow or deny.
+        case controlRequested = "control.requested"
     }
 
     public let seq: Int
@@ -559,6 +565,8 @@ public struct APIEvent: Codable, Equatable, Sendable {
     public let commentId: String?
     public let peer: APIPerson?
     public let error: CollabErrorGroup?
+    /// For `control.requested`: who asks.
+    public let viewer: APIControlViewer?
 }
 
 /// Recent events for long polling, MCP's `wait_for_feedback`, and webhooks. Thread-safe.
@@ -614,9 +622,10 @@ public final class APIEventLog: @unchecked Sendable {
     public var cursor: Int { lock.withLock { nextSeq } }
 
     @discardableResult
-    public func append(_ type: APIEvent.Kind, share: APIShareRef, comment: APIComment? = nil, commentId: String? = nil, peer: APIPerson? = nil, error: CollabErrorGroup? = nil, at: Date = Date()) -> APIEvent {
+    public func append(_ type: APIEvent.Kind, share: APIShareRef, comment: APIComment? = nil, commentId: String? = nil, peer: APIPerson? = nil, error: CollabErrorGroup? = nil,
+                       viewer: APIControlViewer? = nil, at: Date = Date()) -> APIEvent {
         let (event, wake, notify) = lock.withLock { () -> (APIEvent, [CheckedContinuation<Void, Never>], [@Sendable (APIEvent) -> Void]) in
-            let event = APIEvent(seq: nextSeq, id: UUID().uuidString.lowercased(), type: type, at: at, share: share, comment: comment, commentId: commentId, peer: peer, error: error)
+            let event = APIEvent(seq: nextSeq, id: UUID().uuidString.lowercased(), type: type, at: at, share: share, comment: comment, commentId: commentId, peer: peer, error: error, viewer: viewer)
             nextSeq += 1
             events.append(event)
             if events.count > Self.capacity { events.removeFirst(events.count - Self.capacity) }

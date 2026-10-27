@@ -41,9 +41,11 @@ OPENTRAFFIC_E2E=1 swift test --filter MacAppEndToEndTests   # the same, from swi
 
 Options: `--app <OpenTraffic.app>` (default `/Users/Shared/OpenTraffic-e2e/OpenTraffic.app`), `--build`
 (rebuild that copy first), `--via opentunnel|quick`, `--name <share>` (default "Orbit E2E"),
-`--steps a,b` or `--skip a,b` (step names as printed; the set-up steps always run), and `--keep`
+`--steps a,b` or `--skip a,b` (step names as printed; the set-up steps always run), `--keep`
 (leave the share live and the copy running, to look at it afterwards; stop it with the command the
-script prints). `swift test` passes options in `OPENTRAFFIC_E2E_ARGS`.
+script prints), and `--card` (also press Allow and Take Back on the share's Live Collaboration card:
+it opens the copy's window on your screen, and needs Accessibility for the terminal that runs the
+script). `swift test` passes options in `OPENTRAFFIC_E2E_ARGS`.
 
 The work folder (by default a new `ot-e2e-<time>` folder in the temporary folder) holds the fixture's
 scratch copy, the copy's home and socket, Chrome's profile (deleted at the end), `shots/` with one
@@ -79,6 +81,11 @@ process the script started).
 | viewport resize resizes the window | at 1100 px the app's window is resized to the browser (not just scaled), and back at 1440 |
 | phone view at 390 px | the Simple view replaces the window: Add Order and the orders as list items with their text, nothing wider than the phone |
 | watch-only mode blocks input | `opentraffic set --control watch-only`: the bar says Watching only and a click changes nothing; `--control everyone` gives control back |
+| ask to control: a second viewer asks | `--control ask`; a second viewer (a browser context of its own, so its own storage and collaboration id, named "E2E Asker") clicks Request Control and waits; `opentraffic status --json` lists the request (number, name, time) and the text status shows it; `opentraffic watch --json` reports `control.requested` |
+| control allow lets the asker click, not the first page | `opentraffic control … allow <number>`: the asker's bar says You have control, the first page's names who has it; the asker's click on Express shipping changes the app (both pages see it), the first page's click doesn't; the status shows the holder |
+| control take-back blocks the asker again | `control … take-back`: both pages watch and the asker's click changes nothing; a second take-back is refused (nobody has control) |
+| control deny shows the asker the refusal | the asker asks again; `control … deny "E2E Asker"` (by name): its bar says The host said not now with Request Control; `allow` with nobody asking is refused; `--control everyone` again |
+| the card's Allow and Take Back | `--card` only: the asker asks, the copy's window opens on the share (a GetURL Apple event to the copy's pid, never Launch Services), and Accessibility presses the card's Allow, then Take Back; the asker gets and loses control, and the status follows |
 | Reset Data restores the orders | `opentraffic restart --reset-data`: the 30 orders and 20 open again, on the same page |
 | Restart keeps the page connected | `opentraffic restart --app`: a new launch reaches the same page, which stays connected |
 | an edited label is rebuilt and shows in the browser | the fixture's `Add Order` becomes `Add New Order` in its sources; OpenTraffic rebuilds and relaunches it and the page shows the new label |
@@ -90,3 +97,8 @@ process the script started).
 25 October 2026, Mac15,12 (Apple M3, 16 GB), macOS 27.0, Chrome 155, release copy of OpenTraffic
 1.0.20+ (`se.medda.opentraffic.e2e`), OpenTunnel. Load average 13 to 30 from other work on the Mac.
 All steps passed in 68 s (the rebuild step 17 s of it; Orbit's debug build and relaunch).
+
+27 October 2026, the same Mac, Chrome 156, with the ask-to-control steps and `--card`: all steps
+passed in 69 s (load average about 14). Asking, allow, take back and deny took 2 to 3 s each, the
+card's Allow and Take Back 8 s (opening the window and reading it through Accessibility), the rebuild
+10 s.

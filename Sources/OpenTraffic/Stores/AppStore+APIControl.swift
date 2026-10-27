@@ -326,6 +326,29 @@ extension AppStore {
         return apiShare(definitions.first { $0.id == id } ?? definition)
     }
 
+    /// Ask to control from the API, like Allow, Not Now and Take Back on the share's card; answers
+    /// with the share once its status shows the change.
+    func apiControlMacApp(_ reference: String, action: APIMacAppControl.Action, viewer: String?) async throws -> APIShare {
+        let definition = try apiDefinition(reference)
+        let id = definition.id
+        guard definition.macApp != nil else { throw OpenTrafficAPIError.badRequest("“\(definition.name)” doesn't share a Mac app.") }
+        guard isActive(id), let server = macAppSessions[id]?.server else {
+            throw OpenTrafficAPIError.conflict("“\(definition.name)” isn't running. Start it first.")
+        }
+        let target = try APIMacAppControl.target(of: action, viewer: viewer, in: await server.controlState(), share: definition.name)
+        switch action {
+        case .allow: target.map { allowMacAppControl(viewer: $0, for: id) }
+        case .deny: target.map { denyMacAppControl(viewer: $0, for: id) }
+        case .takeBack: revokeMacAppControl(for: id)
+        }
+        // The server has applied it once it answers; its event reaches the status a moment later.
+        let state = await server.controlState()
+        for _ in 0..<40 where isActive(id) && macAppStatus[id]?.control != state {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return apiShare(definitions.first { $0.id == id } ?? definition)
+    }
+
     /// The Mac app a share publishes and how its copy is doing, for `APIShare.macApp`.
     func apiMacAppInfo(_ definition: TunnelDefinition) -> APIShareMacApp? {
         guard let path = definition.macApp else { return nil }
@@ -333,9 +356,13 @@ extension AppStore {
         let described = status.map { APIShareMacApp.describe($0.state) }
         let name = macAppSessions[definition.id]?.name ?? detectedMacApps.first { $0.id == path }?.name
             ?? URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        // The mode as the host set it; who has control and who asks while the share runs.
+        let mode = (definition.macAppOptions ?? MacAppViewerOptions()).control
+        let control = status?.control.flatMap { $0.mode == mode ? APIMacAppControl($0) : nil } ?? APIMacAppControl(mode: mode.rawValue)
         return APIShareMacApp(
             path: path, name: name, data: (definition.macAppData ?? .copy).rawValue,
-            state: described?.state, viewers: status?.viewers, warning: status?.warning, error: described?.error
+            state: described?.state, viewers: status?.viewers, warning: status?.warning, error: described?.error,
+            control: control
         )
     }
 

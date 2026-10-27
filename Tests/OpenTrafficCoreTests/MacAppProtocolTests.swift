@@ -96,6 +96,8 @@ private let everyClientMessage: [MP.ClientMessage] = [
         (#"{"t":"control","mode":"askToControl","you":false,"requested":true,"holder":"Ada"}"#,
          .control(MP.Control(mode: .askToControl, you: false, requested: true, holder: "Ada"))),
         (#"{"t":"control","mode":"everyone","you":true,"requested":false,"holder":null}"#, .control(MP.Control(mode: .everyone, you: true))),
+        (#"{"t":"control","mode":"askToControl","you":false,"requested":false,"holder":null,"refused":true}"#,
+         .control(MP.Control(mode: .askToControl, you: false, refused: true))),
     ]
     for (json, expected) in examples {
         let decoded = try MP.ServerMessage.decode(json)

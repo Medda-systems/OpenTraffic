@@ -1124,6 +1124,11 @@ await check("ask to control: Request Control asks with the overlay's name and id
   await control({ mode: "askToControl", you: false });
   await waitFor(`document.querySelector('.otm-control-button').textContent === 'Request Control'`, "Request Control again");
   assert(await evaluate(`sessionStorage.getItem('opentraffic.macapp.control')`) === null, "the page still thinks it had control");
+  // Asked again and turned down: the bar says so and offers to ask again.
+  await control({ mode: "askToControl", you: false, requested: true });
+  await waitFor(`document.querySelector('.otm-control-text').textContent === 'Asked the host…'`, "the waiting state again");
+  await control({ mode: "askToControl", you: false, refused: true });
+  await waitFor(`document.querySelector('.otm-control-text').textContent === 'The host said not now' && document.querySelector('.otm-control-button').textContent === 'Request Control'`, "the refusal");
   await control({ mode: "everyone", you: true });
   await waitFor(`document.body.dataset.control === 'yes' && document.querySelector('.otm-control').hidden`, "everyone controls again");
   await evaluate(`localStorage.removeItem('__opentraffic_collab_name'); localStorage.removeItem('__opentraffic_collab_client')`);

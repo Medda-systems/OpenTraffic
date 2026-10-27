@@ -49,8 +49,11 @@ public struct APIShareMacApp: Codable, Equatable, Sendable {
     public let warning: String?
     /// Why it crashed or failed.
     public let error: String?
+    /// Who may control the app: the mode, who has control and who asks for it.
+    public let control: APIMacAppControl?
 
-    public init(path: String, name: String, data: String, state: String? = nil, viewers: Int? = nil, warning: String? = nil, error: String? = nil) {
+    public init(path: String, name: String, data: String, state: String? = nil, viewers: Int? = nil, warning: String? = nil, error: String? = nil,
+                control: APIMacAppControl? = nil) {
         self.path = path
         self.name = name
         self.data = data
@@ -58,6 +61,7 @@ public struct APIShareMacApp: Codable, Equatable, Sendable {
         self.viewers = viewers
         self.warning = warning
         self.error = error
+        self.control = control
     }
 
     /// The API's name for a session state, and the message that comes with it.
@@ -69,6 +73,123 @@ public struct APIShareMacApp: Codable, Equatable, Sendable {
         case .crashed(let message): ("crashed", message)
         case .failed(let message): ("failed", message)
         case .stopped: ("stopped", nil)
+        }
+    }
+}
+
+/// Who may control a shared Mac app (`APIShareMacApp.control`): the host's choice on the card and,
+/// with ask to control, who has control and who asks for it.
+public struct APIMacAppControl: Codable, Equatable, Sendable {
+    /// "everyone", "watchOnly", or "askToControl".
+    public let mode: String
+    /// `askToControl`: the viewer the host gave control; nil while only the host controls the app.
+    public let holder: APIControlViewer?
+    /// `askToControl`: viewers asking for control, oldest first.
+    public let requests: [APIControlViewer]
+
+    public init(mode: String, holder: APIControlViewer? = nil, requests: [APIControlViewer] = []) {
+        self.mode = mode
+        self.holder = holder
+        self.requests = requests
+    }
+
+    public init(_ state: MirrorServer.ControlState) {
+        self.init(
+            mode: state.mode.rawValue,
+            holder: state.holder.map { APIControlViewer(viewer: $0.viewer, name: $0.name, since: $0.since, connected: $0.connected) },
+            requests: state.requests.map { APIControlViewer(viewer: $0.viewer, name: $0.name, since: $0.since) }
+        )
+    }
+
+    /// What the host does with ask to control: `allow` a viewer who asks (they get control; whoever had
+    /// it loses it), `deny` a request (their page says so; they may ask again), or `take-back` control.
+    public enum Action: String, Codable, Sendable, CaseIterable {
+        case allow
+        case deny
+        case takeBack = "take-back"
+
+        /// `take-back`, also written `take_back` or `takeBack`.
+        public init?(api: String) {
+            switch api.lowercased().replacingOccurrences(of: "_", with: "-") {
+            case "allow": self = .allow
+            case "deny": self = .deny
+            case "take-back", "takeback": self = .takeBack
+            default: return nil
+            }
+        }
+    }
+
+    /// The viewer an action applies to: for `allow` and `deny`, the request `viewer` names (its
+    /// number, or its name in any case) or, without one, the oldest; nil for `take-back`. Throws what
+    /// the caller should see when the share doesn't ask, nobody asks, or the viewer isn't asking.
+    public static func target(of action: Action, viewer: String?, in state: MirrorServer.ControlState, share: String) throws -> Int? {
+        let trimmed = viewer?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let viewer = trimmed.isEmpty ? nil : trimmed
+        guard state.mode == .askToControl else {
+            let now = state.mode == .watchOnly ? "viewers only watch" : "every viewer controls the app"
+            throw OpenTrafficAPIError.conflict("“\(share)” doesn't ask to control: \(now). Set it to ask to control first (macAppControl askToControl, or `opentraffic set \"\(share)\" --control ask`).")
+        }
+        if action == .takeBack {
+            guard viewer == nil else { throw OpenTrafficAPIError.badRequest("take-back takes no viewer: only one viewer has control at a time.") }
+            guard state.holder != nil else { throw OpenTrafficAPIError.conflict("Nobody has control of “\(share)” but you.") }
+            return nil
+        }
+        guard !state.requests.isEmpty else { throw OpenTrafficAPIError.conflict("Nobody is asking to control “\(share)”.") }
+        guard let viewer else { return state.requests[0].viewer }
+        let waiting = state.requests.map { "\($0.name ?? "A viewer") (\($0.viewer))" }.joined(separator: ", ")
+        if let number = Int(viewer.hasPrefix("#") ? String(viewer.dropFirst()) : viewer) {
+            guard let request = state.requests.first(where: { $0.viewer == number }) else {
+                throw OpenTrafficAPIError.notFound("Viewer \(number) isn't asking to control “\(share)”. Asking: \(waiting).")
+            }
+            return request.viewer
+        }
+        let named = state.requests.filter { ($0.name ?? "").caseInsensitiveCompare(viewer) == .orderedSame }
+        guard !named.isEmpty else { throw OpenTrafficAPIError.notFound("Nobody called “\(viewer)” is asking to control “\(share)”. Asking: \(waiting).") }
+        guard named.count == 1 else {
+            throw OpenTrafficAPIError.conflict("\(named.count) viewers called “\(viewer)” ask to control “\(share)”: give the number (\(named.map { String($0.viewer) }.joined(separator: " or "))).")
+        }
+        return named[0].viewer
+    }
+}
+
+/// A viewer in `APIMacAppControl`: one who asks for control, or the one who has it.
+public struct APIControlViewer: Codable, Equatable, Sendable {
+    /// The viewer's number on the share (what `allow` and `deny` take); nil for a holder whose page is away.
+    public let viewer: Int?
+    /// The name their page gave, nil when none.
+    public let name: String?
+    /// When they asked, or got control.
+    public let since: Date
+    /// The holder only: whether their page is connected (away, they get control back when they return).
+    public let connected: Bool?
+
+    public init(viewer: Int?, name: String?, since: Date, connected: Bool? = nil) {
+        self.viewer = viewer
+        self.name = name
+        self.since = since
+        self.connected = connected
+    }
+}
+
+/// `POST /v1/shares/{ref}/control`: `{"action":"allow"|"deny"|"take-back","viewer":"Ada"|3}`.
+public struct APIMacAppControlChange: Decodable, Equatable, Sendable {
+    public let action: String
+    /// A viewer's number or name; a number may come as a JSON number.
+    public let viewer: String?
+
+    public init(action: String, viewer: String? = nil) {
+        self.action = action
+        self.viewer = viewer
+    }
+
+    private enum CodingKeys: String, CodingKey { case action, viewer }
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        action = try c.decode(String.self, forKey: .action)
+        if let number = try? c.decodeIfPresent(Int.self, forKey: .viewer) {
+            viewer = String(number)
+        } else {
+            viewer = try c.decodeIfPresent(String.self, forKey: .viewer)
         }
     }
 }

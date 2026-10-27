@@ -378,22 +378,25 @@ public enum MirrorProtocol {
     /// `{"t":"control","mode":"askToControl","you":false,"requested":true,"holder":"Ada"}`: the control
     /// mode, whether this viewer may control the app right now, whether its `requestControl` waits for
     /// the host, and (`askToControl`) the name of the viewer who has control, `null` when nobody does.
+    /// `"refused":true` (only sent when true): the host turned this viewer's latest request down.
     public struct Control: Codable, Equatable, Sendable {
         public var mode: ControlMode
         public var you: Bool
         public var requested: Bool
         public var holder: String?
-        public init(mode: ControlMode, you: Bool, requested: Bool = false, holder: String? = nil) {
-            self.mode = mode; self.you = you; self.requested = requested; self.holder = holder
+        public var refused: Bool
+        public init(mode: ControlMode, you: Bool, requested: Bool = false, holder: String? = nil, refused: Bool = false) {
+            self.mode = mode; self.you = you; self.requested = requested; self.holder = holder; self.refused = refused
         }
 
-        private enum CodingKeys: String, CodingKey { case mode, you, requested, holder }
+        private enum CodingKeys: String, CodingKey { case mode, you, requested, holder, refused }
         public init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             mode = try c.decode(ControlMode.self, forKey: .mode)
             you = try c.decode(Bool.self, forKey: .you)
             requested = try c.decodeIfPresent(Bool.self, forKey: .requested) ?? false
             holder = try c.decodeIfPresent(String.self, forKey: .holder)
+            refused = try c.decodeIfPresent(Bool.self, forKey: .refused) ?? false
         }
         public func encode(to encoder: any Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
@@ -401,6 +404,7 @@ public enum MirrorProtocol {
             try c.encode(you, forKey: .you)
             try c.encode(requested, forKey: .requested)
             try c.encode(holder, forKey: .holder)
+            if refused { try c.encode(refused, forKey: .refused) }
         }
     }
 

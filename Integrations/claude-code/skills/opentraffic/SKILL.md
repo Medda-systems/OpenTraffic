@@ -31,6 +31,10 @@ is the element's accessibility path, not a CSS selector. Find the view in the Sw
 its `accessibilityIdentifier`. After a fix, build the app the way the project does, then call `restart_mac_app` so
 the share shows the new build on the same link. Don't open or quit the shared copy yourself.
 
+When the user set the share to ask to control, `list_shares` shows who asks (`macApp.control.requests`, each with
+a `viewer` number and `name`) and who has control. Allow or deny a request, or take control back, with
+`control_mac_app` (`opentraffic control <share> allow|deny [viewer]|take-back`) only when the user tells you to.
+
 ## Act on feedback
 
 Loop while the user wants you to keep going:

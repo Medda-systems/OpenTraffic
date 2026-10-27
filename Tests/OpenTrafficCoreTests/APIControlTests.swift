@@ -128,15 +128,26 @@ private final class MacAppBackend: OpenTrafficAPIBackend, @unchecked Sendable {
     private let lock = NSLock()
     private var recordedRequests: [APIShareRequest] = []
     private var recordedRestarts: [(share: String, resetData: Bool)] = []
+    private var recordedControls: [(share: String, action: APIMacAppControl.Action, viewer: String?)] = []
 
     var requests: [APIShareRequest] { lock.withLock { recordedRequests } }
     var restarts: [(share: String, resetData: Bool)] { lock.withLock { recordedRestarts } }
+    var controls: [(share: String, action: APIMacAppControl.Action, viewer: String?)] { lock.withLock { recordedControls } }
+
+    static let since = Date(timeIntervalSince1970: 1_793_000_000)
+    /// Ask to control, with Ada (viewer 3) in control and Bob (viewer 5) asking.
+    static let control = APIMacAppControl(
+        mode: "askToControl",
+        holder: APIControlViewer(viewer: 3, name: "Ada", since: since, connected: true),
+        requests: [APIControlViewer(viewer: 5, name: "Bob", since: since.addingTimeInterval(60))]
+    )
 
     let share = APIShare(
         id: shareID, name: "Orbit", provider: "opentunnel", kind: "opentunnel", state: "running",
         localURL: "http://127.0.0.1/", publicURL: "https://orbit.opentunnel.xyz", collaboration: true, people: [],
         openComments: 0, comments: 0,
-        macApp: APIShareMacApp(path: "/Users/me/code/Orbit/build/Orbit.app", name: "Orbit", data: "copy", state: "running", viewers: 2, warning: "Orbit dropped an entitlement.")
+        macApp: APIShareMacApp(path: "/Users/me/code/Orbit/build/Orbit.app", name: "Orbit", data: "copy", state: "running", viewers: 2, warning: "Orbit dropped an entitlement.",
+                               control: control)
     )
 
     func listShares() async -> [APIShare] { [share] }
@@ -165,6 +176,12 @@ private final class MacAppBackend: OpenTrafficAPIBackend, @unchecked Sendable {
     func restartMacApp(_ share: String, resetData: Bool, client: String) async throws -> APIShare {
         guard share.caseInsensitiveCompare("Orbit") == .orderedSame else { throw OpenTrafficAPIError.notFound("No share named “\(share)”.") }
         lock.withLock { recordedRestarts.append((share, resetData)) }
+        return self.share
+    }
+
+    func controlMacApp(_ share: String, action: APIMacAppControl.Action, viewer: String?, client: String) async throws -> APIShare {
+        guard share.caseInsensitiveCompare("Orbit") == .orderedSame else { throw OpenTrafficAPIError.notFound("No share named “\(share)”.") }
+        lock.withLock { recordedControls.append((share, action, viewer)) }
         return self.share
     }
 }
@@ -319,4 +336,144 @@ private func json(_ response: APIResponse) throws -> [String: Any] {
     #expect(APIShareMacApp.describe(.crashed("Orbit quit unexpectedly.")) == ("crashed", "Orbit quit unexpectedly."))
     #expect(APIShareMacApp.describe(.failed("No window.")) == ("failed", "No window."))
     #expect(APIShareMacApp.describe(.stopped) == ("stopped", nil))
+}
+
+// MARK: Ask to control
+
+@Test func shareStatusShowsWhoControlsAMacApp() async throws {
+    let router = APIRouter(backend: MacAppBackend(), events: APIEventLog())
+    let share = try json(await router.respond(method: "GET", uri: "/v1/shares/Orbit", body: Data(), client: "test"))
+    let control = try #require((share["macApp"] as? [String: Any])?["control"] as? [String: Any])
+    #expect(control["mode"] as? String == "askToControl")
+    let holder = try #require(control["holder"] as? [String: Any])
+    #expect(holder["viewer"] as? Int == 3 && holder["name"] as? String == "Ada" && holder["connected"] as? Bool == true)
+    #expect((holder["since"] as? String)?.hasPrefix("2026-10-26T") == true)
+    let requests = try #require(control["requests"] as? [[String: Any]])
+    #expect(requests.map { $0["viewer"] as? Int } == [5])
+    #expect(requests[0]["name"] as? String == "Bob")
+    #expect(requests[0]["since"] is String)
+    // It decodes again, and a share from an older OpenTraffic has none.
+    let decoded = try APIJSON.decoder().decode(APIShare.self, from: APIJSON.encode(MacAppBackend().share))
+    #expect(decoded.macApp?.control == MacAppBackend.control)
+    let old = #"{"path":"/a/Orbit.app","name":"Orbit","data":"copy"}"#
+    #expect(try APIJSON.decoder().decode(APIShareMacApp.self, from: Data(old.utf8)).control == nil)
+    // The live state as the API shows it.
+    let state = MirrorServer.ControlState(mode: .askToControl,
+                                          holder: .init(viewer: nil, name: "Ada", connected: false, since: MacAppBackend.since),
+                                          requests: [.init(viewer: 5, name: nil, since: MacAppBackend.since)])
+    #expect(APIMacAppControl(state) == APIMacAppControl(mode: "askToControl",
+                                                        holder: APIControlViewer(viewer: nil, name: "Ada", since: MacAppBackend.since, connected: false),
+                                                        requests: [APIControlViewer(viewer: 5, name: nil, since: MacAppBackend.since)]))
+    #expect(APIMacAppControl(MirrorServer.ControlState(mode: .watchOnly)) == APIMacAppControl(mode: "watchOnly"))
+}
+
+@Test func controlAllowsDeniesAndTakesBackOverREST() async throws {
+    let backend = MacAppBackend()
+    let router = APIRouter(backend: backend, events: APIEventLog())
+    func post(_ body: String, share: String = "Orbit") async -> APIResponse {
+        await router.respond(method: "POST", uri: "/v1/shares/\(share)/control", body: Data(body.utf8), client: "test")
+    }
+    #expect(await post(#"{"action":"allow"}"#).status == 200)
+    #expect(await post(#"{"action":"allow","viewer":"Bob"}"#).status == 200)
+    #expect(await post(#"{"action":"deny","viewer":5}"#).status == 200)
+    #expect(await post(#"{"action":"take-back"}"#).status == 200)
+    #expect(await post(#"{"action":"take_back"}"#).status == 200)
+    #expect(backend.controls.map(\.action) == [.allow, .allow, .deny, .takeBack, .takeBack])
+    #expect(backend.controls.map(\.viewer) == [nil, "Bob", "5", nil, nil])
+    // The answer is the share, with who controls it now.
+    let answer = try json(await post(#"{"action":"allow"}"#))
+    #expect(((answer["macApp"] as? [String: Any])?["control"] as? [String: Any])?["mode"] as? String == "askToControl")
+
+    let bad = await post(#"{"action":"grant"}"#)
+    #expect(bad.status == 400)
+    #expect((try json(bad)["error"] as? [String: Any])?["message"] as? String == "action must be allow, deny, or take-back")
+    #expect(await post("{}").status == 400)
+    #expect(await post(#"{"action":"allow"}"#, share: "Nope").status == 404)
+    #expect(await router.respond(method: "GET", uri: "/v1/shares/Orbit/control", body: Data(), client: "test").status == 405)
+    // Older backends answer that they can't.
+    let minimal = APIRouter(backend: FakeAPIBackend(), events: APIEventLog())
+    #expect(await minimal.respond(method: "POST", uri: "/v1/shares/Orbit/control", body: Data(#"{"action":"allow"}"#.utf8), client: "test").status == 501)
+}
+
+@Test func controlFindsTheViewerAnActionMeans() throws {
+    let since = Date()
+    let state = MirrorServer.ControlState(mode: .askToControl, holder: nil, requests: [
+        .init(viewer: 4, name: "Bob", since: since),
+        .init(viewer: 7, name: "Ada", since: since.addingTimeInterval(5)),
+        .init(viewer: 9, name: "ada", since: since.addingTimeInterval(9)),
+        .init(viewer: 11, name: nil, since: since.addingTimeInterval(12)),
+    ])
+    func target(_ action: APIMacAppControl.Action, _ viewer: String?, _ state: MirrorServer.ControlState = state) throws -> Int? {
+        try APIMacAppControl.target(of: action, viewer: viewer, in: state, share: "Orbit")
+    }
+    func failure(_ action: APIMacAppControl.Action, _ viewer: String?, _ state: MirrorServer.ControlState = state) -> OpenTrafficAPIError? {
+        do { _ = try target(action, viewer, state); return nil } catch { return error as? OpenTrafficAPIError }
+    }
+    // Without a viewer, the oldest request; by number (or #number), or by name in any case.
+    #expect(try target(.allow, nil) == 4)
+    #expect(try target(.deny, "  ") == 4)
+    #expect(try target(.allow, "11") == 11)
+    #expect(try target(.allow, "#7") == 7)
+    #expect(try target(.deny, "BOB") == 4)
+    // Two viewers called Ada: the number decides.
+    #expect(failure(.allow, "Ada")?.status == 409)
+    #expect(failure(.allow, "Ada")?.message.contains("give the number (7 or 9)") == true)
+    // Someone who isn't asking.
+    #expect(failure(.allow, "3")?.status == 404)
+    #expect(failure(.allow, "3")?.message.contains("Asking: Bob (4), Ada (7), ada (9), A viewer (11).") == true)
+    #expect(failure(.deny, "Eve")?.status == 404)
+    // Nobody asks, nobody to take control from.
+    let quiet = MirrorServer.ControlState(mode: .askToControl)
+    #expect(failure(.allow, nil, quiet)?.message == "Nobody is asking to control “Orbit”.")
+    #expect(failure(.takeBack, nil, quiet)?.message == "Nobody has control of “Orbit” but you.")
+    let held = MirrorServer.ControlState(mode: .askToControl, holder: .init(viewer: 4, name: "Bob", connected: true, since: since))
+    #expect(try target(.takeBack, nil, held) == nil)
+    #expect(failure(.takeBack, "Bob", held)?.status == 400)
+    // A share that doesn't ask to control.
+    let everyone = failure(.allow, nil, MirrorServer.ControlState(mode: .everyone))
+    #expect(everyone?.status == 409)
+    #expect(everyone?.message.contains("--control ask") == true)
+    #expect(failure(.takeBack, nil, MirrorServer.ControlState(mode: .watchOnly))?.message.contains("viewers only watch") == true)
+    // The words the API takes.
+    #expect(APIMacAppControl.Action(api: "Take-Back") == .takeBack)
+    #expect(APIMacAppControl.Action(api: "takeBack") == .takeBack)
+    #expect(APIMacAppControl.Action(api: "revoke") == nil)
+}
+
+@Test func mcpAnswersControlRequests() async throws {
+    let backend = MacAppBackend()
+    let mcp = MCPServer(backend: backend, events: APIEventLog())
+    func call(_ arguments: JSONValue) async throws -> JSONValue {
+        try #require(await mcp.handle(["jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": ["name": "control_mac_app", "arguments": arguments]], client: "test")?["result"])
+    }
+    let listed = try #require(await mcp.handle(["jsonrpc": "2.0", "id": 1, "method": "tools/list"], client: "test")?["result"]?["tools"]?.arrayValue)
+    let tool = try #require(listed.first { $0["name"] == "control_mac_app" })
+    #expect(tool["inputSchema"]?["required"] == ["share", "action"])
+    #expect(tool["inputSchema"]?["properties"]?["action"]?["enum"] == ["allow", "deny", "take_back"])
+    #expect(tool["annotations"]?["readOnlyHint"] == false)
+
+    let allowed = try await call(["share": "Orbit", "action": "allow", "viewer": "Bob"])
+    #expect(allowed["isError"] == nil)
+    #expect(allowed["structuredContent"]?["macApp"]?["control"]?["requests"]?.arrayValue?.first?["viewer"] == 5)
+    #expect(try await call(["share": "Orbit", "action": "deny", "viewer": 5])["isError"] == nil)
+    #expect(try await call(["share": "Orbit", "action": "take_back"])["isError"] == nil)
+    #expect(backend.controls.map(\.action) == [.allow, .deny, .takeBack])
+    #expect(backend.controls.map(\.viewer) == ["Bob", "5", nil])
+    #expect(try await call(["share": "Orbit", "action": "grant"])["isError"] == true)
+    #expect(try await call(["share": "Orbit"])["isError"] == true)
+    #expect(try await call(["share": "Orbit", "action": "allow", "viewer": true])["isError"] == true)
+}
+
+@Test func aControlRequestIsAnEvent() throws {
+    let events = APIEventLog()
+    let share = APIShareRef(id: MacAppBackend.shareID, name: "Orbit", publicURL: nil)
+    let viewer = APIControlViewer(viewer: 5, name: "Bob", since: MacAppBackend.since)
+    events.append(.controlRequested, share: share, viewer: viewer)
+    let event = try #require(events.events(since: 0).events.first)
+    #expect(event.type.rawValue == "control.requested")
+    let object = try #require(try JSONSerialization.jsonObject(with: APIJSON.encode(event)) as? [String: Any])
+    #expect(object["type"] as? String == "control.requested")
+    #expect((object["viewer"] as? [String: Any])?["name"] as? String == "Bob")
+    #expect((object["viewer"] as? [String: Any])?["viewer"] as? Int == 5)
+    #expect(APIEvent.Kind.allCases.contains(.controlRequested))
 }

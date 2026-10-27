@@ -260,6 +260,7 @@ viewer changes. A viewer that never got one controls the app, as with `everyone`
 | `you` | Whether this viewer's input reaches the app now |
 | `requested` | Whether this viewer asked for control (`requestControl`) and the host hasn't answered yet; `false` again after a no |
 | `holder` | `askToControl`: the name of the viewer who has control (`"A viewer"` when it gave none), `null` when nobody has it; `null` in the other modes |
+| `refused` | `askToControl`, and only sent when `true`: the host turned this viewer's latest request down (the viewer says so); gone once it asks again or the mode changes |
 
 A viewer without control sends no input (`act`, `pointer`, `text`, `key`, `setText`, `menuAction`,
 `windowAction`); the server drops any it gets anyway. It should not show the effect of input either
@@ -311,7 +312,8 @@ The host decides three things on the share's card; the server and the session ap
 
 **Control** (`control` above). `everyone` is the default. In `watchOnly` every viewer only watches. In
 `askToControl` a viewer sends `requestControl`; the host sees who asks (a notice on the card with
-Allow, and a notification) and may allow one viewer at a time. Control stays with that viewer until
+Allow, and a notification; `opentraffic status`, the API's `macApp.control` and its `control.requested`
+event) and may allow one viewer at a time, or turn the request down (`refused`). Control stays with that viewer until
 the host takes it back, the viewer sends `releaseControl`, or the host changes the mode (which also
 drops waiting requests). A viewer with control that disconnects keeps it while away when its
 `requestControl` carried a `client` id, and gets it back when it returns; without one it loses it.

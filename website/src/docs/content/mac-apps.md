@@ -33,11 +33,11 @@ Sheets, alerts, popovers, and the app's other windows show up too: sheets and po
 
 The Mac app section of the share's Live Collaboration card has three choices, kept with the share:
 
-- **Viewers:** **Everyone can control** (the default), **Watch only**, or **Ask to control**. Watching viewers see the app and comment on it, but their clicks and typing don't reach it, and the bar above the window tells them so. With **Ask to control**, a viewer clicks **Request Control** in that bar; you get a notification and an **Allow** button on the card. Control stays with that person until you click **Take Back** or they click **Give Back**, and comes back to them if their page reconnects. Your own browser, opened with **Open as Host**, can always use the app.
+- **Viewers:** **Everyone can control** (the default), **Watch only**, or **Ask to control**. Watching viewers see the app and comment on it, but their clicks and typing don't reach it, and the bar above the window tells them so. With **Ask to control**, a viewer clicks **Request Control** in that bar; you get a notification and an **Allow** button on the card. **Not Now** turns them down, and their bar says so; they can ask again. Control stays with that person until you click **Take Back** or they click **Give Back**, and comes back to them if their page reconnects. Your own browser, opened with **Open as Host**, can always use the app.
 - **Window size:** **Fit the viewer's browser** (the default) resizes the app's main window to fill the first viewer's browser (or the browser of the person you gave control), as far as the app's minimum size and OpenTraffic's off-screen display allow. Everyone else sees it scaled down. **The app's own size** leaves the window as the app made it.
 - **Appearance:** **First viewer's** (the default) shows the app light or dark as the first viewer's browser prefers; or pick **This Mac's**, **Light**, or **Dark**. Changing it restarts the copy with the same data. Dark only works while your Mac uses the Dark appearance; otherwise the app stays light, and the card says so.
 
-From the terminal: `opentraffic set Orbit --control watch-only` (`everyone`, `watch-only`, `ask`), `--appearance viewer|mac|light|dark` and `--window-size fit|app`.
+From the terminal: `opentraffic set Orbit --control watch-only` (`everyone`, `watch-only`, `ask`), `--appearance viewer|mac|light|dark` and `--window-size fit|app`. With ask to control, `opentraffic status Orbit` shows who has control and who asks, each with a number, `opentraffic watch` tells you when someone asks, and `opentraffic control Orbit allow` (or `allow 3`, `allow Ada`), `deny`, and `take-back` answer as the card does.
 
 ## Permissions
 
@@ -106,6 +106,9 @@ opentraffic services                          # web servers, then the Mac apps y
 opentraffic share Orbit                       # share it by name, on a temporary URL
 opentraffic share dist/Orbit.app --via opentunnel --empty-data --name "Orbit review"
 opentraffic set Orbit --control watch-only    # viewers watch; --control ask, or everyone again
+opentraffic status Orbit                      # with --control ask: who has control, who asks
+opentraffic control Orbit allow               # give control to whoever asked first (or: allow 3, deny Ada)
+opentraffic control Orbit take-back           # only you control it again
 opentraffic restart Orbit --app               # after a rebuild: the new build, same address
 opentraffic restart Orbit --reset-data        # start over from the data it started with
 opentraffic stop Orbit
@@ -113,8 +116,8 @@ opentraffic stop Orbit
 
 - A name is matched against the apps `services` lists, ignoring case. When two builds have the same name, the running one wins; otherwise give the path.
 - Mac apps are shared with `--via quick` (the default) or `--via opentunnel`, always with live collaboration. Sharing the same app the same way again starts that share. `--save` isn't supported.
-- [REST API](/docs/rest-api): `POST /v1/shares` with `macApp` (the path or name) and `macAppData` (`copy` or `empty`); `PATCH /v1/shares/{ref}` with `macAppControl`, `macAppAppearance` and `macAppWindowSize`; `POST /v1/shares/{ref}/restart-app` and `/reset-data`; `GET /v1/services` lists the apps under `apps`. A share without the permissions is refused with 409 `missing_permissions`; a restart whose app doesn't come back fails with 502 `restart_failed`.
-- [MCP](/docs/mcp): the `share` tool takes `mac_app` and `mac_app_data`, and `restart_mac_app` restarts the app (`reset_data` to start over).
+- [REST API](/docs/rest-api): `POST /v1/shares` with `macApp` (the path or name) and `macAppData` (`copy` or `empty`); `PATCH /v1/shares/{ref}` with `macAppControl`, `macAppAppearance` and `macAppWindowSize`; `POST /v1/shares/{ref}/restart-app` and `/reset-data`; `POST /v1/shares/{ref}/control` with `action` `allow`, `deny` or `take-back` (and a `viewer`) answers requests to control, which a share's `macApp.control` lists and the `control.requested` event announces; `GET /v1/services` lists the apps under `apps`. A share without the permissions is refused with 409 `missing_permissions`; a restart whose app doesn't come back fails with 502 `restart_failed`.
+- [MCP](/docs/mcp): the `share` tool takes `mac_app` and `mac_app_data`, `restart_mac_app` restarts the app (`reset_data` to start over), and `control_mac_app` allows, denies, or takes back control.
 
 ## iPhone apps in the Simulator
 

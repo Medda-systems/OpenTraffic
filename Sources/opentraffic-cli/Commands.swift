@@ -86,6 +86,21 @@ enum Commands {
             flags: ["no-project"], options: ["url", "collab", "errors", "branch", "autostart", "project", "host-header", "stop-after", "control", "appearance", "window-size"], arguments: 1...1
         ),
         CommandSpec(
+            name: "control", group: "Shares", usage: "control <share> allow [viewer] | deny [viewer] | take-back",
+            summary: "Answer a request to control a shared Mac app, or take control back",
+            details: """
+            For a Mac app share set to ask to control (`opentraffic set <share> --control ask`), as
+            Allow, Not Now and Take Back on its Live Collaboration card do. `opentraffic status <share>`
+            lists who asks, with their number; `opentraffic watch` says when someone asks.
+
+              allow [viewer]   Give control to a viewer who asks, by number or name (default: who
+                               asked first). Whoever had control loses it
+              deny [viewer]    Turn a request down; their page says so, and they may ask again
+              take-back        Take control back: viewers only watch until you allow someone again
+            """,
+            arguments: 2...20
+        ),
+        CommandSpec(
             name: "protect", group: "Shares", usage: "protect <share> password|google|github|email|off [email ...] [--user NAME]",
             summary: "Choose who can open a share",
             details: """
@@ -172,6 +187,7 @@ struct Context {
         case "remove": try await remove()
         case "rename": try await update(["name": args[1]], done: "Renamed to “\(args[1])”.")
         case "set": try await set()
+        case "control": try await control()
         case "protect": try await protect()
         case "password": try await password()
         case "url", "copy", "open", "qr": try await link()
@@ -245,6 +261,7 @@ struct Context {
             rows.append(("Mac app", state.joined(separator: " · ")))
             rows.append(("App", (app.path as NSString).abbreviatingWithTildeInPath))
             rows.append(("Data", app.data == "empty" ? "started empty" : "a copy of the app's data"))
+            if let control = app.control { rows.append(contentsOf: controlRows(control, app: app.name, share: share.name)) }
             if let warning = app.warning { rows.append(("", style.yellow(warning))) }
             if let error = app.error { rows.append(("", style.red(error))) }
         } else {
@@ -286,6 +303,33 @@ struct Context {
         for (label, value) in rows {
             say("  \(style.dim(label.padding(toLength: width, withPad: " ", startingAt: 0)))  \(value)")
         }
+    }
+
+    /// Who may control a shared Mac app, for `status`: the mode, who has control, who asks.
+    func controlRows(_ control: MacAppControl, app: String, share: String) -> [(String, String)] {
+        func who(_ viewer: ControlViewer) -> String {
+            let name = viewer.name ?? "A viewer"
+            return viewer.viewer.map { "\(name) \(style.dim("(\($0))"))" } ?? name
+        }
+        switch control.mode {
+        case "watchOnly": return [("Control", "viewers only watch")]
+        case "askToControl": break
+        default: return [("Control", "every viewer")]
+        }
+        var rows: [(String, String)] = []
+        if let holder = control.holder {
+            let away = holder.connected == false ? ", away (they get it back when they return)" : ""
+            rows.append(("Control", "ask to control · \(who(holder)) has control since \(Format.time(holder.since))\(away)"))
+        } else {
+            rows.append(("Control", "ask to control · only you control \(app)"))
+        }
+        for request in control.requests {
+            rows.append(("Asks", "\(style.yellow(who(request))) asks to control it, \(Format.ago(request.since))"))
+        }
+        if let first = control.requests.first?.viewer {
+            rows.append(("", style.dim("Answer with `opentraffic control \"\(share)\" allow \(first)` or `deny \(first)`.")))
+        }
+        return rows
     }
 
     /// After a share starts: its URL, or why it isn't live yet.
@@ -445,6 +489,42 @@ struct Context {
             throw CLIError.usage("Nothing to change. Run `opentraffic help set` for the options.")
         }
         try await update(changes, done: "Updated.")
+    }
+
+    func control() async throws {
+        let share = args[0], word = args[1].lowercased()
+        let viewer = args.count > 2 ? args[2...].joined(separator: " ") : nil
+        let action: String
+        switch word {
+        case "allow", "deny": action = word
+        case "take-back", "takeback", "take_back": action = "take-back"
+        case "take" where viewer?.lowercased() == "back": return try await control(share, action: "take-back", viewer: nil)
+        default: throw CLIError.usage("Usage: opentraffic \(Commands.spec(named: "control")!.usage)")
+        }
+        if action == "take-back", viewer != nil { throw CLIError.usage("take-back takes no viewer: only one has control at a time.") }
+        try await control(share, action: action, viewer: viewer)
+    }
+
+    func control(_ name: String, action: String, viewer: String?) async throws {
+        let before = try? await client.get(sharePath(name), as: Share.self).0.macApp?.control
+        let (share, raw) = try await client.call("POST", sharePath(name, "/control"), body: ["action": action, "viewer": viewer], as: Share.self)
+        if json { return say(JSON.pretty(raw)) }
+        let app = share.macApp?.name ?? "the app"
+        let holder = share.macApp?.control?.holder
+        switch action {
+        case "allow":
+            say("\(style.bold(holder?.name ?? "The viewer")) has control of \(app) now. Take it back with `opentraffic control \"\(share.name)\" take-back`.")
+        case "deny":
+            // The request that's gone: the one named, else the oldest.
+            let left = Set(share.macApp?.control?.requests.compactMap(\.viewer) ?? [])
+            let denied = before?.requests.first { $0.viewer.map { !left.contains($0) } ?? false }
+            say("Turned down \(denied?.name.map { "\($0)'s" } ?? "the") request to control \(app); their page says so.")
+        default:
+            say("Took control of \(app) back: viewers only watch until you allow someone again.")
+        }
+        if let waiting = share.macApp?.control?.requests, !waiting.isEmpty {
+            say(style.dim("  Still asking: \(waiting.map { "\($0.name ?? "A viewer") (\($0.viewer.map(String.init) ?? "?"))" }.joined(separator: ", "))."))
+        }
     }
 
     func protect() async throws {
@@ -669,7 +749,8 @@ struct Context {
             cursor = body.next
             for event in body.events where filter == nil || event.share.name.lowercased() == filter {
                 if json {
-                    let object: [String: Any?] = ["type": event.type, "share": event.share.name, "at": event.at.formatted(.iso8601), "person": event.peer?.name, "comment": event.comment?.text, "error": event.error?.message]
+                    let object: [String: Any?] = ["type": event.type, "share": event.share.name, "at": event.at.formatted(.iso8601), "person": event.peer?.name ?? event.viewer?.name,
+                                                  "viewer": event.viewer?.viewer, "comment": event.comment?.text, "error": event.error?.message]
                     say(String(decoding: JSON.encode(object), as: UTF8.self))
                     continue
                 }
@@ -690,6 +771,9 @@ struct Context {
                 case "comment.released": "\(style.dim("✦")) Nobody is working on a comment on \(name) any more"
                 case "comment.deleted": "\(style.dim("●")) A comment on \(name) was deleted"
                 case "error.reported": "\(style.red("!")) \(name): \(event.error?.message ?? "a browser error")"
+                case "control.requested":
+                    "\(style.yellow("✋")) \(event.viewer?.name ?? "A viewer") asks to control \(name)"
+                        + style.dim(" (`opentraffic control \"\(event.share.name)\" allow\(event.viewer?.viewer.map { " \($0)" } ?? "")`)")
                 default: "\(event.type) \(name)"
                 }
                 say("\(style.dim(Format.time(event.at)))  \(line)")

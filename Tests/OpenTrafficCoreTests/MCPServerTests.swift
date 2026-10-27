@@ -76,7 +76,7 @@ private func text(_ result: [String: Any]) throws -> [String: Any] {
     let names = Set(tools.compactMap { $0["name"] as? String })
     #expect(names == [
         "list_shares", "share", "start_share", "stop_share", "get_feedback", "resolve_comment", "reply_to_comment",
-        "get_screenshot", "get_errors", "get_logs", "wait_for_feedback", "claim_comment", "release_comment", "restart_mac_app",
+        "get_screenshot", "get_errors", "get_logs", "wait_for_feedback", "claim_comment", "release_comment", "restart_mac_app", "control_mac_app",
     ])
     for tool in tools {
         let schema = try #require(tool["inputSchema"] as? [String: Any])

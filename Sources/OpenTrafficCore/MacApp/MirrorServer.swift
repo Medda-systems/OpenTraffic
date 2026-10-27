@@ -240,7 +240,10 @@ public final class MirrorServer: @unchecked Sendable {
         public struct Request: Equatable, Sendable, Identifiable {
             public var viewer: Int
             public var name: String?
+            /// When it asked.
+            public var since: Date
             public var id: Int { viewer }
+            public init(viewer: Int, name: String?, since: Date) { self.viewer = viewer; self.name = name; self.since = since }
         }
         /// The viewer the host gave control; `connected` is false while its page is away (it gets
         /// control back when it reconnects, until the host takes it back).
@@ -248,6 +251,11 @@ public final class MirrorServer: @unchecked Sendable {
             public var viewer: Int?
             public var name: String?
             public var connected: Bool
+            /// When the host gave it control.
+            public var since: Date
+            public init(viewer: Int?, name: String?, connected: Bool, since: Date) {
+                self.viewer = viewer; self.name = name; self.connected = connected; self.since = since
+            }
         }
         public var mode: MirrorProtocol.ControlMode
         public var holder: Holder?
@@ -366,6 +374,7 @@ public final class MirrorServer: @unchecked Sendable {
         var viewer: Int?
         var client: String?
         var name: String?
+        var since = Date()
     }
 
     public init(configuration: Configuration) {
@@ -484,7 +493,7 @@ public final class MirrorServer: @unchecked Sendable {
             self.options = options
             if old.control != options.control {
                 self.grant = nil
-                for client in self.clients.values { client.requested = nil }
+                for client in self.clients.values { client.requested = nil; client.requestedAt = nil; client.refused = false }
                 self.controlChanged()
             }
             if old.windowSize != options.windowSize { self.requestResize() }
@@ -503,16 +512,20 @@ public final class MirrorServer: @unchecked Sendable {
             guard self.options.control == .askToControl, let client = self.clients[viewer] else { return }
             self.grant = Grant(viewer: viewer, client: client.token, name: client.name)
             client.requested = nil
+            client.requestedAt = nil
+            client.refused = false
             self.controlChanged()
             self.requestResize()
         }
     }
 
-    /// `askToControl`: turns down a viewer's request (it may ask again).
+    /// `askToControl`: turns down a viewer's request; its page says so (it may ask again).
     public func denyControl(viewer: Int) {
         loop.execute {
             guard let client = self.clients[viewer], client.requested != nil else { return }
             client.requested = nil
+            client.requestedAt = nil
+            client.refused = true
             self.controlChanged()
         }
     }
@@ -1340,8 +1353,11 @@ public final class MirrorServer: @unchecked Sendable {
         /// From `requestControl`: the name the host sees, and the id the page keeps across reconnects.
         var name: String?
         var token: String?
-        /// `askToControl`: when (in request order) it asked for control and the host hasn't answered.
+        /// `askToControl`: when (in request order, and the time) it asked for control and the host hasn't answered.
         var requested: Int?
+        var requestedAt: Date?
+        /// `askToControl`: the host turned its latest request down (until it asks again).
+        var refused = false
         /// The `control` message it got last.
         var control: MirrorProtocol.Control?
         /// The host's own page (the share's proxy said so): it controls the app in every mode.
@@ -1427,7 +1443,7 @@ public final class MirrorServer: @unchecked Sendable {
         // A viewer with control keeps it while away if its page can say who it is when it comes back.
         var changed = client.requested != nil
         if let grant, grant.viewer == id {
-            self.grant = grant.client == nil ? nil : Grant(viewer: nil, client: grant.client, name: grant.name)
+            self.grant = grant.client == nil ? nil : Grant(viewer: nil, client: grant.client, name: grant.name, since: grant.since)
             changed = true
         }
         if changed { controlChanged() }
@@ -1488,7 +1504,8 @@ public final class MirrorServer: @unchecked Sendable {
     /// The `control` message for a viewer.
     private func control(for client: Client) -> MirrorProtocol.Control {
         let holder = options.control == .askToControl ? grant.map { $0.name ?? "A viewer" } : nil
-        return MirrorProtocol.Control(mode: options.control, you: mayControl(client), requested: client.requested != nil, holder: holder)
+        return MirrorProtocol.Control(mode: options.control, you: mayControl(client), requested: client.requested != nil, holder: holder,
+                                      refused: options.control == .askToControl && client.refused)
     }
 
     private func sendControl(_ client: Client, flush: Bool = true) {
@@ -1509,11 +1526,11 @@ public final class MirrorServer: @unchecked Sendable {
     private func currentControlState() -> ControlState {
         let holder = options.control == .askToControl ? grant.map { grant in
             let connected = clients.values.contains { $0.id == grant.viewer || (grant.client != nil && $0.token == grant.client) }
-            return ControlState.Holder(viewer: grant.viewer, name: grant.name, connected: connected)
+            return ControlState.Holder(viewer: grant.viewer, name: grant.name, connected: connected, since: grant.since)
         } : nil
         let requests = clients.values.compactMap { client in client.requested.map { (order: $0, client: client) } }
             .sorted { $0.order < $1.order }
-            .map { ControlState.Request(viewer: $0.client.id, name: $0.client.name) }
+            .map { ControlState.Request(viewer: $0.client.id, name: $0.client.name, since: $0.client.requestedAt ?? Date()) }
         return ControlState(mode: options.control, holder: holder, requests: options.control == .askToControl ? requests : [])
     }
 
@@ -1524,15 +1541,17 @@ public final class MirrorServer: @unchecked Sendable {
         client.token = Self.cleanToken(request.client) ?? client.token
         guard options.control == .askToControl else { return sendControl(client) }
         if let grant, grant.viewer != client.id, grant.client != nil, grant.client == client.token {
-            self.grant = Grant(viewer: client.id, client: grant.client, name: client.name ?? grant.name)
+            self.grant = Grant(viewer: client.id, client: grant.client, name: client.name ?? grant.name, since: grant.since)
             controlChanged()
             requestResize()
             return
         }
         if mayControl(client) { return sendControl(client) }
+        client.refused = false
         if client.requested == nil {
             requestCount += 1
             client.requested = requestCount
+            client.requestedAt = Date()
         }
         controlChanged()
     }
@@ -1540,7 +1559,7 @@ public final class MirrorServer: @unchecked Sendable {
     /// A viewer gives control back, or takes back its request.
     private func releaseControl(_ client: Client) {
         var changed = false
-        if client.requested != nil { client.requested = nil; changed = true }
+        if client.requested != nil { client.requested = nil; client.requestedAt = nil; changed = true }
         if let grant, grant.viewer == client.id || (grant.client != nil && grant.client == client.token) {
             self.grant = nil
             changed = true

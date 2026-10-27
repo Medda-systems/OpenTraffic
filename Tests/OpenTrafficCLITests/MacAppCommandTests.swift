@@ -92,3 +92,49 @@ import Testing
     let details = try #require(Commands.spec(named: "set")).details
     #expect(details.contains("--control everyone|watch-only|ask") && details.contains("--appearance") && details.contains("--window-size"))
 }
+
+@Test func controlAnswersRequestsFromTheTerminal() throws {
+    #expect(try Invocation.parse(["control", "Orbit", "allow"]).arguments == ["Orbit", "allow"])
+    #expect(try Invocation.parse(["control", "Orbit", "allow", "3"]).arguments == ["Orbit", "allow", "3"])
+    #expect(try Invocation.parse(["control", "Orbit", "deny", "Ada", "Lovelace"]).arguments == ["Orbit", "deny", "Ada", "Lovelace"])
+    #expect(try Invocation.parse(["control", "Orbit", "take-back", "--json"]).flags == ["json"])
+    #expect(throws: CLIError.self) { try Invocation.parse(["control", "Orbit"]) }
+    let spec = try #require(Commands.spec(named: "control"))
+    #expect(spec.usage == "control <share> allow [viewer] | deny [viewer] | take-back")
+    #expect(spec.details.contains("--control ask") && spec.details.contains("take-back"))
+}
+
+@Test func readsWhoControlsASharedMacApp() throws {
+    let share = Data(#"""
+    {"id":"22222222-3333-4444-5555-666666666666","name":"Orbit","provider":"opentunnel","kind":"opentunnel","state":"running",
+     "localURL":"http://127.0.0.1/","publicURL":"https://orbit.opentunnel.xyz","collaboration":true,"people":[],"openComments":0,"comments":0,
+     "macApp":{"path":"/Users/me/code/Orbit/build/Orbit.app","name":"Orbit","data":"copy","state":"running","viewers":3,
+       "control":{"mode":"askToControl","holder":{"viewer":3,"name":"Ada","since":"2026-10-27T10:00:00Z","connected":true},
+                  "requests":[{"viewer":5,"name":"Bob","since":"2026-10-27T10:02:30.250Z"},{"viewer":6,"since":"2026-10-27T10:03:00Z"}]}}}
+    """#.utf8)
+    let control = try #require(try JSON.decoder.decode(Share.self, from: share).macApp?.control)
+    #expect(control.mode == "askToControl")
+    #expect(control.holder?.name == "Ada" && control.holder?.connected == true)
+    #expect(control.requests.map(\.viewer) == [5, 6])
+    #expect(control.requests[1].name == nil)
+    let event = Data(#"""
+    {"seq":4,"type":"control.requested","at":"2026-10-27T10:02:30Z","share":{"name":"Orbit"},"viewer":{"viewer":5,"name":"Bob","since":"2026-10-27T10:02:30Z"}}
+    """#.utf8)
+    #expect(try JSON.decoder.decode(Event.self, from: event).viewer?.viewer == 5)
+}
+
+@Test func statusSaysWhoHasControlAndWhoAsks() throws {
+    let context = Context(invocation: Invocation(command: "status", arguments: ["Orbit"]), client: Client(location: AppLocation(environment: [:])), style: Style(color: false))
+    let now = Date()
+    let asking = MacAppControl(mode: "askToControl", holder: ControlViewer(viewer: 3, name: "Ada", since: now, connected: false),
+                               requests: [ControlViewer(viewer: 5, name: "Bob", since: now.addingTimeInterval(-300), connected: nil)])
+    let rows = context.controlRows(asking, app: "Orbit", share: "Orbit E2E")
+    #expect(rows.map(\.0) == ["Control", "Asks", ""])
+    #expect(rows[0].1.hasPrefix("ask to control · Ada (3) has control since "))
+    #expect(rows[0].1.hasSuffix(", away (they get it back when they return)"))
+    #expect(rows[1].1 == "Bob (5) asks to control it, 5 min ago")
+    #expect(rows[2].1 == "Answer with `opentraffic control \"Orbit E2E\" allow 5` or `deny 5`.")
+    #expect(context.controlRows(MacAppControl(mode: "askToControl", holder: nil, requests: []), app: "Orbit", share: "Orbit").map(\.1) == ["ask to control · only you control Orbit"])
+    #expect(context.controlRows(MacAppControl(mode: "watchOnly", holder: nil, requests: []), app: "Orbit", share: "Orbit").map(\.1) == ["viewers only watch"])
+    #expect(context.controlRows(MacAppControl(mode: "everyone", holder: nil, requests: []), app: "Orbit", share: "Orbit").map(\.1) == ["every viewer"])
+}

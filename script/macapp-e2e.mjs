@@ -4,13 +4,14 @@
 // Node only, no npm packages; Chrome is driven over raw CDP. See docs/macapp-e2e.md.
 //
 //   node script/macapp-e2e.mjs [--work <dir>] [--app <OpenTraffic.app>] [--build] [--via opentunnel]
-//                              [--steps a,b,...] [--keep]
+//                              [--steps a,b,...] [--keep] [--card]
 //
 // It builds a scratch copy of Examples/macapp-orbit (so the rebuild step can edit its sources), launches
 // the OpenTraffic copy with its own home and API socket, shares the fixture with the copy's own command,
 // then runs the steps below at 1440 px (and the phone view at 390 px). Every step saves a screenshot in
 // <work>/shots; the run stops at the first failure, names the step, and exits 1. At the end the share is
-// stopped (which removes its OpenTunnel route) and the copy quits.
+// stopped (which removes its OpenTunnel route) and the copy quits. --card also opens the copy's window
+// and presses Allow and Take Back on the share's card through Accessibility (it shows on the screen).
 //
 // Never use it with the OpenTraffic you use day to day: --app must be a copy with its own bundle
 // identifier (docs/macapp-e2e.md builds one), and the script refuses one that is already running.
@@ -40,6 +41,7 @@ const ONLY = opt("steps", "") ? new Set(opt("steps").split(",").map((s) => s.tri
 const SKIP = new Set(opt("skip", "").split(",").map((s) => s.trim()).filter(Boolean));
 const KEEP = flag("keep");
 const BUILD = flag("build");
+const CARD = flag("card");
 const CHROME = process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const BUNDLE_ID = "se.medda.opentraffic.e2e";
 
@@ -126,6 +128,7 @@ function run(cmd, args, { cwd = root, timeout = 600_000, extraEnv = {} } = {}) {
 
 const copyRunning = () => run("/usr/bin/pgrep", ["-f", APP_BINARY]).stdout.trim().split("\n").filter(Boolean).map(Number);
 let launched = false;
+let copyPID = null;
 
 // The copy's own command, talking to its socket. Only while the copy runs: the command starts its
 // app when nobody answers, and that would be the copy without its own home.
@@ -169,7 +172,28 @@ async function startChrome() {
     try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t) => t.type === "page"); } catch { /* not yet */ }
     if (!target) await sleep(100);
   }
-  const ws = new WebSocket(target.webSocketDebuggerUrl);
+  const p = await attachPage(target.webSocketDebuggerUrl);
+  // Another viewer, as a second person would be: a browser context of its own, so its own storage and
+  // collaboration id (the page asks for control with it). close() disposes of it.
+  p.newViewer = async () => {
+    const { webSocketDebuggerUrl } = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
+    const browser = await connectCDP(webSocketDebuggerUrl);
+    const { browserContextId } = await browser.cdp("Target.createBrowserContext", {});
+    const { targetId } = await browser.cdp("Target.createTarget", { url: "about:blank", browserContextId });
+    const q = await attachPage(`ws://127.0.0.1:${port}/devtools/page/${targetId}`);
+    q.close = async () => {
+      q.ws.close();
+      await browser.cdp("Target.disposeBrowserContext", { browserContextId }).catch(() => {});
+      browser.ws.close();
+    };
+    return q;
+  };
+  return p;
+}
+
+// A CDP connection: cdp(method, params) and event listeners.
+async function connectCDP(url) {
+  const ws = new WebSocket(url);
   await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
   let nextId = 0;
   const pending = new Map();
@@ -187,6 +211,12 @@ async function startChrome() {
     pending.set(id, { resolve, reject });
     ws.send(JSON.stringify({ id, method, params }));
   });
+  return { ws, cdp, listeners };
+}
+
+// A page target, with what the steps do to it.
+async function attachPage(url) {
+  const { ws, cdp, listeners } = await connectCDP(url);
   const errors = [];
   listeners.push((m) => {
     if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text);
@@ -197,7 +227,7 @@ async function startChrome() {
   await cdp("Emulation.setFocusEmulationEnabled", { enabled: true });
 
   const p = {
-    cdp, errors,
+    cdp, errors, ws,
     async eval(expression) {
       const r = await cdp("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       if (r.exceptionDetails) throw new Error("page: " + (r.exceptionDetails.exception?.description || r.exceptionDetails.text));
@@ -325,6 +355,7 @@ await step("launch the copy", async () => {
   assert(r.status === 0, "open failed: " + r.stderr);
   launched = true;
   const pid = await until(() => copyRunning()[0], "the copy's process", 30_000);
+  copyPID = pid;
   cleanups.push(async () => {
     if (KEEP) return console.log(`(--keep) the copy keeps running (pid ${pid}): OPENTRAFFIC_SOCKET=${SOCKET} ${quote(CLI)}`);
     // SIGTERM to this process, which quits the way the Quit menu does. Not "tell application id … to
@@ -577,6 +608,195 @@ await step("watch-only mode blocks input", async () => {
   assert(await page.eval(`${FIND("AXCheckBox", "Express shipping")}.getAttribute('aria-checked')`) === before, "a watcher's click changed the app");
   cli(["set", SHARE, "--control", "everyone"]);
   await page.waitFor(`document.body.dataset.control === 'yes'`, "control back", 10_000);
+});
+
+// Ask to control: a second viewer (a browser of its own) asks, the host answers from the terminal.
+const ASKER = "E2E Asker";
+const EXPRESS = FIND("AXCheckBox", "Express shipping");
+const checked = (pg) => pg.eval(`${EXPRESS}?.getAttribute('aria-checked') ?? null`);
+const controlBar = (pg) => pg.eval(`(() => { const c = document.querySelector('.otm-control'); return c && !c.hidden
+  ? { text: document.querySelector('.otm-control-text').textContent, button: document.querySelector('.otm-control-button').hidden ? '' : document.querySelector('.otm-control-button').textContent, you: document.body.dataset.control } : { text: '', button: '', you: document.body.dataset.control }; })()`);
+const barIs = (pg, text, button, what, timeout = 15_000) => until(async () => { const b = await controlBar(pg); return b.text === text && b.button === button && b; }, what, timeout);
+const clickIn = async (pg, expr, what) => pg.click(await until(() => pg.eval(visible(expr)), what + " on the page", 10_000));
+// A click on Express shipping that must not reach the app: the box stays as it was.
+async function clickIgnored(pg, who) {
+  const before = await checked(pg);
+  await clickIn(pg, EXPRESS, "Express shipping");
+  await sleep(1500);
+  const now = await checked(pg), other = await checked(page);
+  assert(now === before && other === before, `${who}'s click changed the app (${before} -> ${now}, first page ${other})`);
+}
+const controlStatus = () => cli(["status", SHARE], { json: true }).macApp?.control;
+// The second viewer: a browser of its own at the same size, named ASKER in the collaboration overlay.
+async function openAsker() {
+  asker = await page.newViewer();
+  await asker.cdp("Page.enable");
+  await asker.cdp("Runtime.enable");
+  await asker.cdp("Emulation.setFocusEmulationEnabled", { enabled: true });
+  await asker.size(1440, 900);
+  await asker.scheme("light");
+  await asker.cdp("Page.navigate", { url: URL_ });
+  await asker.waitFor(`document.getElementById('otm-dot')?.dataset.state === 'live' && ${NODES()}.length > 60`, "the second viewer to connect", 30_000);
+  await asker.eval(`localStorage.setItem('__opentraffic_collab_name', ${JSON.stringify(ASKER)}), true`);
+  await barIs(asker, "Watching", "Request Control", "Request Control on the second page");
+}
+async function askForControl() {
+  await clickIn(asker, `document.querySelector('.otm-control-button')`, "Request Control");
+  await barIs(asker, "Asked the host…", "Cancel", "the second page to wait for the host");
+}
+let asker = null, watcher = null, watched = "";
+const shotAsker = async (suffix) => asker && asker.shot(`${String(stepNumber).padStart(2, "0")}-${suffix}-asker`).catch(() => {});
+cleanups.push(async () => {
+  if (watcher) watcher.kill();
+  if (asker) await asker.close().catch(() => {});
+});
+
+await step("ask to control: a second viewer asks", async () => {
+  if (!cli(["help"]).includes("control <share>")) throw new Error("`opentraffic control` doesn't exist in this copy");
+  // `opentraffic watch` hears of the request.
+  watcher = spawn(CLI, ["watch", SHARE, "--json"], { env: { ...env, OPENTRAFFIC_SOCKET: SOCKET }, stdio: ["ignore", "pipe", "ignore"] });
+  watcher.stdout.on("data", (d) => { watched += d; });
+  cli(["set", SHARE, "--control", "ask"]);
+  await barIs(page, "Watching", "Request Control", "the first page to watch, with Request Control");
+  let s = controlStatus();
+  assert(s?.mode === "askToControl" && !s.holder && !s.requests.length, "status before anyone asks: " + JSON.stringify(s));
+  await openAsker();
+  await sleep(500); // the watch has its cursor
+  await askForControl();
+  s = await until(() => { const c = controlStatus(); return c?.requests?.length === 1 && c; }, "the request in `opentraffic status --json`", 10_000, 300);
+  const request = s.requests[0];
+  assert(request.name === ASKER && Number.isInteger(request.viewer) && Math.abs(Date.parse(request.since) - Date.now()) < 60_000, "the request: " + JSON.stringify(request));
+  const text = cli(["status", SHARE]);
+  assert(/Control\s+ask to control · only you control Orbit/.test(text) && text.includes(`${ASKER} (${request.viewer}) asks to control it`), "`opentraffic status` says: " + text);
+  const event = await until(() => watched.split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .find((e) => e?.type === "control.requested"), "`opentraffic watch` to report the request", 10_000, 200);
+  assert(event.person === ASKER && event.viewer === request.viewer && event.share === SHARE, "the watched event: " + JSON.stringify(event));
+  await shotAsker("ask-to-control-a-second-viewer-asks");
+  return `${ASKER} is viewer ${request.viewer}; watch: ${JSON.stringify(event).slice(0, 120)}`;
+});
+
+await step("control allow lets the asker click, not the first page", async () => {
+  const viewer = controlStatus().requests[0].viewer;
+  const out = cli(["control", SHARE, "allow", String(viewer)]);
+  assert(out.includes(`${ASKER} has control of Orbit`), "`control allow` says: " + out.trim());
+  await barIs(asker, "You have control", "Give Back", "the second page to get control");
+  await barIs(page, `${ASKER} has control`, "Request Control", "the first page to see who has control");
+  const s = controlStatus();
+  assert(s.holder?.name === ASKER && s.holder.viewer === viewer && s.holder.connected === true && !s.requests.length, "status with control given: " + JSON.stringify(s));
+  // The asker's click reaches the app; the first page sees it too.
+  const before = await checked(asker);
+  const want = before === "true" ? "false" : "true";
+  await clickIn(asker, EXPRESS, "Express shipping on the second page");
+  await asker.waitFor(`${EXPRESS}?.getAttribute('aria-checked') === '${want}'`, "the asker's click to change Express shipping", 10_000);
+  await page.waitFor(`${EXPRESS}?.getAttribute('aria-checked') === '${want}'`, "the first page to see the change", 10_000);
+  // The first page still only watches.
+  await clickIgnored(page, "the first page");
+  await shotAsker("control-allow");
+  return `Express shipping ${before} -> ${want} by the asker; the first page's click ignored`;
+});
+
+await step("control take-back blocks the asker again", async () => {
+  const out = cli(["control", SHARE, "take-back"]);
+  assert(out.includes("Took control of Orbit back"), "`control take-back` says: " + out.trim());
+  await barIs(asker, "Watching", "Request Control", "the second page to lose control");
+  await barIs(page, "Watching", "Request Control", "the first page to see nobody has control");
+  assert(!controlStatus().holder, "status still has a holder: " + JSON.stringify(controlStatus()));
+  await clickIgnored(asker, "the asker");
+  // Nobody to take control from now.
+  const again = cli(["control", SHARE, "take-back"], { ok: false });
+  assert(again.includes("Nobody has control"), "a second take-back says: " + again.trim());
+  await shotAsker("control-take-back");
+});
+
+await step("control deny shows the asker the refusal", async () => {
+  await clickIn(asker, `document.querySelector('.otm-control-button')`, "Request Control");
+  await barIs(asker, "Asked the host…", "Cancel", "the second page to ask again");
+  await until(() => controlStatus()?.requests?.length === 1, "the new request in the status", 10_000, 300);
+  const out = cli(["control", SHARE, "deny", ASKER]);
+  assert(out.includes(`Turned down ${ASKER}'s request`), "`control deny` says: " + out.trim());
+  await barIs(asker, "The host said not now", "Request Control", "the refusal on the second page");
+  const s = controlStatus();
+  assert(!s.requests.length && !s.holder, "status after deny: " + JSON.stringify(s));
+  const none = cli(["control", SHARE, "allow"], { ok: false });
+  assert(none.includes("Nobody is asking"), "allow without a request says: " + none.trim());
+  await clickIgnored(asker, "the refused asker");
+  await shotAsker("control-deny");
+  cli(["set", SHARE, "--control", "everyone"]);
+  await page.waitFor(`document.body.dataset.control === 'yes'`, "control back for everyone", 10_000);
+  await asker.waitFor(`document.body.dataset.control === 'yes'`, "control back for the second page", 10_000);
+  await asker.close();
+  asker = null;
+  watcher.kill();
+  watcher = null;
+});
+
+// The card's buttons, through Accessibility: a helper that opens the copy's window on the share with a
+// GetURL Apple event to the copy's pid (never through Launch Services, which could start another copy
+// without its home and socket), reads the window and presses buttons by their titles.
+const CARD_PROBE_SOURCE = `import ApplicationServices
+import Foundation
+let a = CommandLine.arguments
+func attr(_ e: AXUIElement, _ n: String) -> AnyObject? { var v: AnyObject?; return AXUIElementCopyAttributeValue(e, n as CFString, &v) == .success ? v : nil }
+func texts(_ e: AXUIElement) -> [String] { [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute].compactMap { attr(e, $0) as? String } }
+func find(_ e: AXUIElement, _ depth: Int = 0, _ match: (AXUIElement) -> Bool) -> AXUIElement? {
+  if match(e) { return e }
+  guard depth < 40 else { return nil }
+  for c in (attr(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] { if let f = find(c, depth + 1, match) { return f } }
+  return nil
+}
+if a[1] == "trusted" { print(AXIsProcessTrusted()); exit(0) }
+let pid = pid_t(a[2])!
+let windows = (attr(AXUIElementCreateApplication(pid), kAXWindowsAttribute) as? [AXUIElement]) ?? []
+switch a[1] {
+case "show":
+  let e = NSAppleEventDescriptor(eventClass: AEEventClass(0x4755524C), eventID: AEEventID(0x4755524C), targetDescriptor: NSAppleEventDescriptor(processIdentifier: pid),
+                                 returnID: AEReturnID(-1), transactionID: AETransactionID(0))
+  e.setParam(NSAppleEventDescriptor(string: a[3]), forKeyword: AEKeyword(0x2D2D2D2D))
+  do { _ = try e.sendEvent(options: [.noReply, .neverInteract], timeout: 10) } catch { print(error); exit(1) }
+case "has":
+  exit(windows.contains { find($0) { texts($0).contains { $0.contains(a[3]) } } != nil } ? 0 : 2)
+case "press":
+  for w in windows { if let b = find(w, 0, { attr($0, kAXRoleAttribute) as? String == "AXButton" && texts($0).contains(a[3]) }) {
+    exit(AXUIElementPerformAction(b, kAXPressAction as CFString) == .success ? 0 : 1) } }
+  exit(2)
+case "close":
+  for w in windows { if let b = attr(w, kAXCloseButtonAttribute) { _ = AXUIElementPerformAction(b as! AXUIElement, kAXPressAction as CFString) } }
+default: exit(64)
+}
+`;
+function cardProbe(...args) {
+  const probe = path.join(WORK, "card-probe");
+  if (!fs.existsSync(probe)) {
+    fs.writeFileSync(probe + ".swift", CARD_PROBE_SOURCE);
+    const c = run("/usr/bin/xcrun", ["swiftc", "-O", probe + ".swift", "-o", probe]);
+    assert(c.status === 0, "couldn't build the card probe: " + c.stderr);
+  }
+  return run(probe, args.map(String));
+}
+
+await step("the card's Allow and Take Back", async () => {
+  if (!CARD) throw new Skip("--card opens the copy's window and presses the card's buttons through Accessibility");
+  if (cardProbe("trusted").stdout.trim() !== "true") throw new Skip("this terminal has no Accessibility permission to press the card's buttons");
+  cli(["set", SHARE, "--control", "ask"]);
+  await openAsker();
+  await askForControl();
+  const shown = cardProbe("show", copyPID, "opentraffic://show?name=" + encodeURIComponent(SHARE));
+  assert(shown.status === 0, "couldn't open the copy's window: " + shown.stdout + shown.stderr);
+  cleanups.push(async () => { cardProbe("close", copyPID); });
+  await until(() => cardProbe("has", copyPID, `${ASKER} asks for control`).status === 0, `“${ASKER} asks for control” on the card`, 15_000, 300);
+  assert(cardProbe("press", copyPID, "Allow").status === 0, "no Allow button on the card");
+  await barIs(asker, "You have control", "Give Back", "the second page to get control from the card");
+  assert(controlStatus().holder?.name === ASKER, "status after Allow: " + JSON.stringify(controlStatus()));
+  await until(() => cardProbe("has", copyPID, `${ASKER} has control of Orbit`).status === 0, `“${ASKER} has control of Orbit” on the card`, 10_000, 300);
+  assert(cardProbe("press", copyPID, "Take Back").status === 0, "no Take Back button on the card");
+  await barIs(asker, "Watching", "Request Control", "the second page to lose control from the card");
+  assert(!controlStatus().holder, "status after Take Back: " + JSON.stringify(controlStatus()));
+  await until(() => cardProbe("has", copyPID, "they can ask you for control").status === 0, "the card to say viewers watch", 10_000, 300);
+  cardProbe("close", copyPID);
+  cli(["set", SHARE, "--control", "everyone"]);
+  await asker.waitFor(`document.body.dataset.control === 'yes'`, "control back for the second page", 10_000);
+  await asker.close();
+  asker = null;
 });
 
 await step("Reset Data restores the orders", async () => {
