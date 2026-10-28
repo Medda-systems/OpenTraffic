@@ -595,6 +595,104 @@ await step("the copy saves the change and the host's file stays as it was", asyn
   return `the copy saved ${saved.orders.length} orders; the host's file has ${JSON.parse(hostOrders).orders.length}`;
 });
 
+// ---------------------------------------------------------------- the sandbox
+
+// The copy runs in a sandbox that keeps it out of the host's files (MacAppSandbox). The "host's files"
+// here are a canary in the work folder, outside the copy's session folder: the work folder is in the
+// user's temporary folder (or /tmp, or under /Users), which the sandbox keeps out like the home folder.
+// A viewer has Orbit open the canary and save over it (File > Open File Named in Note, Save Orders to
+// File Named in Note, the path typed into an order's note): macOS must refuse both, and the canary must
+// stay as it was; the same in the copy's own Documents must work. (Open and Save dialogs don't open in
+// a copy at all: see the TextEdit steps.)
+const HOST_FILES = path.join(WORK, "host-files");
+const CANARY = path.join(HOST_FILES, "canary.txt");
+const CANARY_TEXT = "The host's canary " + Date.now().toString(36);
+const ANY_NODES = `[...document.querySelectorAll('.otm-window .otm-node')]`;
+const windowsNow = () => page.eval(`[...document.querySelectorAll('.otm-window')].map((w) => ({ kind: w.dataset.kind,
+  nodes: [...w.querySelectorAll('.otm-node')].map((el) => [el.dataset.role, el.getAttribute('aria-label') || '', (el.value ?? '').slice(0, 60)].join(' | ')).slice(0, 400) }))`);
+// Chooses a menu item from the viewer's menu bar: its label, or a RegExp for it (TextEdit's Save… changes
+// with the document).
+async function chooseMenu(menu, item) {
+  const title = `[...document.querySelectorAll('#otm-bar .otm-menus .otm-menu-title')].find((b) => b.textContent === ${JSON.stringify(menu)})`;
+  await page.click(await centerOf(title, `the ${menu} menu title`));
+  const matches = item instanceof RegExp ? `new RegExp(${JSON.stringify(item.source)}).test(b.querySelector('.otm-menu-label')?.textContent || '')`
+    : `b.querySelector('.otm-menu-label')?.textContent === ${JSON.stringify(item)}`;
+  const entry = `[...document.querySelectorAll('.otm-menu-bar .otm-menu-item')].find((b) => ${matches})`;
+  await page.click(await centerOf(entry, `${menu} > ${item}`));
+}
+
+// The selected order's note field (the detail pane's only text field besides New customer's).
+const NOTE = `${NODES()}.find((el) => el.dataset.role === 'AXTextField' && el.dataset.key !== '/Window:/Group:/TextField:')`;
+const noteValue = () => page.eval(`(${NOTE})?.value ?? null`);
+async function setNote(text) {
+  await page.click(await centerOf(NOTE, "the order's note field"));
+  await page.waitFor(`document.activeElement === (${NOTE})`, "the note field to take focus");
+  await page.eval(`document.activeElement.select()`);
+  await page.cdp("Input.insertText", { text }); // replaces the selection: the viewer sends the whole value (setText)
+  await page.waitFor(`(${NOTE})?.value === ${JSON.stringify(text)}`, "the note to say " + text, 10_000);
+  await sleep(400);
+}
+const canaryUnchanged = (before) => {
+  const now = fs.statSync(CANARY);
+  assert(fs.readFileSync(CANARY, "utf8") === CANARY_TEXT && now.mtimeMs === before.mtimeMs && now.size === before.size, "the canary changed: " + fs.readFileSync(CANARY, "utf8").slice(0, 200));
+};
+let canaryStat = null;
+
+await step("the copy runs in its sandbox", async () => {
+  const copied = copyOrdersFile();
+  const session = copied.split(path.sep + "home" + path.sep)[0];
+  const profile = fs.readFileSync(path.join(session, "sandbox.sb"), "utf8");
+  assert(profile.includes("(deny file-read* (subpath \"/Users\")") && profile.includes("(deny file-write* (subpath \"/\"))"), "the session's sandbox.sb: " + profile.slice(0, 300));
+  const info = JSON.parse(run("/usr/bin/plutil", ["-convert", "json", "-o", "-", path.join(session, "app", "Orbit.app", "Contents", "Info.plist")]).stdout);
+  assert(info.CFBundleExecutable === "opentraffic-sandbox", "the copy starts with " + info.CFBundleExecutable);
+  const logs = cli(["logs", SHARE, "--lines", "500"]);
+  assert(/Launched Orbit \(pid \d+\) in its sandbox/.test(logs), "the share's log doesn't say Orbit launched in its sandbox:\n" + logs.slice(-1500));
+  // The work folder, where the host's files are, is one the sandbox keeps out.
+  const work = fs.realpathSync(WORK);
+  const temp = fs.realpathSync(path.dirname(run("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"]).stdout.trim()));
+  assert(work.startsWith("/Users/") || work.startsWith("/private/tmp/") || work.startsWith(temp + "/"), `the work folder ${work} isn't one the sandbox keeps out`);
+  fs.mkdirSync(HOST_FILES, { recursive: true });
+  fs.writeFileSync(CANARY, CANARY_TEXT);
+  canaryStat = fs.statSync(CANARY);
+  return "canary " + CANARY;
+});
+
+await step("a viewer can't open a file outside the copy", async () => {
+  await setNote(CANARY);
+  await chooseMenu("File", "Open File Named in Note");
+  const note = await until(async () => { const v = await noteValue(); return v && v !== CANARY && v; }, "Orbit to say how opening went", 10_000);
+  assert(note.startsWith("Couldn't open " + CANARY) && /not permitted/i.test(note), "Orbit's note: " + note);
+  assert(!(await page.eval(`document.body.innerText.includes(${JSON.stringify(CANARY_TEXT)}) || ${ANY_NODES}.some((el) => (el.value || '').includes(${JSON.stringify(CANARY_TEXT)}))`)), "the canary's text is on the page");
+  canaryUnchanged(canaryStat);
+  return note;
+});
+
+await step("a viewer can't save over a file outside the copy", async () => {
+  await setNote(CANARY);
+  await chooseMenu("File", "Save Orders to File Named in Note");
+  const note = await until(async () => { const v = await noteValue(); return v && v !== CANARY && v; }, "Orbit to say how saving went", 10_000);
+  assert(note.startsWith("Couldn't save " + CANARY) && /not permitted/i.test(note), "Orbit's note: " + note);
+  canaryUnchanged(canaryStat);
+  assert(fs.readdirSync(HOST_FILES).join() === "canary.txt", "the host's folder has " + fs.readdirSync(HOST_FILES).join(", "));
+  return note;
+});
+
+await step("saving inside the copy works", async () => {
+  const home = copyOrdersFile().split(path.sep + "Library" + path.sep)[0];
+  const inside = path.join(home, "Documents", "orders-export.json");
+  await setNote(inside);
+  await chooseMenu("File", "Save Orders to File Named in Note");
+  await page.waitFor(`(${NOTE})?.value === ${JSON.stringify("Saved to " + inside)}`, "Orbit to say it saved in its own Documents", 10_000);
+  const saved = JSON.parse(fs.readFileSync(inside, "utf8"));
+  assert(Array.isArray(saved) && saved.some((o) => o.customer === CUSTOMER), "the export has no " + CUSTOMER);
+  // And reading it back, the way that was refused outside.
+  await setNote(inside);
+  await chooseMenu("File", "Open File Named in Note");
+  await page.waitFor(`((${NOTE})?.value || '').startsWith('Opened: [')`, "Orbit to open its own export", 10_000);
+  canaryUnchanged(canaryStat);
+  return `${saved.length} orders in the copy's ${path.relative(path.dirname(path.dirname(home)), inside)}`;
+});
+
 await step("scrolling the long list reaches its end", async () => {
   const list = await centerOf(`${NODES()}.find((el) => el.dataset.role === 'AXOutline')`, "the order list");
   const last = visible(FIND("AXStaticText", "Evelyn Berezin"));
@@ -1101,6 +1199,26 @@ await step("an installed app (TextEdit) is shared and takes typing", async () =>
   const ownAfter = textEditPIDs();
   assert(JSON.stringify(ownAfter) === JSON.stringify(ownBefore), `your own TextEdit changed: ${ownBefore} → ${ownAfter}`);
   return `${url}; your TextEdit ${ownBefore.length ? "(pid " + ownBefore.join(", ") + ") kept running" : "wasn't running"}`;
+});
+
+// macOS draws Open and Save dialogs in a service of its own, outside the copy's sandbox, that would list
+// and preview the host's files for the viewer: the sandbox refuses it, so they don't open, and TextEdit
+// keeps running.
+await step("TextEdit's Open and Save dialogs don't open", async () => {
+  if (!fs.existsSync(INSTALLED_APP)) throw new Skip("no TextEdit on this Mac");
+  const dialogs = `[...document.querySelectorAll('.otm-window')].filter((w) => w.dataset.kind !== 'main' && w.dataset.kind !== 'menu').length`;
+  const items = [];
+  const before = await page.eval(dialogs);
+  for (const item of [/^Open…$/, /^Save( As)?…$/]) {
+    await chooseMenu("File", item);
+    await sleep(3000);
+    assert(await page.eval(dialogs) === before, `File > ${item} opened a window: ` + JSON.stringify(await windowsNow()).slice(0, 600));
+    items.push(item);
+  }
+  const status = cli(["status", TEXTEDIT_SHARE], { json: true });
+  assert(status.macApp?.state === "running", "TextEdit's copy: " + JSON.stringify(status.macApp).slice(0, 300));
+  assert(await page.eval(`!!${NODES()}.find((el) => el.dataset.role === 'AXTextArea')`), "TextEdit's document is gone");
+  return items.map(String).join(", ") + ": nothing opened; TextEdit still runs";
 });
 
 await step("stopping the installed app leaves nothing behind", async () => {

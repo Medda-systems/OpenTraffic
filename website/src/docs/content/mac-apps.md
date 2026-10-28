@@ -31,17 +31,18 @@ Some apps can't run as a copy at all. OpenTraffic refuses them before anything s
 
 - **Apps that use CloudKit** (iCloud's database), like many App Store apps. CloudKit only works for the app signed by its developer, and stops a copy as soon as the app asks for it, usually at launch.
 - **Parts of macOS** that aren't apps you use on their own: the Dock, the Finder, Siri, and the like in `/System/Library`.
+- **Apps that can't run in the sandbox** that keeps a shared copy out of your files ([What the copy can touch](/docs/mac-apps#what-the-copy-can-touch)), like MarkEdit, which shows no document without macOS's Open and Save dialog service.
 
 Others run, without what their developer's signature gives them: iCloud Drive documents, keychain items, App Groups, push notifications, Sign in with Apple. The card names what the copy runs without.
 
-What we found on macOS 27:
+What we found on macOS 27, with every copy in its sandbox:
 
 | App | Where it comes from | Result |
 | --- | --- | --- |
-| TextEdit 1.21 | macOS (`/System/Applications`) | Works: opens a new document; viewers type into it and use its formatting bar and menus. Runs without iCloud Drive. |
+| TextEdit 1.21 | macOS (`/System/Applications`) | Works: opens a new document; viewers type into it and use its formatting bar and menus. **File → Open…** and **Save…** show nothing (the sandbox refuses them). Runs without iCloud Drive. |
 | Calculator 12.0 | macOS (`/System/Applications`) | Works: viewers press its buttons (7 × 6 = 42). |
-| CotEditor 5.2 | another developer, downloaded | Works: viewers type into a new document. Runs without iCloud Drive. |
-| MarkEdit 1.27 | another developer, downloaded | Works: starts in its Open dialog, in the copy's own Documents folder; it also shows its own update alert. |
+| CotEditor 5.2 | another developer, downloaded | Works: viewers type into a new document. No Open or Save dialogs. Runs without iCloud Drive. |
+| MarkEdit 1.27 | another developer, downloaded | Refused: without the Open and Save dialog service it shows only its update alert, and a new document's window never appears. |
 | MindNode 2026.2 | App Store | Refused: it uses CloudKit, and a copy quit at launch. |
 | Developer | App Store (Apple) | Refused: it uses CloudKit. |
 | Dock | macOS (`/System/Library`) | Refused: a part of macOS. |
@@ -107,9 +108,10 @@ Each share runs its own copy of the app:
   - its preferences.
 
   A sandboxed app's data is read from its container. **Share with Empty Data** starts it as on a first launch.
-- What can't come along is on the Live Collaboration card: a folder macOS didn't let OpenTraffic read (another app's container: allow OpenTraffic when macOS asks to access data from other apps, or give it Full Disk Access, then use **Reset Data**), App Group data the copy may not find (macOS shows an app its App Group folder in your own Library; if it asks whether the copy may access data from other apps, choose **Don't Allow**), and the app's iCloud data and keychain items, which stay with your own copy of the app.
+- What can't come along is on the Live Collaboration card: a folder macOS didn't let OpenTraffic read (another app's container: allow OpenTraffic when macOS asks to access data from other apps, or give it Full Disk Access, then use **Reset Data**), App Group data the copy may not find (macOS shows an app its App Group folder in your own Library, which the copy's sandbox keeps it out of), and the app's iCloud data and keychain items, which stay with your own copy of the app.
 - Its preferences are kept under `<bundle id>.opentraffic` and removed when the share stops, with the windows it saved.
-- It starts a document app with a new document rather than its Open dialog, and its Open and Save dialogs start in its own Documents folder, in its home folder (see the limit on file dialogs below).
+- It starts a document app with a new document rather than its Open dialog.
+- It runs in a sandbox that keeps it out of your files: see [What the copy can touch](/docs/mac-apps#what-the-copy-can-touch).
 - What the app prints, including its `Logger` and `os_log` messages, is in the share's **Logs**.
 
 The share's Live Collaboration card has a Mac app section with the copy's state and how many people are viewing:
@@ -118,6 +120,30 @@ The share's Live Collaboration card has a Mac app section with the copy's state 
 - **Reset Data** quits it and starts it over from the data it started with.
 
 If the app quits by itself, viewers see that it did, and OpenTraffic opens it again once. Stopping the share, or quitting OpenTraffic, quits the copy and deletes its folder.
+
+## What the copy can touch
+
+Every copy runs in a macOS sandbox that OpenTraffic writes for its share, whatever the app is and whatever viewers make it do. The app's own code can't reach your files, so neither can viewers, through an Open or Save dialog or any other way.
+
+The copy can:
+
+- read and change its own home folder and temporary folder, in its share's folder, and read its own copy of the app;
+- read macOS and installed apps (`/System`, `/Library`, `/Applications`, `/usr`), and in your home folder only your fonts and keyboard layouts (`~/Library/Fonts`, `~/Library/Keyboard Layouts`), so text looks and types as on your Mac;
+- keep its own preferences, and read the system's and Apple's (appearance, keyboard, accessibility);
+- use the network as the app does.
+
+It can't:
+
+- read or change anything else in your home folder: Desktop, Documents, Downloads, iCloud Drive, other apps' data and containers, App Group folders, keychains, `~/.ssh`. Nor other users' folders, `/Users/Shared`, or disks in `/Volumes`;
+- read other apps' temporary files and caches (`/tmp` and your own temporary folder);
+- write anywhere outside its home and temporary folders, or change another app's preferences;
+- use the keychain, or reach ssh-agent or other local agents' sockets (OpenTraffic's own included);
+- open another app, a file in another app, or a link, or send Apple events: another app would do what the copy may not;
+- show an Open or Save dialog. macOS draws those dialogs in a service of its own, outside the copy's sandbox, which lists your folders, previews files, and renames or makes folders for whoever uses it. So **File → Open…** and **Save…** show nothing in a shared copy. What the app saves by itself (its own data, a document that already has a file in the copy's home, autosave) works as usual; a new document can't be saved to a file. The same goes for a document's title popover, Browse All Versions, the media browser, Services, and the color sampler.
+
+App Groups: macOS shows the copy the App Group folders in your own Library, which its sandbox keeps it out of, so the copy starts without that data, and your own stays untouched.
+
+Apps run in the sandbox as they are: OpenTraffic starts the copy with a small launcher that applies the sandbox before any of the app's code runs, and starts the app's helpers and XPC services the same way. A copy that doesn't start in the sandbox is stopped at once, and an app that can't run in it isn't shared: the share stops with the reason before viewers see anything. Messages like `sandbox_extension_issue_file_to_process failed` or `connection to service named com.apple.linkd.autoShortcut` in the share's **Logs** are the sandbox at work (the app can't hand its files to other processes, or register App Shortcuts), not a problem.
 
 ## Show a fix
 
@@ -185,9 +211,9 @@ Sharing an iPhone app shows viewers the Simulator's window for its device, cut t
 - The app can only look dark while your Mac uses the Dark appearance.
 - No drag and drop between the app and other apps or the browser.
 - There's a short delay between a click and the change on screen, longer on a slow connection.
-- The copy isn't sandboxed. It runs as you, without the App Sandbox even when your app uses it, so it can reach what your app's own code can reach on this Mac. Viewers can only do what the app's windows and menus let them do, but share it with people you'd let use the app on your Mac.
+- The copy runs in OpenTraffic's sandbox, not the App Sandbox, even when your app uses it: it reaches only its own folder of your files ([What the copy can touch](/docs/mac-apps#what-the-copy-can-touch)), but it can use the network as the app does.
 - Entitlements that need your team's signature (iCloud, app groups, keychain sharing, push notifications, and the like) are left out of the copy. The card warns you, and features that use them may not work. So are the private ones of Apple's own apps.
-- **File dialogs reach your files.** An Open or Save dialog in the copy starts in the copy's own Documents folder, but its sidebar leads to your folders (Desktop, Documents, iCloud Drive), and the copy can open and save files there as you can. Choose **Watch only** or **Ask to control** when you share an app whose File menu viewers shouldn't use.
+- **No Open or Save dialogs.** A shared copy can't show them (see [What the copy can touch](/docs/mac-apps#what-the-copy-can-touch)): viewers can't open files or save a new document to a file. What the app saves by itself works.
 - From the first Mac app share until OpenTraffic quits, System Settings → Displays and Mission Control show a display called "OpenTraffic". That's where the copy's windows are kept, off screen.
 - The viewer's menus leave out the Apple menu, Services, Hide, Quit, full screen, and window tiling.
 - If OpenTraffic quits right after a share stops, an empty `<bundle id>.opentraffic` preferences file can stay behind. It holds no data.

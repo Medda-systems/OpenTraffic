@@ -241,6 +241,17 @@ private struct Workbench {
     #expect(!MacAppDiscovery.usesCloudKit(["com.apple.developer.icloud-services": ["CloudDocuments"]]))
 }
 
+@Test func anAppKnownNotToWorkInTheSandboxIsRefusedBeforeItStarts() throws {
+    let bench = try Workbench()
+    defer { bench.remove() }
+    let markEdit = try bench.app("Applications/MarkEdit.app", identifier: "app.cyan.markedit")
+    #expect(throws: MacAppRefusal("MarkEdit can't run in the sandbox that keeps a shared copy out of your files: it \(MacAppSandbox.incompatibleApps["app.cyan.markedit"]!). OpenTraffic can't share it.")) {
+        try MacAppDiscovery.resolve(path: markEdit.path, context: bench.context())
+    }
+    let processes: [(pid: Int32, executable: String)] = [(202, bench.executable(of: markEdit))]
+    #expect(MacAppDiscovery.runningInstalledApps(bench.context(processes: processes)).isEmpty)
+}
+
 @Test func appsInsideOtherBundlesAreNotListedAsInstalled() throws {
     let bench = try Workbench()
     defer { bench.remove() }

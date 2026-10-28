@@ -79,6 +79,10 @@ run changed in them (the scratch Orbit and TextEdit it remembered under `remembe
 | the segmented filter filters the list | Shipped lists the 10 shipped orders, All the 30 again |
 | typing a customer and Add Order adds the order | a click in New customer, typing, Add Order: a 31st order with that name |
 | the copy saves the change and the host's file stays as it was | the order added through the page is in the copy's `orders.json`; the host's file is byte for byte as Orbit saved it |
+| the copy runs in its sandbox | the session folder has the copy's `sandbox.sb` (no reading `/Users`, no writing outside its home and temporary folders), the copy's `CFBundleExecutable` is the `opentraffic-sandbox` launcher, the share's log says Orbit launched in its sandbox, and the work folder is one the sandbox keeps out (the user's temporary folder, `/tmp` or `/Users`); a canary file is written in `<work>/host-files`, standing for the host's files |
+| a viewer can't open a file outside the copy | the canary's path typed into the new order's note, File → Open File Named in Note: Orbit's note says `Couldn't open <canary>: Operation not permitted`, the canary's text is nowhere on the page, and the canary is unchanged (bytes, size, modification time) |
+| a viewer can't save over a file outside the copy | the canary's path in the note, File → Save Orders to File Named in Note: `Couldn't save <canary>: Operation not permitted`; the canary is unchanged and alone in its folder |
+| saving inside the copy works | the same with a path in the copy's own `Documents`: Orbit saves the orders there (with the page's new order) and opens the file again |
 | scrolling the long list reaches its end | wheel events over the list bring the last order into view |
 | a sheet opens and closes | Edit Address… opens the sheet as its own surface with its own pixels; Cancel closes it |
 | an alert opens and is dismissed | Delete Order's alert shows; Cancel closes it and the order stays |
@@ -104,6 +108,7 @@ run changed in them (the scratch Orbit and TextEdit it remembered under `remembe
 | the host's saved orders are untouched | after everything above (restarts, Reset Data, rebuilds), the host's `orders.json` is unchanged and alone in its folder |
 | Empty Data starts with the sample orders | the share is stopped and Orbit shared again with `--empty-data`: status says `empty`, the page shows the 30 sample orders and Gift wrap, not the host's note |
 | an installed app (TextEdit) is shared and takes typing | `opentraffic share /System/Applications/TextEdit.app --empty-data` (Empty Data, so TextEdit's real data is never read or written): the command says viewers use a copy, the status has `installed: true` and no `build`; the copy is `TextEdit (Shared).app` with the identifier `com.apple.TextEdit.opentraffic`, its document types ranked None; `osascript -e 'id of application "TextEdit"'` still answers `com.apple.TextEdit`; the page shows TextEdit's new document and the text typed there arrives in it; your own TextEdit, if it runs, keeps its process. Skipped without TextEdit |
+| TextEdit's Open and Save dialogs don't open | File → Open… and File → Save… from the viewer's menu bar: no window or sheet opens within 3 s (the sandbox refuses the service macOS draws them in, which would list and preview the host's files), the copy keeps running with its document |
 | stopping the installed app leaves nothing behind | after `stop`: no `TextEdit (Shared)` process, no `com.apple.TextEdit.opentraffic` preferences or saved state, no session folder for it |
 
 ## Results

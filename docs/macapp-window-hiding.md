@@ -59,7 +59,15 @@ Other notes from the spike:
    to that file: NSWorkspace can't redirect them (its private `_additionalLSOpenOptions` with
    LaunchServices' stdout/stderr keys is ignored on macOS 27), so the app is opened the same way
    through `/usr/bin/open -n -j -g --stdout --stderr --env … --args …` and found among the running
-   apps by its bundle path.
+   apps by its bundle path. A shared copy starts with its sandbox launcher (`MacAppSandbox`: its
+   `CFBundleExecutable` is a script that `exec`s `sandbox-exec`, which `exec`s the app's own
+   executable). The pid stays the same and Launch Services still applies the hidden launch, but it
+   lists the process without a bundle identifier, and `runningApplications` keeps a launch record
+   with pid -1 for the bundle path; so with `executable:` the copy is found as the new process
+   running that executable (by then it is in its sandbox). Launch Services' hide doesn't always
+   reach such a process either: MarkEdit came up with its windows ordered out but not hidden, and
+   then Accessibility lists none of them. While it waits for the first window, `launch` hides the
+   app through Accessibility (`AXHidden`) when it isn't hidden, and unhides it the same way.
 3. **Later windows.** `keepOffScreen(pid:)` installs an `AXObserver` for window created, focused
    window changed and main window changed (on the app) and moved (on each window), plus a
    watchdog: every 16 ms, on its own queue, it lists on-screen window ids, describes only new ones

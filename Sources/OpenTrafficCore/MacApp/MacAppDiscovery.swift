@@ -417,8 +417,15 @@ public enum MacAppDiscovery {
     ///   copy quits as it starts (MindNode, measured). Your own builds may use CloudKit only later, or
     ///   not at all in a debug build; they get the warning about entitlements the copy runs without.
     static func knownProblem(_ bundle: URL, info: [String: Any], installed: Bool) -> ((String) -> String)? {
+        // A copy only ever runs in the sandbox that keeps it out of your files (MacAppSandbox).
+        if !MacAppSandbox.isAvailable {
+            return { _ in "OpenTraffic runs shared Mac apps in macOS's sandbox (\(MacAppSandbox.sandboxExec)), which this Mac doesn't have, so it can't share them." }
+        }
         if isSystemComponent(bundle) {
             return { "\($0) is part of macOS itself; a copy of it can't run on its own." }
+        }
+        if let identifier = info["CFBundleIdentifier"] as? String, let reason = MacAppSandbox.incompatibleApps[identifier] {
+            return { "\($0) can't run in the sandbox that keeps a shared copy out of your files: it \(reason). OpenTraffic can't share it." }
         }
         if installed, usesCloudKit(MacAppSession.entitlements(of: bundle)) {
             return { "\($0) keeps its data in iCloud (CloudKit), which only \($0) itself, signed by its developer, may use: a copy of it quits as it starts. OpenTraffic can't share it." }

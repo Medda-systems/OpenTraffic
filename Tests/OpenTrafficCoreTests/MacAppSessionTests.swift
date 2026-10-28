@@ -99,10 +99,13 @@ struct MacAppSessionPieceTests {
         let original = URL(fileURLWithPath: "/System/Applications/TextEdit.app")
         let before = try Data(contentsOf: original.appendingPathComponent("Contents/Info.plist"))
         let copy = scratch.url.appendingPathComponent("session/app/TextEdit.app")
-        let prepared = try MacAppSession.makeIsolatedCopy(of: original, at: copy, bundleIdentifier: "com.apple.TextEdit.opentraffic")
+        let prepared = try MacAppSession.makeIsolatedCopy(of: original, at: copy, bundleIdentifier: "com.apple.TextEdit.opentraffic",
+                                                          sandboxProfile: scratch.url.appendingPathComponent("session/sandbox.sb"))
         #expect(prepared.wasSandboxed)
         #expect(Bundle(url: copy)?.bundleIdentifier == "com.apple.TextEdit.opentraffic")
-        let entitlements = MacAppSession.entitlements(of: copy)
+        // The app's own executable has them; the copy starts with the sandbox launcher.
+        #expect(Bundle(url: copy)?.object(forInfoDictionaryKey: "CFBundleExecutable") as? String == MacAppSandbox.launcherName)
+        let entitlements = MacAppSession.entitlements(of: copy.appendingPathComponent("Contents/MacOS/TextEdit"))
         #expect(!entitlements.isEmpty && entitlements.keys.allSatisfy { $0.hasPrefix("com.apple.security.") })
         #expect(entitlements["com.apple.security.app-sandbox"] == nil)
         #expect(codesignVerifies(copy))
@@ -157,18 +160,19 @@ struct MacAppSessionPieceTests {
         let before = try Data(contentsOf: original.appendingPathComponent("Contents/Info.plist"))
         let copy = scratch.url.appendingPathComponent("session/app/Stub.app")
 
-        let prepared = try MacAppSession.makeIsolatedCopy(of: original, at: copy, bundleIdentifier: "se.medda.stub.opentraffic")
+        let profile = scratch.url.appendingPathComponent("session/sandbox.sb")
+        let prepared = try MacAppSession.makeIsolatedCopy(of: original, at: copy, bundleIdentifier: "se.medda.stub.opentraffic", sandboxProfile: profile)
 
         #expect(prepared.wasSandboxed)
         #expect(prepared.warnings.count == 1 && prepared.warnings[0].contains("keychain-access-groups"))
         #expect(Bundle(url: copy)?.bundleIdentifier == "se.medda.stub.opentraffic")
         #expect(try Data(contentsOf: original.appendingPathComponent("Contents/Info.plist")) == before)
         #expect(Bundle(url: original)?.bundleIdentifier == "se.medda.stub")
-        let entitlements = MacAppSession.entitlements(of: copy)
+        let entitlements = MacAppSession.entitlements(of: copy.appendingPathComponent("Contents/MacOS/Stub"))
         #expect(Set(entitlements.keys) == ["com.apple.security.network.client"])
         #expect(codesignVerifies(copy))
         // Copied again (a rebuild) over the old copy.
-        _ = try MacAppSession.makeIsolatedCopy(of: original, at: copy, bundleIdentifier: "se.medda.stub.opentraffic")
+        _ = try MacAppSession.makeIsolatedCopy(of: original, at: copy, bundleIdentifier: "se.medda.stub.opentraffic", sandboxProfile: profile)
         #expect(codesignVerifies(copy))
     }
 
@@ -280,7 +284,7 @@ struct MacAppSessionPieceTests {
         #expect(!world.exists("Library/Group Containers/other.group"))
         #expect(!world.exists("Library/Group Containers/ABCDE12345.missing"))
         #expect(warnings.count == 1)
-        #expect(warnings[0].contains("App Group data (ABCDE12345.group.stub)") && warnings[0].contains("Don't Allow"))
+        #expect(warnings[0].contains("App Group data (ABCDE12345.group.stub)") && warnings[0].contains("sandbox keeps it out"))
         // The original is only read.
         #expect(try String(contentsOf: world.real.appendingPathComponent("Library/Group Containers/ABCDE12345.group.stub/Library/state.json"), encoding: .utf8) == "shared")
     }
@@ -291,7 +295,7 @@ struct MacAppSessionPieceTests {
         try world.write("Library/Group Containers/ABCDE12345.group.stub/Library/state.json", "shared")
         let warnings = try world.prepare(data: .empty, entitlements: ["com.apple.security.application-groups": ["ABCDE12345.group.stub"]])
         #expect(!world.exists("Library/Group Containers"))
-        #expect(warnings.count == 1 && warnings[0].contains("App Groups (ABCDE12345.group.stub)") && warnings[0].contains("even with empty data"))
+        #expect(warnings.count == 1 && warnings[0].contains("App Groups (ABCDE12345.group.stub)") && warnings[0].contains("sandbox keeps it out"))
         #expect(try world.prepare(fresh: true, data: .empty).isEmpty)
     }
 
@@ -392,10 +396,13 @@ struct MacAppSessionFixtureTests {
             let port = try #require(session.port)
             #expect(session.state == .running)
 
-            // The isolated copy: its own bundle, identifier and home folder.
+            // The isolated copy: its own bundle, identifier and home folder, in its sandbox. (Started by
+            // its sandbox launcher, it runs under Launch Services without its bundle identifier.)
             let running = try #require(NSRunningApplication(processIdentifier: pid))
-            #expect(running.bundleIdentifier == "se.medda.orbit.opentraffic")
+            #expect(Bundle(url: session.appCopy)?.bundleIdentifier == "se.medda.orbit.opentraffic")
             #expect(running.bundleURL?.resolvingSymlinksInPath().path.hasPrefix(sessionFolder.resolvingSymlinksInPath().path) == true)
+            #expect(MacAppSandbox.isSandboxed(pid))
+            #expect(FileManager.default.fileExists(atPath: session.sandboxProfile.path))
             let environment = OrbitFixture.run("/bin/ps", ["eww", "-o", "command=", "-p", "\(pid)"])
             #expect(environment.contains("CFFIXED_USER_HOME=\(session.homeDirectory.path)"))
             #expect(environment.contains("-ApplePersistenceIgnoreState YES"))
@@ -736,7 +743,7 @@ private struct DataWorld {
     func exists(_ path: String) -> Bool { FileManager.default.fileExists(atPath: home.appendingPathComponent(path).path) }
 }
 
-private func makeStubApp(in folder: URL, entitlements: [String: Any]) throws -> URL {
+func makeStubApp(in folder: URL, entitlements: [String: Any]) throws -> URL {
     let app = folder.appendingPathComponent("Stub.app")
     let macOS = app.appendingPathComponent("Contents/MacOS")
     try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
@@ -755,7 +762,7 @@ private func makeStubApp(in folder: URL, entitlements: [String: Any]) throws -> 
     return app
 }
 
-private func codesignVerifies(_ bundle: URL) -> Bool {
+func codesignVerifies(_ bundle: URL) -> Bool {
     let verify = Process()
     verify.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
     verify.arguments = ["--verify", "--strict", bundle.path]

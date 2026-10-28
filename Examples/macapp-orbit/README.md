@@ -57,3 +57,4 @@ Accessibility identifiers are in brackets.
 | Orders > Show Statistics (⌥⌘I) | Menu bar | Opens the second window |
 | Orders > Filter | Menu bar | A submenu with the three filters |
 | Statistics (`statistics`) | Second window (a `WindowGroup`) | Counts and revenue, updates live |
+| File > Open File Named in Note, File > Save Orders to File Named in Note | Menu bar | Read the file whose path is the selected order's note into the note, or write the orders over it; the note then says how it went (`Couldn't open <path>: Operation not permitted`). For tests of what a shared copy may touch |

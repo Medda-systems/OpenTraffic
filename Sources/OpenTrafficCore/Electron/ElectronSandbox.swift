@@ -41,17 +41,33 @@ public enum ElectronSandbox {
         return NSHomeDirectory()
     }
 
+    /// A string as a profile's literal.
+    static func quoted(_ text: String) -> String {
+        "\"" + text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    }
+
+    /// A path as Seatbelt matches it: resolved (/private/var, not /var). resolvingSymlinksInPath drops
+    /// /private, so realpath; paths that don't exist yet stay as given.
+    static func real(_ path: String) -> String {
+        guard let resolved = realpath(path, nil) else { return path }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+
+    /// The folders above `paths`, which may be looked at (not listed or read): resolving a path needs it.
+    static func parents(of paths: [String]) -> [String] {
+        var parents = Set<String>()
+        for path in paths {
+            var parent = URL(fileURLWithPath: real(path)).deletingLastPathComponent()
+            while parent.path != "/", !parent.path.isEmpty {
+                parents.insert(parent.path)
+                parent.deleteLastPathComponent()
+            }
+        }
+        return parents.sorted()
+    }
+
     public static func profile(_ policy: Policy) -> String {
-        func quoted(_ text: String) -> String {
-            "\"" + text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
-        }
-        // Real paths: Seatbelt matches resolved paths (/private/var, not /var).
-        // (resolvingSymlinksInPath drops /private, so realpath; paths that don't exist yet stay as given.)
-        func real(_ path: String) -> String {
-            guard let resolved = realpath(path, nil) else { return path }
-            defer { free(resolved) }
-            return String(cString: resolved)
-        }
         let session = real(policy.session)
         var lines = [
             "(version 1)",
@@ -66,15 +82,7 @@ public enum ElectronSandbox {
             lines.append("(deny file-read* " + privateFolders.map { "(subpath \(quoted($0)))" }.joined(separator: " ") + ")")
         }
         // Their parent folders can be looked at (not listed or read): resolving paths needs it.
-        var parents = Set<String>()
-        for folder in policy.readable + [policy.session] {
-            var parent = URL(fileURLWithPath: real(folder)).deletingLastPathComponent()
-            while parent.path != "/", !parent.path.isEmpty {
-                parents.insert(parent.path)
-                parent.deleteLastPathComponent()
-            }
-        }
-        for parent in parents.sorted() { lines.append("(allow file-read-metadata (literal \(quoted(parent))))") }
+        for parent in parents(of: policy.readable + [policy.session]) { lines.append("(allow file-read-metadata (literal \(quoted(parent))))") }
         for folder in policy.readable { lines.append("(allow file-read* (subpath \(quoted(real(folder)))))") }
         lines += [
             "(allow file-read* (subpath \(quoted(session))))",

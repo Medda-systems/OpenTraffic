@@ -509,9 +509,26 @@ public final class MacAppWindowHider {
     ///
     /// With `output`, the app's standard output and error are appended to that file. NSWorkspace
     /// can't redirect them, so the app is then launched the same way through `/usr/bin/open`
-    /// (`-n -j -g --stdout --stderr`) and found among the running apps by its bundle path.
+    /// (`-n -j -g --stdout --stderr`) and found among the running apps by its bundle path, or, with
+    /// `executable`, as the new process running that executable: a bundle whose `CFBundleExecutable`
+    /// starts another one (a shared copy's sandbox launcher, MacAppSandbox) runs under Launch Services
+    /// without its bundle identifier, and is found by what it runs once it runs it.
     public func launch(bundle: URL, environment: [String: String] = [:], arguments: [String] = [],
                        windowTimeout: Duration = .seconds(10), output: URL? = nil) async throws -> NSRunningApplication {
+        try await launchHidden(bundle: bundle, environment: environment, arguments: arguments, windowTimeout: windowTimeout, output: output).app
+    }
+
+    /// `launch`, for a bundle whose executable starts `executable` (a shared copy's sandbox launcher):
+    /// returns its pid. Launch Services hands this process an NSRunningApplication for it whose
+    /// `processIdentifier` stays -1 (its launch record), though hiding, unhiding and quitting it work.
+    public func launch(bundle: URL, environment: [String: String] = [:], arguments: [String] = [],
+                       windowTimeout: Duration = .seconds(10), output: URL, executable: URL) async throws -> pid_t {
+        try await launchHidden(bundle: bundle, environment: environment, arguments: arguments, windowTimeout: windowTimeout,
+                               output: output, executable: executable).pid
+    }
+
+    private func launchHidden(bundle: URL, environment: [String: String], arguments: [String], windowTimeout: Duration,
+                              output: URL?, executable: URL? = nil) async throws -> (pid: pid_t, app: NSRunningApplication) {
         guard Self.isPermitted else { throw Failure.notTrusted }
         try await offscreenDisplay()
         // A window the app opens later starts where AppKit puts it, on one of your screens, until it
@@ -519,8 +536,9 @@ public final class MacAppWindowHider {
         // play there first. Without animations it is moved before it is ever drawn there.
         let arguments = arguments + Self.launchArguments
         let app: NSRunningApplication
+        let pid: pid_t
         if let output {
-            app = try await Self.openHidden(bundle: bundle, environment: environment, arguments: arguments, output: output)
+            (pid, app) = try await Self.openHidden(bundle: bundle, environment: environment, arguments: arguments, output: output, executable: executable)
         } else {
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = false
@@ -530,40 +548,52 @@ public final class MacAppWindowHider {
             configuration.environment = environment
             configuration.arguments = arguments
             app = try await NSWorkspace.shared.openApplication(at: bundle, configuration: configuration)
+            pid = app.processIdentifier
         }
         do {
             // Hidden, its windows are ordered out: moving them now can't flash anything.
-            let element = AXUIElementCreateApplication(app.processIdentifier)
+            let element = AXUIElementCreateApplication(pid)
             AXUIElementSetMessagingTimeout(element, Self.messagingTimeout)
             let deadline = ContinuousClock.now + windowTimeout
-            while Self.axWindows(of: element).isEmpty, ContinuousClock.now < deadline, !app.isTerminated {
+            while Self.axWindows(of: element).isEmpty, ContinuousClock.now < deadline, kill(pid, 0) == 0 {
+                // A bundle that starts another executable (a shared copy's sandbox launcher) doesn't always
+                // get Launch Services' hide: the app may come up with its windows ordered out but not
+                // hidden, and then Accessibility doesn't list them (MarkEdit). Hiding it lists them.
+                if executable != nil, Self.isHidden(element) == false { Self.setHidden(element, true) }
                 try await Task.sleep(for: .milliseconds(25))
             }
-            try await keepOffScreen(pid: app.processIdentifier)
+            try await keepOffScreen(pid: pid)
             app.unhide()
+            if executable != nil { Self.setHidden(element, false) }
             // Unhiding takes effect a moment later: wait until the windows are ordered in, so they
             // can be captured as soon as this returns.
-            try await waitUntilOrderedIn(app.processIdentifier, timeout: .seconds(2))
+            try await waitUntilOrderedIn(pid, timeout: .seconds(2))
             // The windows are on a screen, so AppKit has no reason to move them as it orders them in;
             // one more look in case it did (the moved notification and the watchdog catch later ones).
-            try await sweep(app.processIdentifier)
+            try await sweep(pid)
         } catch {
-            unwatch(app.processIdentifier)
-            app.forceTerminate()
+            unwatch(pid)
+            if pid > 0 { kill(pid, SIGKILL) } else { app.forceTerminate() }
             throw error
         }
-        return app
+        return (pid, app)
     }
 
     /// Launches a new instance of the app hidden, in the background, with its standard output and
     /// error going to `output`, and returns it once it is among the running apps.
     private static func openHidden(bundle: URL, environment: [String: String], arguments: [String],
-                                   output: URL) async throws -> NSRunningApplication {
+                                   output: URL, executable: URL? = nil) async throws -> (pid: pid_t, app: NSRunningApplication) {
         let path = bundle.standardizedFileURL.resolvingSymlinksInPath().path
-        func instances() -> [NSRunningApplication] {
-            NSWorkspace.shared.runningApplications.filter { $0.bundleURL?.standardizedFileURL.resolvingSymlinksInPath().path == path }
+        let executablePath = executable.map { ElectronDiscovery.realURL($0).path }
+        func instances() -> [(pid: pid_t, app: NSRunningApplication)] {
+            if let executablePath {
+                return ElectronDiscovery.allProcessIDs().filter { ElectronDiscovery.executablePath($0) == executablePath }
+                    .compactMap { pid in NSRunningApplication(processIdentifier: pid).map { (pid, $0) } }
+            }
+            return NSWorkspace.shared.runningApplications.filter { $0.bundleURL?.standardizedFileURL.resolvingSymlinksInPath().path == path }
+                .map { ($0.processIdentifier, $0) }
         }
-        let before = Set(instances().map(\.processIdentifier))
+        let before = Set(instances().map(\.pid))
         var openArguments = ["-n", "-j", "-g", "--stdout", output.path, "--stderr", output.path]
         for (name, value) in environment.sorted(by: { $0.key < $1.key }) { openArguments += ["--env", "\(name)=\(value)"] }
         openArguments += ["-a", path]
@@ -588,7 +618,7 @@ public final class MacAppWindowHider {
         }
         let deadline = ContinuousClock.now + .seconds(10)
         while ContinuousClock.now < deadline {
-            if let app = instances().first(where: { !before.contains($0.processIdentifier) }) { return app }
+            if let found = instances().first(where: { !before.contains($0.pid) }) { return found }
             try await Task.sleep(for: .milliseconds(20))
         }
         throw Failure.launchFailed("the app was opened but didn't show up among the running apps")
@@ -833,6 +863,17 @@ public final class MacAppWindowHider {
     }
 
     // MARK: Accessibility helpers
+
+    /// Whether an app is hidden, as Accessibility says (nil when it doesn't answer).
+    nonisolated static func isHidden(_ app: AXUIElement) -> Bool? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXHiddenAttribute as CFString, &value) == .success else { return nil }
+        return (value as? Bool)
+    }
+
+    nonisolated static func setHidden(_ app: AXUIElement, _ hidden: Bool) {
+        _ = AXUIElementSetAttributeValue(app, kAXHiddenAttribute as CFString, hidden ? kCFBooleanTrue : kCFBooleanFalse)
+    }
 
     nonisolated static func axWindows(of app: AXUIElement) -> [AXUIElement] {
         var value: CFTypeRef?

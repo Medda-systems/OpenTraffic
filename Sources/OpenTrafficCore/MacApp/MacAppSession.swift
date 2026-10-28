@@ -239,6 +239,16 @@ public final class MacAppSession {
     }
     /// The app's home folder (`CFFIXED_USER_HOME`).
     public var homeDirectory: URL { options.sessionDirectory.appendingPathComponent("home", isDirectory: true) }
+    /// The app's temporary folder (`TMPDIR`).
+    public var temporaryDirectory: URL { options.sessionDirectory.appendingPathComponent("tmp", isDirectory: true) }
+    /// The sandbox profile the copy runs in (MacAppSandbox), written before every launch. Outside the
+    /// folders the copy may write, so it can't change its own sandbox for the next launch.
+    public var sandboxProfile: URL { options.sessionDirectory.appendingPathComponent("sandbox.sb") }
+    /// What the copy may touch: its session folder, writing only its home and temporary folders.
+    public var sandboxPolicy: MacAppSandbox.Policy {
+        MacAppSandbox.Policy(homeDirectory: options.realHomeDirectory, session: options.sessionDirectory.path,
+                             writable: [homeDirectory.path, temporaryDirectory.path], preferencesDomain: bundleIdentifier)
+    }
     /// The running copy's windows (on the off-screen display).
     public var windows: [HiddenWindow] { launch.map { hider.windows(pid: $0.pid) } ?? [] }
     /// Every window viewers see now, as the mirror sends them (main first; second windows, sheets,
@@ -281,6 +291,8 @@ public final class MacAppSession {
     private var dataPrepared = false
     /// Whether the sandbox of the original app means its data lives in its container.
     private var originalIsSandboxed = false
+    /// The app's own executable in the copy (its sandbox launcher runs it).
+    private var copyExecutable: URL?
     /// What didn't come along to the copy: entitlements it runs without, data it starts without.
     /// The card shows them together (it shows one warning at a time).
     private var bundleWarnings: [String] = []
@@ -511,10 +523,19 @@ public final class MacAppSession {
         if let simulator {
             return try await launchInSimulator(simulator, automatic: automatic, fresh: fresh, generation: generation, logFile: logFile, tail: tail)
         }
+        // The sandbox, as of this launch (the copy's launcher reads it; a missing one stops it).
+        do {
+            try FileManager.default.createDirectory(at: homeDirectory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+            try Data(MacAppSandbox.profile(sandboxPolicy).utf8).write(to: sandboxProfile)
+        } catch {
+            tail.finish()
+            throw MacAppSessionError.failed("Couldn't write the sandbox \(name) runs in: \(error.localizedDescription)")
+        }
         let environment = [
             "CFFIXED_USER_HOME": homeDirectory.path,
             "HOME": homeDirectory.path,
-            "TMPDIR": options.sessionDirectory.appendingPathComponent("tmp").path + "/",
+            "TMPDIR": temporaryDirectory.path + "/",
             // os_log and Logger messages on standard error too, as Xcode's console shows them.
             "OS_ACTIVITY_DT_MODE": "1",
         ]
@@ -523,16 +544,16 @@ public final class MacAppSession {
             warnedAboutDark = true
             warn("\(name) can only look dark while this Mac uses the Dark appearance, so it shows light.")
         }
-        let running: NSRunningApplication
+        let pid: pid_t
         do {
-            running = try await hider.launch(bundle: appCopy, environment: environment,
-                                             arguments: ["-ApplePersistenceIgnoreState", "YES"] + Self.appearanceArguments(appearance),
-                                             windowTimeout: options.windowTimeout, output: logFile)
+            guard let copyExecutable else { throw MacAppSessionError.failed("\(name)'s copy has no executable to start in its sandbox.") }
+            pid = try await hider.launch(bundle: appCopy, environment: environment,
+                                         arguments: ["-ApplePersistenceIgnoreState", "YES"] + Self.appearanceArguments(appearance),
+                                         windowTimeout: options.windowTimeout, output: logFile, executable: copyExecutable)
         } catch {
             tail.finish()
             throw error
         }
-        let pid = running.processIdentifier
         let exit = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .main)
         exit.setEventHandler { [weak self] in
             MainActor.assumeIsolated { self?.exited(pid: pid, generation: generation) }
@@ -541,12 +562,18 @@ public final class MacAppSession {
         let boot = UUID().uuidString
         launch = Launch(pid: pid, generation: generation, boot: boot, started: .now, automatic: automatic, tail: tail, exit: exit)
         guard Self.isAlive(pid) else {
-            throw MacAppSessionError.failed("\(name) quit while starting.\(lastAppLines())")
+            throw MacAppSessionError.failed("\(name) quit while starting in OpenTraffic's sandbox, which keeps it out of your files, so it can't be shared.\(lastAppLines())")
+        }
+        // The launcher starts nothing of the app outside the sandbox; a copy that runs without one anyway
+        // (its executable changed) is stopped before viewers see it.
+        guard MacAppSandbox.isSandboxed(pid) else {
+            kill(pid, SIGKILL)
+            throw MacAppSessionError.failed("\(name) didn't start in OpenTraffic's sandbox, so it was stopped: a shared copy never runs without it.")
         }
         guard !hider.windows(pid: pid).isEmpty else {
             throw MacAppSessionError.failed("\(name) didn't open a window within \(options.windowTimeout.components.seconds) seconds.\(lastAppLines())")
         }
-        note("Launched \(name) (pid \(pid)) in the \(appearance.rawValue) appearance.")
+        note("Launched \(name) (pid \(pid)) in its sandbox, in the \(appearance.rawValue) appearance.")
         if appearance != self.appearance {
             self.appearance = appearance
             eventSink.yield(.appearance(appearance))
@@ -613,7 +640,7 @@ public final class MacAppSession {
             return
         }
         if Self.isAlive(pid) {
-            NSRunningApplication(processIdentifier: pid)?.terminate()
+            if NSRunningApplication(processIdentifier: pid)?.terminate() != true { kill(pid, SIGTERM) }
             let deadline = ContinuousClock.now + Self.stopGrace
             while Self.isAlive(pid), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(50)) }
             if Self.isAlive(pid) {
@@ -960,8 +987,12 @@ public final class MacAppSession {
         let target = appCopy
         let identifier = bundleIdentifier
         let renamed = Self.copyBundleName(for: options.app)
-        let prepared = try await Task.detached { try Self.makeIsolatedCopy(of: source, at: target, bundleIdentifier: identifier, bundleName: renamed) }.value
+        let profile = sandboxProfile
+        let prepared = try await Task.detached {
+            try Self.makeIsolatedCopy(of: source, at: target, bundleIdentifier: identifier, bundleName: renamed, sandboxProfile: profile)
+        }.value
         originalIsSandboxed = prepared.wasSandboxed
+        copyExecutable = prepared.executable
         bundleWarnings = prepared.warnings
         for warning in bundleWarnings { note(warning) }
         warnAboutTheCopy()
@@ -973,7 +1004,7 @@ public final class MacAppSession {
         guard !dataPrepared else { return }
         let app = options.app
         let home = homeDirectory
-        let tmp = options.sessionDirectory.appendingPathComponent("tmp", isDirectory: true)
+        let tmp = temporaryDirectory
         let source = options.data
         let identifier = bundleIdentifier
         let realHome = options.realHomeDirectory
@@ -999,7 +1030,7 @@ public final class MacAppSession {
 
     private func clearHome() throws {
         try? FileManager.default.removeItem(at: homeDirectory)
-        try? FileManager.default.removeItem(at: options.sessionDirectory.appendingPathComponent("tmp", isDirectory: true))
+        try? FileManager.default.removeItem(at: temporaryDirectory)
         Self.removePreferences(bundleIdentifier, realHome: options.realHomeDirectory)
     }
 
@@ -1024,7 +1055,9 @@ public final class MacAppSession {
         for folder in folders {
             let prefix = folder.standardizedFileURL.resolvingSymlinksInPath().path + "/"
             for app in NSWorkspace.shared.runningApplications {
-                guard let bundle = app.bundleURL?.standardizedFileURL.resolvingSymlinksInPath().path, bundle.hasPrefix(prefix) else { continue }
+                // A copy runs without its bundle identifier (its sandbox launcher): its executable is in the folder too.
+                let paths = [app.bundleURL, app.executableURL].compactMap { $0?.standardizedFileURL.resolvingSymlinksInPath().path }
+                guard paths.contains(where: { $0.hasPrefix(prefix) }) else { continue }
                 app.terminate()
                 for _ in 0..<60 where !app.isTerminated { try? await Task.sleep(for: .milliseconds(50)) }
                 if !app.isTerminated { app.forceTerminate() }
@@ -1136,14 +1169,18 @@ extension MacAppSession {
     struct PreparedCopy: Sendable {
         var warnings: [String]
         var wasSandboxed: Bool
+        /// The app's own executable in the copy, which its sandbox launcher runs.
+        var executable: URL
     }
 
     /// Clones `source` to `target` (APFS clonefile: instant, no extra space), gives it
     /// `bundleIdentifier`, and signs it again ad hoc with the original's entitlements minus those
     /// that need the developer's team or Apple (and the App Sandbox, so the copy's data stays in its
     /// session's home folder). The copy never stands in for the app (`detachFromLaunchServices`): it
-    /// opens no document types or links for macOS, and has no extensions.
-    nonisolated static func makeIsolatedCopy(of source: URL, at target: URL, bundleIdentifier: String, bundleName: String? = nil) throws -> PreparedCopy {
+    /// opens no document types or links for macOS, and has no extensions. It, its XPC services and the
+    /// apps inside it only ever start inside the sandbox of `sandboxProfile` (`MacAppSandbox.wrap`).
+    nonisolated static func makeIsolatedCopy(of source: URL, at target: URL, bundleIdentifier: String, bundleName: String? = nil,
+                                             sandboxProfile: URL) throws -> PreparedCopy {
         let fm = FileManager.default
         try? fm.removeItem(at: target)
         try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -1175,16 +1212,29 @@ extension MacAppSession {
         }
         let sandboxed = (original[sandboxEntitlement] as? Bool) == true
 
-        // Nested code first (frameworks, helpers keep their entitlements), then the app itself.
-        try codesign(["--force", "--deep", "--sign", "-", "--preserve-metadata=entitlements", target.path])
-        if kept.isEmpty {
-            try codesign(["--force", "--sign", "-", target.path])
-        } else {
-            let file = target.deletingLastPathComponent().appendingPathComponent("entitlements.plist")
-            try PropertyListSerialization.data(fromPropertyList: kept, format: .xml, options: 0).write(to: file)
-            try codesign(["--force", "--sign", "-", "--entitlements", file.path, target.path])
+        // Everything macOS may start on its own starts in the sandbox: the app, its XPC services, the
+        // apps inside it. Each one's own executable is signed first with the entitlements a copy may
+        // have, then everything around it, nested code first, keeping those.
+        let entitlementsFile = target.deletingLastPathComponent().appendingPathComponent("entitlements.plist")
+        defer { try? fm.removeItem(at: entitlementsFile) }
+        var mainExecutable: URL?
+        for bundle in MacAppSandbox.startableBundles(in: target) {
+            let isCopy = bundle == target
+            let identifier = isCopy ? bundleIdentifier : (Bundle(url: bundle)?.bundleIdentifier ?? bundle.deletingPathExtension().lastPathComponent)
+            let executable = try MacAppSandbox.wrap(bundle, profile: sandboxProfile)
+            if isCopy { mainExecutable = executable }
+            let allowed = isCopy ? kept : sharedEntitlements(entitlements(of: executable)).kept
+            var arguments = ["--force", "--sign", "-", "--identifier", identifier]
+            if !allowed.isEmpty {
+                try PropertyListSerialization.data(fromPropertyList: allowed, format: .xml, options: 0).write(to: entitlementsFile)
+                arguments += ["--entitlements", entitlementsFile.path]
+            }
+            try codesign(arguments + [executable.path])
         }
-        return PreparedCopy(warnings: warnings, wasSandboxed: sandboxed)
+        try codesign(["--force", "--deep", "--sign", "-", "--preserve-metadata=identifier,entitlements", target.path])
+        try codesign(["--force", "--sign", "-", "--identifier", bundleIdentifier, target.path])
+        guard let mainExecutable else { throw MacAppSessionError.failed("\(source.lastPathComponent) has no executable OpenTraffic can start in its sandbox.") }
+        return PreparedCopy(warnings: warnings, wasSandboxed: sandboxed, executable: mainExecutable)
     }
 
     nonisolated static let sandboxEntitlement = "com.apple.security.app-sandbox"
@@ -1310,10 +1360,10 @@ extension MacAppSession {
             .filter { !$0.isEmpty && !$0.contains("/") && $0 != "." && $0 != ".." }
         guard data == .copy else {
             if sessionDefaults { setSessionDefaults(copyIdentifier, home: home) }
-            // Nothing is copied, but containerURL still gives the copy the App Group folders in your own
-            // Library (measured): it could read or change them.
+            // containerURL gives the copy the App Group folders in your own Library (measured), which its
+            // sandbox keeps it out of.
             guard !groups.isEmpty else { return [] }
-            return ["\(app.name) keeps some of its data in App Groups (\(groups.sorted().joined(separator: ", "))), which macOS shows the copy in your own Library even with empty data. If macOS asks whether \(app.name) may access data from other apps, choose Don't Allow: your own data then stays untouched."]
+            return ["\(app.name) keeps some of its data in App Groups (\(groups.sorted().joined(separator: ", "))). macOS shows the copy those folders in your own Library, which its sandbox keeps it out of, so features that use them may not work."]
         }
 
         let sourceHome = dataHome ?? realHome
@@ -1391,8 +1441,9 @@ extension MacAppSession {
         if !copiedGroups.isEmpty {
             // FileManager.containerURL(forSecurityApplicationGroupIdentifier:) gives the copy the folder in
             // the user's real Library, whatever its home folder is (measured on macOS 27), and the copy,
-            // signed ad hoc, has no App Group entitlement of its own.
-            warnings.append("\(app.name)'s App Group data (\(copiedGroups.joined(separator: ", "))) is copied, but macOS shows apps their App Group folder in your own Library, so the copy may start without it. If macOS asks whether \(app.name) may access data from other apps, choose Don't Allow: your own data then stays untouched.")
+            // signed ad hoc, has no App Group entitlement of its own. Its sandbox keeps it out of that one;
+            // an app that builds the path from its home folder finds the copy.
+            warnings.append("\(app.name)'s App Group data (\(copiedGroups.joined(separator: ", "))) is copied, but macOS shows apps their App Group folder in your own Library, which the copy's sandbox keeps it out of, so the copy may start without it. Your own data stays untouched.")
         }
 
         // Preferences.
@@ -1442,8 +1493,8 @@ extension MacAppSession {
     ///
     /// - a document app (TextEdit) opens a new document instead of its Open panel at launch, so viewers
     ///   start in the app rather than in a file dialog;
-    /// - Open and Save dialogs start in the copy's own Documents folder (in its session home), not in
-    ///   yours. Their sidebar still leads to this Mac's folders (mac-apps.md, Open and Save dialogs);
+    /// - Open and Save dialogs would start in the copy's own Documents folder (in its session home), not
+    ///   in yours; its sandbox refuses them anyway (MacAppSandbox.refusedServices);
     /// - Sparkle (the update framework many apps outside the App Store use) doesn't ask viewers whether
     ///   to check for updates, and never installs one into the copy.
     nonisolated static func setSessionDefaults(_ copyIdentifier: String, home: URL) {

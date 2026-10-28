@@ -441,9 +441,12 @@ extension AppStore {
         }
         let sessions = MacAppSession.sessionsDirectory.standardizedFileURL.resolvingSymlinksInPath().path + "/"
         for pid in macAppStoppingPIDs.values {
+            // A copy runs without its bundle identifier (its sandbox launcher), and its NSRunningApplication
+            // may still say pid -1: it's the copy when its bundle or executable is in a session folder.
             guard let app = NSRunningApplication(processIdentifier: pid),
-                  app.bundleURL?.standardizedFileURL.resolvingSymlinksInPath().path.hasPrefix(sessions) == true else { continue }
-            app.forceTerminate()
+                  [app.bundleURL, app.executableURL].contains(where: { $0?.standardizedFileURL.resolvingSymlinksInPath().path.hasPrefix(sessions) == true })
+            else { continue }
+            kill(pid, SIGKILL)
         }
     }
 

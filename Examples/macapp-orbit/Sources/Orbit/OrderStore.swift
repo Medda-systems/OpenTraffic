@@ -142,4 +142,41 @@ enum OrderFilter: String, CaseIterable, Identifiable, Codable {
     func markAllShipped() {
         for index in orders.indices { orders[index].shipped = true }
     }
+
+    /// File > Open File Named in Note: reads the file whose path is the selected order's note, as any app
+    /// reads a file a person asks for, and puts its text in the note, or why it couldn't
+    /// (`Couldn't open <path>: …`). Tests use it to try a file outside the app's sandbox.
+    func openFileNamedInNote() {
+        guard let index = index(of: selectedID) else { return }
+        let path = orders[index].note.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            orders[index].note = "Opened: " + (try String(contentsOfFile: path, encoding: .utf8))
+        } catch {
+            orders[index].note = "Couldn't open \(path): \(Self.reason(error))"
+        }
+    }
+
+    /// File > Save Orders to File Named in Note: writes the orders as JSON over the file whose path is
+    /// the selected order's note, and says in the note how it went (`Saved to <path>`,
+    /// `Couldn't save <path>: …`).
+    func saveOrdersToFileNamedInNote() {
+        guard let index = index(of: selectedID) else { return }
+        let path = orders[index].note.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            try JSONEncoder().encode(orders).write(to: URL(fileURLWithPath: path))
+            orders[index].note = "Saved to \(path)"
+        } catch {
+            orders[index].note = "Couldn't save \(path): \(Self.reason(error))"
+        }
+    }
+
+    /// The system's reason (`Operation not permitted`), not Foundation's sentence around it.
+    private static func reason(_ error: Error) -> String {
+        let error = error as NSError
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError, underlying.domain == NSPOSIXErrorDomain,
+           let code = POSIXErrorCode(rawValue: Int32(underlying.code)) {
+            return String(cString: strerror(code.rawValue))
+        }
+        return error.localizedDescription
+    }
 }

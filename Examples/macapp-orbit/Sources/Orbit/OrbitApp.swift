@@ -59,6 +59,11 @@ struct OrdersCommands: Commands {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
+        // For tests of what the app may touch: the selected order's note names the file.
+        CommandGroup(after: .newItem) {
+            Button("Open File Named in Note") { store.openFileNamedInNote() }
+            Button("Save Orders to File Named in Note") { store.saveOrdersToFileNamedInNote() }
+        }
         CommandMenu("Orders") {
             Button("Mark All Shipped") { store.markAllShipped() }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
