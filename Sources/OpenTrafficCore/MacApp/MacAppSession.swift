@@ -30,7 +30,8 @@ import Security
 @MainActor
 public final class MacAppSession {
     public enum DataSource: String, Sendable, Codable {
-        /// A copy of the app's own Application Support folder and preferences (instant on APFS).
+        /// A copy of the app's data (instant on APFS): its Application Support folders, a Core Data or
+        /// SwiftData store at the top of Application Support, its App Group folders and its preferences.
         case copy
         /// Nothing: a first launch.
         case empty
@@ -159,14 +160,17 @@ public final class MacAppSession {
         public var windowTimeout: Duration
         /// Start the app again once when it quits by itself.
         public var restartsAutomatically: Bool
-        /// The home folder the app's real data is read from for `.copy`.
+        /// The user's real home folder, whose Library holds the copy's preferences file.
         public var realHomeDirectory: String
+        /// The home folder the app's data is read from for `.copy` (only ever read): the real one, or
+        /// `OPENTRAFFIC_TEST_DATA_HOME` when set (script/macapp-e2e.mjs).
+        public var dataHomeDirectory: String
         /// How long a build from the sources may take (`watchSources`).
         public var buildTimeout: Duration = MacAppBuild.defaultTimeout
 
         public init(app: MacApp, data: DataSource, assets: MirrorServer.Assets, viewerOptions: MacAppViewerOptions = .init(),
                     sessionDirectory: URL? = nil, windowTimeout: Duration = .seconds(20), restartsAutomatically: Bool = true,
-                    realHomeDirectory: String = ElectronSandbox.realHomeDirectory) {
+                    realHomeDirectory: String = ElectronSandbox.realHomeDirectory, dataHomeDirectory: String? = nil) {
             self.app = app
             self.data = data
             self.assets = assets
@@ -175,6 +179,8 @@ public final class MacAppSession {
             self.windowTimeout = windowTimeout
             self.restartsAutomatically = restartsAutomatically
             self.realHomeDirectory = realHomeDirectory
+            let testHome = ProcessInfo.processInfo.environment["OPENTRAFFIC_TEST_DATA_HOME"] ?? ""
+            self.dataHomeDirectory = dataHomeDirectory ?? (testHome.isEmpty ? realHomeDirectory : testHome)
         }
     }
 
@@ -272,6 +278,10 @@ public final class MacAppSession {
     private var dataPrepared = false
     /// Whether the sandbox of the original app means its data lives in its container.
     private var originalIsSandboxed = false
+    /// What didn't come along to the copy: entitlements it runs without, data it starts without.
+    /// The card shows them together (it shows one warning at a time).
+    private var bundleWarnings: [String] = []
+    private var dataWarnings: [String] = []
     private var lastAutomaticRestart: ContinuousClock.Instant?
     private var serverEvents: Task<Void, Never>?
     /// Whether the card was told that dark needs this Mac in Dark.
@@ -948,7 +958,9 @@ public final class MacAppSession {
         let identifier = bundleIdentifier
         let prepared = try await Task.detached { try Self.makeIsolatedCopy(of: source, at: target, bundleIdentifier: identifier) }.value
         originalIsSandboxed = prepared.wasSandboxed
-        for warning in prepared.warnings { warn(warning) }
+        bundleWarnings = prepared.warnings
+        for warning in bundleWarnings { note(warning) }
+        warnAboutTheCopy()
         bundleStamp = stamp
     }
 
@@ -961,13 +973,24 @@ public final class MacAppSession {
         let source = options.data
         let identifier = bundleIdentifier
         let realHome = options.realHomeDirectory
+        let dataHome = options.dataHomeDirectory
         let sandboxed = originalIsSandboxed
         let warnings = try await Task.detached {
             try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-            return try Self.prepareHome(home, data: source, app: app, copyIdentifier: identifier, realHome: realHome, sandboxed: sandboxed)
+            return try Self.prepareHome(home, data: source, app: app, copyIdentifier: identifier, realHome: realHome,
+                                        dataHome: dataHome, sandboxed: sandboxed)
         }.value
-        for warning in warnings { warn(warning) }
+        dataWarnings = warnings
+        for warning in dataWarnings { note(warning) }
+        warnAboutTheCopy()
         dataPrepared = true
+    }
+
+    /// Everything that didn't come along to the copy, as one warning on the card.
+    private func warnAboutTheCopy() {
+        let all = bundleWarnings + dataWarnings
+        guard !all.isEmpty else { return }
+        eventSink.yield(.warning(all.joined(separator: "\n")))
     }
 
     private func clearHome() throws {
@@ -1192,12 +1215,26 @@ extension MacAppSession {
 
     // MARK: The home folder and preferences
 
-    /// Makes the copy's home folder. For `.copy` it clones the app's Application Support folders
-    /// (named after the app and after its bundle identifier) and copies its preferences into the
-    /// copy's own defaults domain; for `.empty` it starts bare. Anything that can't be copied is
-    /// skipped with a warning. Leftover preferences of the copy's domain are always removed first.
+    /// Makes the copy's home folder. For `.copy` it clones the app's data into it (APFS clones: instant,
+    /// no extra space), only ever reading the originals:
+    ///
+    /// - the Application Support folders named after the app and after its bundle identifier (the latter
+    ///   also under the copy's identifier, where an app that names its folder after
+    ///   `Bundle.main.bundleIdentifier` looks);
+    /// - a Core Data or SwiftData store at the top of Application Support (`default.store`, any
+    ///   `*.store` or `*.sqlite` with its `-wal`, `-shm` and external `_SUPPORT` folder) when the app
+    ///   links Core Data or SwiftData (or is sandboxed, so the folder is its own) and its own folders hold
+    ///   no store;
+    /// - the App Group folders its entitlements name (`~/Library/Group Containers/<group>`);
+    /// - its preferences, into the copy's own defaults domain.
+    ///
+    /// A sandboxed app's data comes from its container. For `.empty` it starts bare. Leftover preferences
+    /// of the copy's domain are always removed first. It returns what the card should say didn't come
+    /// along: data that couldn't be copied, folders macOS didn't let OpenTraffic read, App Group data the
+    /// copy may not find, and iCloud data and keychain items (which never follow).
     nonisolated static func prepareHome(_ home: URL, data: DataSource, app: MacApp, copyIdentifier: String,
-                                        realHome: String, sandboxed: Bool) throws -> [String] {
+                                        realHome: String, dataHome: String? = nil, sandboxed: Bool,
+                                        entitlements: [String: Any]? = nil) throws -> [String] {
         let fm = FileManager.default
         let library = home.appendingPathComponent("Library", isDirectory: true)
         let support = library.appendingPathComponent("Application Support", isDirectory: true)
@@ -1207,31 +1244,99 @@ extension MacAppSession {
         removePreferences(copyIdentifier, realHome: realHome)
         guard data == .copy else { return [] }
 
+        let entitlements = entitlements ?? Self.entitlements(of: app.bundle)
+        let sourceHome = dataHome ?? realHome
         var warnings: [String] = []
-        // A sandboxed app keeps its data in its container.
-        var realLibrary = URL(fileURLWithPath: realHome, isDirectory: true).appendingPathComponent("Library", isDirectory: true)
-        if sandboxed, let identifier = app.bundleIdentifier {
-            realLibrary = realLibrary.appendingPathComponent("Containers/\(identifier)/Data/Library", isDirectory: true)
-        }
-        let names = Array(Set([app.name, app.bundleIdentifier].compactMap { $0 }.filter { !$0.isEmpty && !$0.contains("/") })).sorted()
-        for name in names {
-            let source = realLibrary.appendingPathComponent("Application Support", isDirectory: true).appendingPathComponent(name)
-            guard fm.fileExists(atPath: source.path) else { continue }
-            let target = support.appendingPathComponent(name)
+        var unreadable: [URL] = []
+        func clone(_ source: URL, to target: URL) {
             do {
+                try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try? fm.removeItem(at: target)
-                try fm.copyItem(at: source, to: target)
+                // A link is followed: the copy must never write through it into the original.
+                try fm.copyItem(at: source.resolvingSymlinksInPath(), to: target)
             } catch {
-                warnings.append("Couldn't copy \(app.name)'s data (\(source.path)): \(error.localizedDescription). It starts without it.")
+                warnings.append("Couldn't copy \(app.name)'s data (\(displayPath(source.path, home: sourceHome))): \(error.localizedDescription). It starts without it.")
             }
         }
+
+        // A sandboxed app keeps its data in its container.
+        let userLibrary = URL(fileURLWithPath: sourceHome, isDirectory: true).appendingPathComponent("Library", isDirectory: true)
+        var realLibrary = userLibrary
+        var libraryReadable = true
+        if sandboxed, let identifier = app.bundleIdentifier {
+            let container = userLibrary.appendingPathComponent("Containers/\(identifier)", isDirectory: true)
+            realLibrary = container.appendingPathComponent("Data/Library", isDirectory: true)
+            if readability(of: container) == .unreadable {
+                unreadable.append(container)
+                libraryReadable = false
+            }
+        }
+        let realSupport = realLibrary.appendingPathComponent("Application Support", isDirectory: true)
+
+        if libraryReadable {
+            // The app's own folders.
+            let names = Array(Set([app.name, app.bundleIdentifier].compactMap { $0 }.filter { !$0.isEmpty && !$0.contains("/") })).sorted()
+            var ownFolders: [URL] = []
+            for name in names {
+                let source = realSupport.appendingPathComponent(name)
+                switch readability(of: source) {
+                case .missing: continue
+                case .unreadable: unreadable.append(source); continue
+                case .readable: break
+                }
+                clone(source, to: support.appendingPathComponent(name))
+                if name == app.bundleIdentifier, copyIdentifier != name {
+                    clone(source, to: support.appendingPathComponent(copyIdentifier))
+                }
+                ownFolders.append(source)
+            }
+
+            // A Core Data or SwiftData store at the top of Application Support. Outside a sandbox that
+            // folder is every app's, so only for an app that uses one and keeps none in its own folders.
+            if (sandboxed || linksCoreData(app.bundle)), !ownFolders.contains(where: containsStore) {
+                for source in topLevelStores(in: realSupport) {
+                    if readability(of: source) == .unreadable { unreadable.append(source); continue }
+                    clone(source, to: support.appendingPathComponent(source.lastPathComponent))
+                }
+            }
+        }
+
+        // App Group folders, wherever the app is sandboxed or not.
+        let groups = ((entitlements["com.apple.security.application-groups"] as? [String]) ?? [])
+            .filter { !$0.isEmpty && !$0.contains("/") && $0 != "." && $0 != ".." }
+        var copiedGroups: [String] = []
+        for group in groups.sorted() {
+            let source = userLibrary.appendingPathComponent("Group Containers/\(group)", isDirectory: true)
+            switch readability(of: source) {
+            case .missing: continue
+            case .unreadable: unreadable.append(source); continue
+            case .readable: break
+            }
+            clone(source, to: library.appendingPathComponent("Group Containers/\(group)", isDirectory: true))
+            copiedGroups.append(group)
+        }
+        if !copiedGroups.isEmpty {
+            // FileManager.containerURL(forSecurityApplicationGroupIdentifier:) gives the copy the folder in
+            // the user's real Library, whatever its home folder is (measured on macOS 27), and the copy,
+            // signed ad hoc, has no App Group entitlement of its own.
+            warnings.append("\(app.name)'s App Group data (\(copiedGroups.joined(separator: ", "))) is copied, but macOS shows apps their App Group folder in your own Library, so the copy may start without it. If macOS asks whether \(app.name) may access data from other apps, choose Don't Allow: your own data then stays untouched.")
+        }
+
+        // Preferences.
         if let identifier = app.bundleIdentifier {
             var values: [String: Any] = [:]
             if sandboxed {
                 let file = realLibrary.appendingPathComponent("Preferences/\(identifier).plist")
-                if let data = try? Data(contentsOf: file),
-                   let dictionary = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] {
-                    values = dictionary
+                if libraryReadable {
+                    switch readability(of: file) {
+                    case .readable:
+                        if let data = try? Data(contentsOf: file),
+                           let dictionary = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] {
+                            values = dictionary
+                        }
+                    case .unreadable: unreadable.append(file)
+                    case .missing: break
+                    }
                 }
             } else if let keys = CFPreferencesCopyKeyList(identifier as CFString, kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? [String], !keys.isEmpty {
                 values = CFPreferencesCopyMultiple(keys as CFArray, identifier as CFString, kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? [String: Any] ?? [:]
@@ -1243,7 +1348,80 @@ extension MacAppSession {
                 }
             }
         }
+
+        if !unreadable.isEmpty {
+            let paths = unreadable.map { displayPath($0.path, home: sourceHome) }.joined(separator: ", ")
+            warnings.append("macOS didn't let OpenTraffic read \(paths), so \(app.name) starts without that data. Allow OpenTraffic when macOS asks to access data from other apps, or turn on Full Disk Access for OpenTraffic in System Settings > Privacy & Security, then use Reset Data.")
+        }
+
+        // What never follows a copy.
+        let iCloud = entitlements.keys.contains { $0.hasPrefix("com.apple.developer.icloud") || $0.hasPrefix("com.apple.developer.ubiquity") }
+        let keychain = entitlements.keys.contains { $0 == "keychain-access-groups" || $0 == "com.apple.developer.keychain-access-groups" }
+        if iCloud || keychain {
+            let what = [iCloud ? "iCloud data" : nil, keychain ? "keychain items" : nil].compactMap { $0 }.joined(separator: " and ")
+            warnings.append("The copy starts without \(app.name)'s \(what): they stay with your own \(app.name) and can't follow a copy.")
+        }
         return warnings
+    }
+
+    enum Readability: Equatable { case missing, readable, unreadable }
+
+    /// Whether OpenTraffic may read a file or folder: macOS's App Data protection (macOS 14 and later)
+    /// refuses other apps' containers until the user allows it.
+    nonisolated static func readability(of url: URL) -> Readability {
+        func failure() -> Readability { errno == EPERM || errno == EACCES ? .unreadable : .missing }
+        var info = stat()
+        guard stat(url.path, &info) == 0 else { return failure() }
+        if info.st_mode & S_IFMT == S_IFDIR {
+            guard let folder = opendir(url.path) else { return failure() }
+            closedir(folder)
+        } else {
+            let descriptor = open(url.path, O_RDONLY | O_CLOEXEC)
+            guard descriptor >= 0 else { return failure() }
+            close(descriptor)
+        }
+        return .readable
+    }
+
+    /// Whether the app's executables (with Xcode's `*.debug.dylib`) link Core Data or SwiftData.
+    nonisolated static func linksCoreData(_ bundle: URL) -> Bool {
+        let folder = bundle.appendingPathComponent("Contents/MacOS", isDirectory: true)
+        let names = ["/CoreData.framework/", "/SwiftData.framework/"].map { Data($0.utf8) }
+        for file in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [] {
+            guard let data = try? Data(contentsOf: file, options: .alwaysMapped) else { continue }
+            if names.contains(where: { data.range(of: $0) != nil }) { return true }
+        }
+        return false
+    }
+
+    nonisolated static let storeExtensions: Set<String> = ["store", "sqlite"]
+
+    /// Whether a folder holds a Core Data or SwiftData store anywhere in it.
+    nonisolated static func containsStore(_ folder: URL) -> Bool {
+        guard let items = FileManager.default.enumerator(at: folder.resolvingSymlinksInPath(), includingPropertiesForKeys: nil) else { return false }
+        for case let item as URL in items where storeExtensions.contains(item.pathExtension.lowercased()) { return true }
+        return false
+    }
+
+    /// The stores directly in `folder` with the files that belong to them: `-wal`, `-shm` and the
+    /// `.<name>_SUPPORT` folder of external attributes.
+    nonisolated static func topLevelStores(in folder: URL) -> [URL] {
+        guard let items = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return [] }
+        let present = Set(items)
+        var stores: [URL] = []
+        for item in items.sorted() where storeExtensions.contains((item as NSString).pathExtension.lowercased()) {
+            let base = (item as NSString).deletingPathExtension
+            for part in [item, item + "-wal", item + "-shm", "." + base + "_SUPPORT"] where present.contains(part) {
+                stores.append(folder.appendingPathComponent(part))
+            }
+        }
+        return stores
+    }
+
+    /// A path as the card shows it: `~/Library/…` for the user's own.
+    nonisolated static func displayPath(_ path: String, home: String) -> String {
+        let prefix = home.hasSuffix("/") ? home : home + "/"
+        return path.hasPrefix(prefix) ? "~/" + path.dropFirst(prefix.count) : path
     }
 
     /// Removes every preference of the copy's defaults domain and its file.

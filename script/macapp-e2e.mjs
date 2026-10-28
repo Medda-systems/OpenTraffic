@@ -8,7 +8,9 @@
 //
 // It builds a scratch copy of Examples/macapp-orbit (so the rebuild step can edit its sources), launches
 // the OpenTraffic copy with its own home and API socket, shares the fixture with the copy's own command,
-// then runs the steps below at 1440 px (and the phone view at 390 px). Every step saves a screenshot in
+// then runs the steps below at 1440 px (and the phone view at 390 px). Before sharing, the scratch Orbit runs
+// once on its own, with a home in the work folder, to save orders of its own; the copy reads its data from
+// there (OPENTRAFFIC_TEST_DATA_HOME), and viewers must see them while that file stays as it was. Every step saves a screenshot in
 // <work>/shots; the run stops at the first failure, names the step, and exits 1. At the end the share is
 // stopped (which removes its OpenTunnel route) and the copy quits. --card also opens the copy's window
 // and presses Allow and Take Back on the share's card through Accessibility (it shows on the screen).
@@ -50,6 +52,10 @@ const HOME = path.join(WORK, "home");
 const SOCKET = path.join(WORK, "ot.sock");
 const FIXTURE = path.join(WORK, "orbit");
 const FIXTURE_APP = path.join(FIXTURE, "dist", "Orbit.app");
+// The host's home as far as Orbit's data goes: the scratch Orbit saves its orders here, never in ~/Library.
+const ORBIT_HOME = path.join(WORK, "orbit-home");
+const ORBIT_FILE = path.join(ORBIT_HOME, "Library", "Application Support", "se.medda.orbit", "orders.json");
+const HOST_NOTE = "Saved by the host " + Date.now().toString(36);
 const CLI = path.join(APP, "Contents", "MacOS", "opentraffic-cli");
 const APP_BINARY = path.join(APP, "Contents", "MacOS", "OpenTraffic");
 
@@ -120,8 +126,8 @@ const assert = (cond, message) => { if (!cond) throw new Error(message); };
 
 // ---------------------------------------------------------------- the OpenTraffic copy and its command
 
-function run(cmd, args, { cwd = root, timeout = 600_000, extraEnv = {} } = {}) {
-  const r = spawnSync(cmd, args, { cwd, env: { ...env, ...extraEnv }, encoding: "utf8", timeout, maxBuffer: 64 << 20 });
+function run(cmd, args, { cwd = root, timeout = 600_000, extraEnv = {}, input } = {}) {
+  const r = spawnSync(cmd, args, { cwd, env: { ...env, ...extraEnv }, encoding: "utf8", timeout, maxBuffer: 64 << 20, input });
   if (r.error) throw new Error(`${path.basename(cmd)}: ${r.error.message}`);
   return r;
 }
@@ -332,6 +338,21 @@ await step("build the fixture", async () => {
   assert(r.status === 0 && fs.existsSync(FIXTURE_APP), "package.sh failed: " + (r.stderr || r.stdout).slice(-800));
 }, { always: true });
 
+let hostOrders = null; // the bytes Orbit saved on its own
+await step("Orbit saves its orders on its own", async () => {
+  // Orbit changes its saved orders without opening a window (--set-note), with its home in the work folder.
+  fs.rmSync(ORBIT_HOME, { recursive: true, force: true });
+  fs.mkdirSync(ORBIT_HOME, { recursive: true });
+  const r = run(path.join(FIXTURE_APP, "Contents", "MacOS", "Orbit"), ["--set-note", "1", HOST_NOTE],
+    { cwd: ORBIT_HOME, extraEnv: { HOME: ORBIT_HOME, CFFIXED_USER_HOME: ORBIT_HOME }, timeout: 60_000 });
+  assert(r.status === 0, "Orbit --set-note exited " + r.status + ": " + (r.stderr || r.stdout));
+  assert(fs.existsSync(ORBIT_FILE), "Orbit didn't save " + ORBIT_FILE + ": " + r.stdout);
+  hostOrders = fs.readFileSync(ORBIT_FILE);
+  const saved = JSON.parse(hostOrders);
+  assert(saved.orders.length === 30 && saved.orders[0].note === HOST_NOTE && saved.selectedID === 1, "saved: " + JSON.stringify(saved).slice(0, 300));
+  return `${saved.orders.length} orders, order #1001's note "${HOST_NOTE}"`;
+}, { always: true });
+
 await step("build the OpenTraffic copy", async () => {
   if (!BUILD) {
     assert(fs.existsSync(APP_BINARY), `no OpenTraffic copy at ${APP}; run with --build (see docs/macapp-e2e.md)`);
@@ -344,6 +365,36 @@ await step("build the OpenTraffic copy", async () => {
   assert(r.status === 0, "build_and_run.sh failed: " + (r.stderr || r.stdout).slice(-1500));
 }, { always: true });
 
+// The copy's preferences aren't isolated by its home: sharing remembers the scratch Orbit
+// (rememberedMacApps) and removing the share changes selectedTunnelID. Put both back as they were once
+// the copy has quit.
+// An array (json) or a string (raw) preference of the copy, or undefined.
+const readPreference = (key, format) => {
+  const r = run("/usr/bin/defaults", ["export", BUNDLE_ID, "-"]);
+  if (r.status !== 0) return undefined;
+  const x = run("/usr/bin/plutil", ["-extract", key, format, "-o", "-", "-"], { input: r.stdout });
+  if (x.status !== 0) return undefined;
+  return format === "json" ? JSON.parse(x.stdout) : x.stdout.replace(/\n$/, "");
+};
+const preferencesBefore = { rememberedMacApps: readPreference("rememberedMacApps", "json"), selectedTunnelID: readPreference("selectedTunnelID", "raw") };
+cleanups.push(async () => {
+  if (KEEP) return;
+  const put = (key, args) => {
+    const r = run("/usr/bin/defaults", args === null ? ["delete", BUNDLE_ID, key] : ["write", BUNDLE_ID, key, ...args]);
+    if (r.status !== 0) console.log(`cleanup: couldn't put back ${key}: ${r.stderr}`);
+  };
+  // The paths this run added (in the work folder, as given or resolved: /tmp is /private/tmp).
+  const work = [WORK, fs.realpathSync(WORK)].map((w) => w + "/");
+  const before = preferencesBefore.rememberedMacApps;
+  const remembered = readPreference("rememberedMacApps", "json");
+  if (remembered) {
+    const kept = remembered.filter((p) => (before || []).includes(p) || !work.some((w) => p.startsWith(w)));
+    if (kept.length !== remembered.length) put("rememberedMacApps", !before && !kept.length ? null : ["-array", ...kept]);
+  }
+  const tunnel = readPreference("selectedTunnelID", "raw");
+  if (tunnel !== preferencesBefore.selectedTunnelID) put("selectedTunnelID", preferencesBefore.selectedTunnelID === undefined ? null : ["-string", preferencesBefore.selectedTunnelID]);
+});
+
 await step("launch the copy", async () => {
   const id = run("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleIdentifier", path.join(APP, "Contents", "Info.plist")]).stdout.trim();
   assert(id && id !== "se.medda.opentraffic", `${APP} is OpenTraffic itself (${id}); use a copy with its own bundle identifier`);
@@ -351,6 +402,7 @@ await step("launch the copy", async () => {
   fs.mkdirSync(HOME, { recursive: true });
   fs.rmSync(SOCKET, { force: true });
   const r = run("/usr/bin/open", ["-j", "-n", "-g", "-a", APP, "--env", `CFFIXED_USER_HOME=${HOME}`, "--env", `OPENTRAFFIC_SOCKET=${SOCKET}`,
+    "--env", `OPENTRAFFIC_TEST_DATA_HOME=${ORBIT_HOME}`,
     "--args", "--background", "-migratedLegacyDefaults", "<true/>", "-hasCompletedOnboarding", "<true/>", "-apiEnabled", "<true/>"]);
   assert(r.status === 0, "open failed: " + r.stderr);
   launched = true;
@@ -368,6 +420,13 @@ await step("launch the copy", async () => {
   return `pid ${pid}`;
 }, { always: true });
 
+// Stopping removes a share's OpenTunnel route; removing it drops its settings and comments.
+function removeShare(name) {
+  try { cli(["stop", name]); } catch (e) { console.log("cleanup: " + e.message); }
+  try { cli(["remove", name, "--yes"]); } catch (e) { console.log("cleanup: " + e.message); }
+}
+let mainShareRemoved = false;
+
 let URL_ = null;
 await step("share the fixture", async () => {
   const help = cli(["help", "share"]);
@@ -377,9 +436,8 @@ await step("share the fixture", async () => {
   assert(URL_, "no public URL in: " + out.trim());
   cleanups.push(async () => {
     if (KEEP) return console.log(`(--keep) ${SHARE} stays live at ${URL_}`);
-    // Stopping removes the share's OpenTunnel route; removing it drops its settings and comments.
-    try { cli(["stop", SHARE]); } catch (e) { console.log("cleanup: " + e.message); }
-    try { cli(["remove", SHARE, "--yes"]); } catch (e) { console.log("cleanup: " + e.message); }
+    if (mainShareRemoved) return;
+    removeShare(SHARE);
   });
   const status = await until(() => { const s = cli(["status", SHARE], { json: true }); return s.macApp?.state === "running" && s.collaboration && s; }, "the Mac app to run with collaboration on", 60_000);
   await until(async () => (await fetch(URL_)).status === 200, "the public URL to answer 200", 60_000, 1000);
@@ -405,6 +463,28 @@ await step("page loads with the collab toolbar and the window", async () => {
     const d = c.getContext('2d').getImageData(Math.floor(c.width / 2), Math.floor(c.height / 2), 1, 1).data; return d[3] === 255; })()`, "the window's pixels", 15_000);
   assert(await page.eval(ROWS) === 30, "orders listed: " + await page.eval(ROWS));
   return `${await page.eval(`${NODES()}.length`)} elements`;
+});
+
+// The copy's own home in its session folder (in the OpenTraffic copy's home), and Orbit's file there.
+const copyOrdersFile = () => {
+  const sessions = path.join(HOME, "Library", "Application Support", "OpenTraffic", "Mac App Sessions");
+  const files = (fs.existsSync(sessions) ? fs.readdirSync(sessions) : [])
+    .map((s) => path.join(sessions, s, "home", "Library", "Application Support", "se.medda.orbit", "orders.json")).filter((f) => fs.existsSync(f));
+  assert(files.length === 1, `${files.length} copies of Orbit's orders in ${sessions}`);
+  return files[0];
+};
+const NOTE_FIELD = (text) => `${NODES()}.some((el) => el.dataset.role === 'AXTextField' && el.value === ${JSON.stringify(text)})`;
+
+await step("viewers see the host's saved orders", async () => {
+  // Order #1001 is selected (as saved), its note the one Orbit saved on its own, not the sample's Gift wrap.
+  await page.waitFor(`${HAS_TEXT("Order #1001 · Open")} && ${NOTE_FIELD(HOST_NOTE)}`, `order #1001 with the note "${HOST_NOTE}"`, 15_000);
+  assert(!(await page.eval(NOTE_FIELD("Gift wrap"))), "the sample's note shows too");
+  const copied = copyOrdersFile();
+  assert(Buffer.compare(fs.readFileSync(copied), hostOrders) === 0, "the copy's orders.json isn't the host's");
+  const status = cli(["status", SHARE], { json: true });
+  // Nothing of Orbit's stayed behind (another display's warning may show, but none about its data).
+  assert(status.macApp?.data === "copy" && !/data|App Group|iCloud|keychain|read /.test(status.macApp.warning || ""), "status: " + JSON.stringify(status.macApp));
+  return "copied to " + path.relative(WORK, copied);
 });
 
 const COMMENT = "E2E check: is this the right label? " + Date.now().toString(36);
@@ -503,6 +583,14 @@ await step("typing a customer and Add Order adds the order", async () => {
   await sleep(400); // the app's own field has it too before the button is pressed
   await page.click(await centerOf(FIND("AXButton", "Add Order"), "Add Order"));
   await page.waitFor(`${ROWS} === 31 && ${HAS_TEXT(CUSTOMER)}`, "a 31st order for " + CUSTOMER, 10_000);
+});
+
+await step("the copy saves the change and the host's file stays as it was", async () => {
+  const copied = copyOrdersFile();
+  const saved = await until(() => { const s = JSON.parse(fs.readFileSync(copied, "utf8")); return s.orders.some((o) => o.customer === CUSTOMER) && s; },
+    "the copy's orders.json to have " + CUSTOMER, 10_000, 200);
+  assert(Buffer.compare(fs.readFileSync(ORBIT_FILE), hostOrders) === 0, "the host's orders.json changed");
+  return `the copy saved ${saved.orders.length} orders; the host's file has ${JSON.parse(hostOrders).orders.length}`;
 });
 
 await step("scrolling the long list reaches its end", async () => {
@@ -946,6 +1034,29 @@ await step("WebKit", async () => {
 await step("no page errors", async () => {
   const errors = page.errors.filter((e) => !/WebSocket|ERR_|net::/.test(e));
   assert(!errors.length, errors.slice(0, 5).join(" | "));
+});
+
+await step("the host's saved orders are untouched", async () => {
+  assert(Buffer.compare(fs.readFileSync(ORBIT_FILE), hostOrders) === 0, "the host's orders.json changed");
+  assert(fs.readdirSync(path.dirname(ORBIT_FILE)).join(",") === "orders.json", "other files next to the host's orders: " + fs.readdirSync(path.dirname(ORBIT_FILE)));
+});
+
+const EMPTY_SHARE = SHARE + " Empty";
+await step("Empty Data starts with the sample orders", async () => {
+  // The same app shared again, with --empty-data: a first launch, whatever the host saved.
+  removeShare(SHARE);
+  mainShareRemoved = true;
+  const out = cli(["share", FIXTURE_APP, "--via", VIA, "--name", EMPTY_SHARE, "--empty-data"]);
+  const url = (out.match(/https:\/\/\S+/) || [])[0];
+  assert(url, "no public URL in: " + out.trim());
+  cleanups.push(async () => { if (!KEEP) removeShare(EMPTY_SHARE); });
+  await until(() => { const s = cli(["status", EMPTY_SHARE], { json: true }); return s.macApp?.state === "running" && s.macApp.data === "empty"; }, "the empty share to run", 60_000);
+  await until(async () => (await fetch(url)).status === 200, "the public URL to answer 200", 60_000, 1000);
+  await page.cdp("Page.navigate", { url });
+  await page.waitFor(`document.getElementById('otm-dot')?.dataset.state === 'live' && ${ROWS} === 30 && ${NOTE_FIELD("Gift wrap")}`, "30 orders and #1001's Gift wrap note", 30_000);
+  assert(!(await page.eval(NOTE_FIELD(HOST_NOTE))), "the host's note shows in an empty share");
+  assert(Buffer.compare(fs.readFileSync(ORBIT_FILE), hostOrders) === 0, "the host's orders.json changed");
+  return url;
 });
 
 await finish(0);

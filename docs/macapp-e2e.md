@@ -51,9 +51,12 @@ opens on another Space where Accessibility can't read it, and those steps are sk
 The work folder (by default a new `ot-e2e-<time>` folder in the temporary folder) holds the fixture's
 scratch copy, the copy's home and socket, Chrome's profile (deleted at the end), `shots/` with one
 screenshot per step (plus the open sheet, alert and popover, the dark app, the 1100 px window and the
-phone view), and `summary.json` with every step's result and duration. At the end the share is stopped,
-which removes its OpenTunnel route, and removed with its comments, and the copy quits (SIGTERM to the
-process the script started).
+phone view), `orbit-home/` (the home Orbit saves its own orders in, which the copy reads its data from
+through `OPENTRAFFIC_TEST_DATA_HOME`: the run never reads or writes Orbit's data in your Library), and
+`summary.json` with every step's result and duration. At the end the shares are stopped, which removes
+their OpenTunnel routes, and removed with their comments, and the copy quits (SIGTERM to the process the
+script started). The copy's preferences aren't isolated by its home: the script then puts back what the
+run changed in them (the scratch Orbit it remembered under `rememberedMacApps`, and `selectedTunnelID`).
 
 ## The steps
 
@@ -61,10 +64,12 @@ process the script started).
 | --- | --- |
 | display is healthy | `CGGetActiveDisplayList` answers in under a second |
 | build the fixture | a scratch copy of `Examples/macapp-orbit` builds (`package.sh`) |
+| Orbit saves its orders on its own | the scratch Orbit, run on its own with its home in the work folder, changes order #1001's note (`--set-note`, no window) and saves `Application Support/se.medda.orbit/orders.json` there |
 | build the OpenTraffic copy | `--build` only; otherwise the existing copy is used |
 | launch the copy | the copy starts with its own home and API socket and answers |
 | share the fixture | `opentraffic share <Orbit.app> --via opentunnel --name … --collab` goes live; status says the app runs with collaboration on; the public URL answers |
 | page loads with the collab toolbar and the window | at 1440 px the viewer connects, shows Orbit's window (pixels and 60+ elements, 30 orders), the bar names Orbit and the collaboration overlay and its toolbar are on the page |
+| viewers see the host's saved orders | shared with data, the page shows order #1001 selected with the note Orbit saved (not the sample's Gift wrap); the copy's `orders.json` in its session home is the host's, and the status has no warning about data |
 | the picker selects Add Order with a label naming it | with the comment tool, the element under the pointer is Add Order's; a comment is posted on it |
 | the pinned comment is in opentraffic comments with the element's label | `opentraffic comments` has it, labelled Button “Add Order” |
 | dark appearance | `opentraffic set --appearance dark` restarts the app dark (dark pixels); back to the viewer's choice it is light again. Skipped when the Mac uses Light (an app can only be dark while the Mac is) |
@@ -73,6 +78,7 @@ process the script started).
 | the stepper changes the quantity | the stepper's upper half adds one |
 | the segmented filter filters the list | Shipped lists the 10 shipped orders, All the 30 again |
 | typing a customer and Add Order adds the order | a click in New customer, typing, Add Order: a 31st order with that name |
+| the copy saves the change and the host's file stays as it was | the order added through the page is in the copy's `orders.json`; the host's file is byte for byte as Orbit saved it |
 | scrolling the long list reaches its end | wheel events over the list bring the last order into view |
 | a sheet opens and closes | Edit Address… opens the sheet as its own surface with its own pixels; Cancel closes it |
 | an alert opens and is dismissed | Delete Order's alert shows; Cancel closes it and the order stays |
@@ -95,6 +101,8 @@ process the script started).
 | fixing the build clears the warning and shows the new version | the compile error is removed: the page shows `Add Fixed Order` without reloading, the banner goes, the status is `idle` again, `watch` reports `build.started` then `build.succeeded`, and (with `--card`) the card's warning goes |
 | WebKit | skipped: there is no headless WebKit without npm packages, and Safari's WebDriver drives the user's own Safari |
 | no page errors | no JavaScript errors on the page |
+| the host's saved orders are untouched | after everything above (restarts, Reset Data, rebuilds), the host's `orders.json` is unchanged and alone in its folder |
+| Empty Data starts with the sample orders | the share is stopped and Orbit shared again with `--empty-data`: status says `empty`, the page shows the 30 sample orders and Gift wrap, not the host's note |
 
 ## Results
 
@@ -111,3 +119,7 @@ card's Allow and Take Back 8 s (opening the window and reading it through Access
 `--card` (the broken build reported in 4 s, the fix shown in 13 s), and in 177 s with `--card` under a
 load average of 40 to 48 from other work (the failure in 5.5 s, Build Again's second failure 10 s, the
 fix shown in 22 s).
+
+28 October 2026, the same Mac, with Orbit saving its orders: all steps passed in 65 to 84 s without
+`--card`; the copy showed the host's saved note, saved the page's new order in its own home, and the
+host's file stayed byte for byte the same; the Empty Data share started in 4 to 5 s.

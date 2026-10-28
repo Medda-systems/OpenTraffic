@@ -125,6 +125,109 @@ struct MacAppSessionPieceTests {
         await removeDomains([identifier, copyIdentifier], waitingForCfprefsd: true)
     }
 
+    // The data sources of a "with data" share, each with temporary folders as the real home. The
+    // identifier has no preferences, so the user's defaults are never touched.
+
+    @Test func theIdentifiersFolderAlsoGoesWhereTheCopyLooksForIt() throws {
+        let scratch = try Scratch()
+        let world = try DataWorld(scratch)
+        try world.write("Library/Application Support/\(world.identifier)/orders.json", "orders")
+        let warnings = try world.prepare()
+        #expect(warnings.isEmpty)
+        #expect(try world.copied("Library/Application Support/\(world.identifier)/orders.json") == "orders")
+        #expect(try world.copied("Library/Application Support/\(world.identifier).opentraffic/orders.json") == "orders")
+    }
+
+    @Test func aStoreAtTheTopOfApplicationSupportIsCopiedForAnAppThatUsesSwiftData() throws {
+        let scratch = try Scratch()
+        let world = try DataWorld(scratch, linking: "/System/Library/Frameworks/SwiftData.framework/Versions/A/SwiftData")
+        for file in ["default.store", "default.store-wal", "default.store-shm", ".default_SUPPORT/_EXTERNAL_DATA/blob", "Notes.sqlite", "notes.txt", "Other App/x.store"] {
+            try world.write("Library/Application Support/\(file)", file)
+        }
+        #expect(MacAppSession.linksCoreData(world.app.bundle))
+        #expect(try world.prepare().isEmpty)
+        for file in ["default.store", "default.store-wal", "default.store-shm", ".default_SUPPORT/_EXTERNAL_DATA/blob", "Notes.sqlite"] {
+            #expect(try world.copied("Library/Application Support/\(file)") == file)
+        }
+        // Only the stores: not other files or other apps' folders.
+        #expect(!world.exists("Library/Application Support/notes.txt"))
+        #expect(!world.exists("Library/Application Support/Other App"))
+
+        // Its own folder holds its store: the top level isn't its.
+        try world.write("Library/Application Support/Stub/Model.sqlite", "own")
+        _ = try world.prepare(fresh: true)
+        #expect(try world.copied("Library/Application Support/Stub/Model.sqlite") == "own")
+        #expect(!world.exists("Library/Application Support/default.store"))
+    }
+
+    @Test func storesAtTheTopAreLeftAloneForAnAppWithoutCoreData() throws {
+        let scratch = try Scratch()
+        let world = try DataWorld(scratch)
+        try world.write("Library/Application Support/default.store", "someone else's")
+        #expect(!MacAppSession.linksCoreData(world.app.bundle))
+        #expect(try world.prepare().isEmpty)
+        #expect(!world.exists("Library/Application Support/default.store"))
+        // A sandboxed app's Application Support is its own.
+        try world.write("Library/Containers/\(world.identifier)/Data/Library/Application Support/default.store", "its own")
+        _ = try world.prepare(fresh: true, sandboxed: true)
+        #expect(try world.copied("Library/Application Support/default.store") == "its own")
+    }
+
+    @Test func appGroupFoldersAreCopiedWithAWarningThatTheCopyMayNotFindThem() throws {
+        let scratch = try Scratch()
+        let world = try DataWorld(scratch)
+        try world.write("Library/Group Containers/ABCDE12345.group.stub/Library/state.json", "shared")
+        try world.write("Library/Group Containers/other.group/secret", "not its")
+        let warnings = try world.prepare(entitlements: ["com.apple.security.application-groups": ["ABCDE12345.group.stub", "ABCDE12345.missing", "../escape"]])
+        #expect(try world.copied("Library/Group Containers/ABCDE12345.group.stub/Library/state.json") == "shared")
+        #expect(!world.exists("Library/Group Containers/other.group"))
+        #expect(!world.exists("Library/Group Containers/ABCDE12345.missing"))
+        #expect(warnings.count == 1)
+        #expect(warnings[0].contains("App Group data (ABCDE12345.group.stub)") && warnings[0].contains("Don't Allow"))
+        // The original is only read.
+        #expect(try String(contentsOf: world.real.appendingPathComponent("Library/Group Containers/ABCDE12345.group.stub/Library/state.json"), encoding: .utf8) == "shared")
+    }
+
+    @Test func aFolderMacOSWontLetOpenTrafficReadIsNamedInTheWarning() throws {
+        let scratch = try Scratch()
+        let world = try DataWorld(scratch)
+        try world.write("Library/Application Support/Stub/orders.json", "orders")
+        try world.write("Library/Group Containers/ABCDE12345.group.stub/state", "shared")
+        let locked = [world.real.appendingPathComponent("Library/Application Support/Stub"),
+                      world.real.appendingPathComponent("Library/Group Containers/ABCDE12345.group.stub")]
+        for folder in locked { try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: folder.path) }
+        defer { for folder in locked { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path) } }
+        #expect(MacAppSession.readability(of: locked[0]) == .unreadable)
+        #expect(MacAppSession.readability(of: world.real.appendingPathComponent("nothing")) == .missing)
+
+        let warnings = try world.prepare(entitlements: ["com.apple.security.application-groups": ["ABCDE12345.group.stub"]])
+        #expect(warnings.count == 1)
+        let warning = try #require(warnings.first)
+        #expect(warning.contains("macOS didn't let OpenTraffic read ~/Library/Application Support/Stub, ~/Library/Group Containers/ABCDE12345.group.stub"))
+        #expect(warning.contains("Full Disk Access"))
+        #expect(!world.exists("Library/Application Support/Stub"))
+
+        // A sandboxed app's container it can't read: named once, nothing in it tried.
+        let container = world.real.appendingPathComponent("Library/Containers/\(world.identifier)")
+        try world.write("Library/Containers/\(world.identifier)/Data/Library/Application Support/Stub/orders.json", "orders")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: container.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: container.path) }
+        let sandboxed = try world.prepare(fresh: true, sandboxed: true)
+        #expect(sandboxed.count == 1 && sandboxed[0].contains("read ~/Library/Containers/\(world.identifier), so Stub starts without that data"))
+    }
+
+    @Test func iCloudAndKeychainDataAreNamedAsStayingBehind() throws {
+        let scratch = try Scratch()
+        let world = try DataWorld(scratch)
+        let both = try world.prepare(entitlements: ["com.apple.developer.icloud-services": ["CloudKit"], "keychain-access-groups": ["ABCDE12345.*"]])
+        #expect(both == ["The copy starts without Stub's iCloud data and keychain items: they stay with your own Stub and can't follow a copy."])
+        let kvs = try world.prepare(fresh: true, entitlements: ["com.apple.developer.ubiquity-kvstore-identifier": "ABCDE12345.se.medda.stub"])
+        #expect(kvs.count == 1 && kvs[0].contains("without Stub's iCloud data:"))
+        #expect(try world.prepare(fresh: true, entitlements: ["com.apple.security.network.client": true]).isEmpty)
+        // Empty data starts without everything anyway.
+        #expect(try world.prepare(fresh: true, data: .empty, entitlements: ["keychain-access-groups": ["ABCDE12345.*"]]).isEmpty)
+    }
+
     @Test func theLogFollowsAFileAnotherProcessAppendsTo() async throws {
         let scratch = try Scratch()
         let file = scratch.url.appendingPathComponent("app.log")
@@ -357,9 +460,12 @@ private func startOrbitSession(restartsAutomatically: Bool = true) async throws 
     try OrbitFixture.buildIfNeeded()
     await MacAppSession.removeLeftovers(in: fixtureSessions)
     let app = MacApp(name: "Orbit", bundle: OrbitFixture.app, bundleIdentifier: OrbitFixture.bundleIdentifier, projectDirectory: OrbitFixture.folder, isRunning: false)
+    // With data, read from a home with no saved orders, so it starts with the 30 sample orders even
+    // when the real Orbit saved some (Application Support/se.medda.orbit).
+    let dataHome = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-data-\(UUID().uuidString)").path
     let session = MacAppSession(options: .init(app: app, data: .copy, assets: sessionAssets,
                                                sessionDirectory: fixtureSessions.appendingPathComponent(UUID().uuidString, isDirectory: true),
-                                               restartsAutomatically: restartsAutomatically))
+                                               restartsAutomatically: restartsAutomatically, dataHomeDirectory: dataHome))
     let started = ContinuousClock.now
     try await session.start()
     print("MacAppSession fixture: started in \(ContinuousClock.now - started)")
@@ -485,6 +591,44 @@ private final class Scratch {
 }
 
 /// A minimal .app (its executable is a copy of /usr/bin/true), signed ad hoc with `entitlements`.
+/// A real home of temporary folders and a stub app ("Stub", an identifier without preferences) whose
+/// data `prepareHome` copies into a session home.
+private struct DataWorld {
+    let real: URL
+    let home: URL
+    let app: MacApp
+    let identifier = "se.medda.opentraffic.datatest"
+
+    init(_ scratch: Scratch, linking framework: String? = nil) throws {
+        real = scratch.url.appendingPathComponent("real-home", isDirectory: true)
+        home = scratch.url.appendingPathComponent("session/home", isDirectory: true)
+        let bundle = scratch.url.appendingPathComponent("Stub.app")
+        let macOS = bundle.appendingPathComponent("Contents/MacOS")
+        try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
+        // An executable's load commands name the frameworks it links.
+        try Data(("\u{CF}\u{FA}\u{ED}\u{FE}" + (framework ?? "/usr/lib/libSystem.B.dylib")).utf8).write(to: macOS.appendingPathComponent("Stub"))
+        app = MacApp(name: "Stub", bundle: bundle, bundleIdentifier: identifier, projectDirectory: nil, isRunning: false)
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+    }
+
+    func write(_ path: String, _ text: String) throws {
+        let file = real.appendingPathComponent(path)
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: file)
+    }
+
+    func prepare(fresh: Bool = false, data: MacAppSession.DataSource = .copy, sandboxed: Bool = false,
+                 entitlements: [String: Any] = [:]) throws -> [String] {
+        if fresh { try? FileManager.default.removeItem(at: home) }
+        return try MacAppSession.prepareHome(home, data: data, app: app, copyIdentifier: identifier + ".opentraffic",
+                                             realHome: ElectronSandbox.realHomeDirectory, dataHome: real.path,
+                                             sandboxed: sandboxed, entitlements: entitlements)
+    }
+
+    func copied(_ path: String) throws -> String { try String(contentsOf: home.appendingPathComponent(path), encoding: .utf8) }
+    func exists(_ path: String) -> Bool { FileManager.default.fileExists(atPath: home.appendingPathComponent(path).path) }
+}
+
 private func makeStubApp(in folder: URL, entitlements: [String: Any]) throws -> URL {
     let app = folder.appendingPathComponent("Stub.app")
     let macOS = app.appendingPathComponent("Contents/MacOS")

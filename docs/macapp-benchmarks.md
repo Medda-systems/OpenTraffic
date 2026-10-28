@@ -97,10 +97,11 @@ defaults find). Run it with an isolated OpenTraffic copy, never the one you use 
 
    ```sh
    export OPENTRAFFIC_SOCKET=/tmp/ot-bench/ot.sock
-   /Users/Shared/OpenTraffic-e2e/OpenTraffic.app/Contents/MacOS/opentraffic-cli share Examples/macapp-orbit/dist/Orbit.app --via opentunnel --name Orbit
+   /Users/Shared/OpenTraffic-e2e/OpenTraffic.app/Contents/MacOS/opentraffic-cli share Examples/macapp-orbit/dist/Orbit.app --via opentunnel --empty-data --name Orbit
    ```
 
-   It prints the public URL (`https://….opentunnel.xyz`). `--via quick` (trycloudflare.com) works the
+   `--empty-data` starts it with the 30 sample orders and order 1 selected, whatever Orbit saved in
+   your Application Support. It prints the public URL (`https://….opentunnel.xyz`). `--via quick` (trycloudflare.com) works the
    same where that service isn't blocked.
 4. Find the local addresses. The share's proxy and the mirror server both listen on loopback ports
    of the OpenTraffic copy; the proxy also serves `/__opentraffic/collab.js`, the mirror server

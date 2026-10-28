@@ -64,7 +64,14 @@ The share's Live Collaboration card says when a permission is missing, with a **
 Each share runs its own copy of the app:
 
 - The `.app` is copied into a folder of OpenTraffic's, with its own bundle identifier (yours with `.opentraffic` added), and signed again ad hoc. Its preferences, saved windows, and single-instance checks are its own, so it runs next to your copy.
-- Its home folder is in that folder too. By default it starts with a copy of the app's data: its Application Support folder (named after the app or its bundle identifier) and its preferences. A sandboxed app's data is read from its container. **Share with Empty Data** starts it as on a first launch.
+- Its home folder is in that folder too. By default it starts with a copy of the app's data, only ever read from yours:
+  - its Application Support folders, named after the app or its bundle identifier;
+  - a Core Data or SwiftData store at the top of Application Support (`default.store` and other `.store` or `.sqlite` files, with their `-wal` and `-shm` files), when the app uses Core Data or SwiftData and keeps no store in its own folder;
+  - the App Group folders it names (`~/Library/Group Containers/<group>`);
+  - its preferences.
+
+  A sandboxed app's data is read from its container. **Share with Empty Data** starts it as on a first launch.
+- What can't come along is on the Live Collaboration card: a folder macOS didn't let OpenTraffic read (another app's container: allow OpenTraffic when macOS asks to access data from other apps, or give it Full Disk Access, then use **Reset Data**), App Group data the copy may not find (macOS shows an app its App Group folder in your own Library; if it asks whether the copy may access data from other apps, choose **Don't Allow**), and the app's iCloud data and keychain items, which stay with your own copy of the app.
 - Its preferences are kept under `<bundle id>.opentraffic` and removed when the share stops.
 - What the app prints, including its `Logger` and `os_log` messages, is in the share's **Logs**.
 

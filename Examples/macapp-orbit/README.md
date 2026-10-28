@@ -14,8 +14,18 @@ This builds the Swift package in debug and writes `Examples/macapp-orbit/dist/Or
 Swift 6 and macOS 14 or later. `swift run --package-path Examples/macapp-orbit` also starts it,
 but without a bundle identifier.
 
-The orders are fixed (30 of them, the same every launch), so screenshots and tests see the same
-app each time. Nothing is saved: quitting resets everything.
+On a first launch it has 30 fixed sample orders, so screenshots and tests see the same app each
+time. Like an ordinary app, it saves its orders, the selected order and the filter after every change
+in `~/Library/Application Support/se.medda.orbit/orders.json` (not `Orbit`: the Electron Orbit
+fixture uses that folder) and loads them at launch. Delete the file to start over, or run it with a
+home of its own (`HOME` and `CFFIXED_USER_HOME`) as the tests do.
+
+For tests that need saved orders of its own, it changes them without opening a window and quits:
+
+```sh
+Examples/macapp-orbit/dist/Orbit.app/Contents/MacOS/Orbit --set-note 1 "Gift wrap, please"
+Examples/macapp-orbit/dist/Orbit.app/Contents/MacOS/Orbit --add-order "Ada Lovelace"
+```
 
 Like any Mac app, Orbit reopens the windows it had open when it was last stopped. For a clean
 start with only the main window, launch it with `-ApplePersistenceIgnoreState YES`:

@@ -1,6 +1,40 @@
 import SwiftUI
 
+/// Starts the app, or, with an edit on the command line, changes the saved orders without opening a
+/// window and quits (for tests that need the app to have saved something of its own):
+///
+///     Orbit --set-note <order id> <text>    the order's note
+///     Orbit --add-order <customer>          a new order, selected
 @main
+enum Launcher {
+    static func main() {
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        guard let edit = arguments.first, edit == "--set-note" || edit == "--add-order" else {
+            OrbitApp.main()
+            return
+        }
+        MainActor.assumeIsolated {
+            let store = OrderStore()
+            switch (edit, arguments.count) {
+            case ("--set-note", 3):
+                guard let id = Int(arguments[1]), let index = store.index(of: id) else { fail("no order \(arguments[1])") }
+                store.orders[index].note = arguments[2]
+            case ("--add-order", 2):
+                store.newCustomer = arguments[1]
+                store.add()
+            default:
+                fail("usage: Orbit --set-note <order id> <text> | --add-order <customer>")
+            }
+            print("Saved \(store.orders.count) orders to \(OrderStore.file.path)")
+        }
+    }
+
+    static func fail(_ message: String) -> Never {
+        FileHandle.standardError.write(Data("Orbit: \(message)\n".utf8))
+        exit(2)
+    }
+}
+
 struct OrbitApp: App {
     @State private var store = OrderStore()
 

@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-struct Order: Identifiable, Equatable {
+struct Order: Identifiable, Equatable, Codable {
     let id: Int
     var customer: String
     var amount: Double
@@ -18,21 +18,53 @@ struct Order: Identifiable, Equatable {
     var trackingNumber: String { shipped ? "1Z ORB \(String(format: "%06d", id * 7919 % 1_000_000))" : "Not shipped yet" }
 }
 
-enum OrderFilter: String, CaseIterable, Identifiable {
+enum OrderFilter: String, CaseIterable, Identifiable, Codable {
     case all = "All", open = "Open", shipped = "Shipped"
     var id: String { rawValue }
 }
 
 /// The app's whole state, shared by the main window, the Statistics window and the Orders menu.
+///
+/// Saved as JSON in Application Support/se.medda.orbit/orders.json after every change and loaded at
+/// launch, like an ordinary app keeps its documents. Without that file (a first launch) it starts with
+/// the fixed sample orders.
 @MainActor @Observable final class OrderStore {
-    var orders: [Order]
-    var selectedID: Int? = 1
-    var filter: OrderFilter = .all
+    var orders: [Order] { didSet { save() } }
+    var selectedID: Int? = 1 { didSet { save() } }
+    var filter: OrderFilter = .all { didSet { save() } }
     var newCustomer = ""
 
+    /// What is saved.
+    struct Saved: Codable {
+        var orders: [Order]
+        var selectedID: Int?
+        var filter: OrderFilter
+    }
+
+    /// Application Support/se.medda.orbit/orders.json in the user's home (`CFFIXED_USER_HOME` when set).
+    /// A fixed folder name: the Electron Orbit fixture already uses Application Support/Orbit.
+    nonisolated static var file: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("se.medda.orbit", isDirectory: true)
+            .appendingPathComponent("orders.json")
+    }
+
+    @ObservationIgnored private var loading = true
+
     init() {
-        // Enough orders that the list has to scroll in the default window size. Fixed values, so
-        // screenshots and tests see the same app every launch.
+        if let data = try? Data(contentsOf: Self.file), let saved = try? JSONDecoder().decode(Saved.self, from: data) {
+            orders = saved.orders
+            selectedID = saved.selectedID
+            filter = saved.filter
+        } else {
+            orders = Self.sampleOrders
+        }
+        loading = false
+    }
+
+    /// Enough orders that the list has to scroll in the default window size. Fixed values, so
+    /// screenshots and tests see the same app on every first launch.
+    static var sampleOrders: [Order] {
         let names = [
             "Edward", "Alan Turing", "Grace Hopper", "Linus Torvalds", "Ada Lovelace", "Margaret Hamilton",
             "Dennis Ritchie", "Barbara Liskov", "Ken Thompson", "Radia Perlman", "Donald Knuth", "Frances Allen",
@@ -41,12 +73,27 @@ enum OrderFilter: String, CaseIterable, Identifiable {
             "Niklaus Wirth", "Mary Kenneth Keller", "Leslie Lamport", "Adele Goldberg", "Vint Cerf",
             "Jean Sammet", "Tony Hoare", "Evelyn Berezin",
         ]
-        orders = names.enumerated().map { offset, name in
+        var orders = names.enumerated().map { offset, name in
             let id = offset + 1
             return Order(id: id, customer: name, amount: Double(20 + (id * 37) % 280) + (id % 2 == 0 ? 0.5 : 0),
                          shipped: id % 3 == 0, express: id % 4 == 1, quantity: 1 + id % 3)
         }
         orders[0].note = "Gift wrap"
+        return orders
+    }
+
+    /// Writes the orders, the selection and the filter (atomically, so a quit never leaves half a file).
+    func save() {
+        guard !loading else { return }
+        let file = Self.file
+        do {
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(Saved(orders: orders, selectedID: selectedID, filter: filter)).write(to: file, options: .atomic)
+        } catch {
+            print("Orbit couldn't save its orders to \(file.path): \(error.localizedDescription)")
+        }
     }
 
     var visible: [Order] {

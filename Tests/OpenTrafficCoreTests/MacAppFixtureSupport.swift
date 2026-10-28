@@ -218,17 +218,34 @@ struct OrbitFixture {
 
     let running: NSRunningApplication
     let hider: MacAppWindowHider
+    /// Its own home folder, for this launch only.
+    let home: URL
     var pid: pid_t { running.processIdentifier }
     /// Whether the process is still there (NSRunningApplication learns of an exit a little later).
     var isRunning: Bool { kill(pid, 0) == 0 }
 
     /// Builds the fixture when it's missing, quits copies of it left by an interrupted run, and
     /// launches a fresh one with only its main window. Take a `MacAppFixtureTurn` first.
+    ///
+    /// It runs with a home folder of its own: Orbit saves its orders in Application Support, and a test
+    /// must start with the 30 sample orders and never write to the user's Library.
     static func launch(hider: MacAppWindowHider = MacAppWindowHider()) async throws -> OrbitFixture {
         try buildIfNeeded()
         killLeftovers()
-        let running = try await hider.launch(bundle: app, arguments: ["-ApplePersistenceIgnoreState", "YES"])
-        return OrbitFixture(running: running, hider: hider)
+        // Homes of launches a test didn't quit go with them.
+        let temporary = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        for old in (try? FileManager.default.contentsOfDirectory(atPath: temporary.path)) ?? [] where old.hasPrefix("opentraffic-orbit-home-") {
+            try? FileManager.default.removeItem(at: temporary.appendingPathComponent(old))
+        }
+        let home = temporary.appendingPathComponent("opentraffic-orbit-home-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        // Its window sizes are saved in se.medda.orbit's preferences, which its home doesn't isolate: an
+        // unreadable frame on the command line (it wins over the saved one) makes every launch start at
+        // the default size, whatever an earlier test resized the window to.
+        let frames = ["orders", "statistics"].flatMap { ["-NSWindow Frame \($0)-AppWindow-1", "default"] }
+        let running = try await hider.launch(bundle: app, environment: ["HOME": home.path, "CFFIXED_USER_HOME": home.path],
+                                             arguments: ["-ApplePersistenceIgnoreState", "YES"] + frames)
+        return OrbitFixture(running: running, hider: hider, home: home)
     }
 
     /// Quits the copy and stops hiding it (the off-screen display stays for the next test).
@@ -238,6 +255,7 @@ struct OrbitFixture {
             kill(pid, SIGKILL)
             for _ in 0..<40 where isRunning { try? await Task.sleep(for: .milliseconds(25)) }
         }
+        try? FileManager.default.removeItem(at: home)
     }
 
     nonisolated private static let buildLock = NSLock()
