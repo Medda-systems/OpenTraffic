@@ -135,3 +135,9 @@ host's file stayed byte for byte the same; the Empty Data share started in 4 to 
 average about 10); TextEdit's copy started in under 7 s, took the typed text, and AppleScript and the
 user's own running TextEdit were unaffected; stopping it left no preferences, saved state or session
 folder (12 s, most of it waiting out cfprefsd's write-back).
+
+28 October 2026, the same Mac, with every copy in its sandbox (TASK-032): all steps passed in 188 s
+without `--card`. Orbit, with the host's data, ran in its sandbox; a viewer had it open and save over a
+canary file in the work folder and macOS refused both (`Operation not permitted`), the canary stayed
+byte for byte the same, and the same in the copy's own Documents worked. The rebuild showed in 26 s.
+TextEdit's File → Open… and Save… opened nothing and it kept running.

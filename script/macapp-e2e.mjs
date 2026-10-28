@@ -627,8 +627,14 @@ const noteValue = () => page.eval(`(${NOTE})?.value ?? null`);
 async function setNote(text) {
   await page.click(await centerOf(NOTE, "the order's note field"));
   await page.waitFor(`document.activeElement === (${NOTE})`, "the note field to take focus");
-  await page.eval(`document.activeElement.select()`);
-  await page.cdp("Input.insertText", { text }); // replaces the selection: the viewer sends the whole value (setText)
+  if (await noteValue()) {
+    // Emptied first: a selection deleted in the page reaches the app as the field's whole new value (setText).
+    await page.eval(`document.activeElement.select()`);
+    await page.key("Backspace", "Backspace", 8);
+    await page.waitFor(`(${NOTE})?.value === ''`, "the note to be empty", 10_000);
+    await sleep(400);
+  }
+  await page.cdp("Input.insertText", { text });
   await page.waitFor(`(${NOTE})?.value === ${JSON.stringify(text)}`, "the note to say " + text, 10_000);
   await sleep(400);
 }
@@ -639,8 +645,8 @@ const canaryUnchanged = (before) => {
 let canaryStat = null;
 
 await step("the copy runs in its sandbox", async () => {
-  const copied = copyOrdersFile();
-  const session = copied.split(path.sep + "home" + path.sep)[0];
+  // <session>/home/Library/Application Support/se.medda.orbit/orders.json
+  const session = path.resolve(copyOrdersFile(), "../../../../..");
   const profile = fs.readFileSync(path.join(session, "sandbox.sb"), "utf8");
   assert(profile.includes("(deny file-read* (subpath \"/Users\")") && profile.includes("(deny file-write* (subpath \"/\"))"), "the session's sandbox.sb: " + profile.slice(0, 300));
   const info = JSON.parse(run("/usr/bin/plutil", ["-convert", "json", "-o", "-", path.join(session, "app", "Orbit.app", "Contents", "Info.plist")]).stdout);
@@ -678,7 +684,7 @@ await step("a viewer can't save over a file outside the copy", async () => {
 });
 
 await step("saving inside the copy works", async () => {
-  const home = copyOrdersFile().split(path.sep + "Library" + path.sep)[0];
+  const home = path.resolve(copyOrdersFile(), "../../../..");
   const inside = path.join(home, "Documents", "orders-export.json");
   await setNote(inside);
   await chooseMenu("File", "Save Orders to File Named in Note");
