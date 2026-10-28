@@ -216,7 +216,7 @@ struct CollaborationCard: View {
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Mac app, isolated copy")
+                Text(store.sharesInstalledMacApp(tunnel.id) ? "Installed app, isolated copy" : "Mac app, isolated copy")
                 Text(macAppCaption(status))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -237,6 +237,13 @@ struct CollaborationCard: View {
                               canShowLog: store.macAppSessions[tunnel.id]?.buildLog != nil,
                               showLog: { store.showMacAppBuildLog(tunnel.id) },
                               buildAgain: { store.buildMacAppAgain(tunnel.id) })
+        }
+        if !store.hasSeenInstalledMacAppNote, store.sharesInstalledMacApp(tunnel.id) {
+            // Once, for the first installed app (or another developer's) a host shares.
+            InlineMessage(severity: .info, message: AppStore.installedMacAppNote(app: macAppName, data: tunnel.macAppData ?? .copy),
+                          title: "Viewers use a copy of \(macAppName)") {
+                Button("Got It") { withAnimation(.snappy) { store.dismissInstalledMacAppNote() } }
+            }
         }
         macAppOptions(status)
         if let warning = status?.warning {

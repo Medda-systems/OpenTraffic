@@ -368,7 +368,8 @@ extension AppStore {
         return APIShareMacApp(
             path: path, name: name, data: (definition.macAppData ?? .copy).rawValue,
             state: described?.state, viewers: status?.viewers, warning: status?.warning, error: described?.error,
-            control: control, build: apiMacAppBuild(definition.id)
+            control: control, build: apiMacAppBuild(definition.id),
+            installed: sharesInstalledMacApp(definition.id) ? true : nil
         )
     }
 

@@ -233,7 +233,10 @@ public final class MacAppSession {
     public var viewerCount: Int { server?.viewerCount ?? 0 }
     public var sessionDirectory: URL { options.sessionDirectory }
     /// The isolated copy of the .app that runs.
-    public var appCopy: URL { options.sessionDirectory.appendingPathComponent("app", isDirectory: true).appendingPathComponent(options.app.bundle.lastPathComponent) }
+    public var appCopy: URL {
+        let file = Self.copyBundleName(for: options.app).map { $0 + ".app" } ?? options.app.bundle.lastPathComponent
+        return options.sessionDirectory.appendingPathComponent("app", isDirectory: true).appendingPathComponent(file)
+    }
     /// The app's home folder (`CFFIXED_USER_HOME`).
     public var homeDirectory: URL { options.sessionDirectory.appendingPathComponent("home", isDirectory: true) }
     /// The running copy's windows (on the off-screen display).
@@ -956,7 +959,8 @@ public final class MacAppSession {
         note(bundleStamp == nil ? "Copying \(name) to its session folder." : "\(name) was rebuilt; copying it again.")
         let target = appCopy
         let identifier = bundleIdentifier
-        let prepared = try await Task.detached { try Self.makeIsolatedCopy(of: source, at: target, bundleIdentifier: identifier) }.value
+        let renamed = Self.copyBundleName(for: options.app)
+        let prepared = try await Task.detached { try Self.makeIsolatedCopy(of: source, at: target, bundleIdentifier: identifier, bundleName: renamed) }.value
         originalIsSandboxed = prepared.wasSandboxed
         bundleWarnings = prepared.warnings
         for warning in bundleWarnings { note(warning) }
@@ -977,7 +981,7 @@ public final class MacAppSession {
         let sandboxed = originalIsSandboxed
         let warnings = try await Task.detached {
             try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-            return try Self.prepareHome(home, data: source, app: app, copyIdentifier: identifier, realHome: realHome,
+            return try Self.prepareHome(home, data: source, app: app, copyIdentifier: identifier, copyName: Self.copyBundleName(for: app), realHome: realHome,
                                         dataHome: dataHome, sandboxed: sandboxed)
         }.value
         dataWarnings = warnings
@@ -1117,6 +1121,18 @@ extension MacAppSession {
         return "se.medda.opentraffic.shared." + String(name)
     }
 
+    /// The name an installed app's copy goes by (its .app folder and CFBundleName): `TextEdit (Shared)`,
+    /// nil for your own builds. While a copy runs under the app's own name, AppleScript's
+    /// `application "TextEdit"` (and `osascript`, Shortcuts, Automator) finds the copy instead of your
+    /// TextEdit (measured on macOS 27); it matches the bundle's file name or its CFBundleName, so both
+    /// change. Viewers still see the app's own name: the share's bar is named after the app, and apps
+    /// with localized names keep them in their menu bar.
+    nonisolated static func copyBundleName(for app: MacApp) -> String? {
+        guard app.isInstalled, app.simulator == nil else { return nil }
+        let base = app.bundle.deletingPathExtension().lastPathComponent
+        return base.isEmpty ? nil : base + " (Shared)"
+    }
+
     struct PreparedCopy: Sendable {
         var warnings: [String]
         var wasSandboxed: Bool
@@ -1124,9 +1140,10 @@ extension MacAppSession {
 
     /// Clones `source` to `target` (APFS clonefile: instant, no extra space), gives it
     /// `bundleIdentifier`, and signs it again ad hoc with the original's entitlements minus those
-    /// that need the developer's team (and the App Sandbox, so the copy's data stays in its
-    /// session's home folder).
-    nonisolated static func makeIsolatedCopy(of source: URL, at target: URL, bundleIdentifier: String) throws -> PreparedCopy {
+    /// that need the developer's team or Apple (and the App Sandbox, so the copy's data stays in its
+    /// session's home folder). The copy never stands in for the app (`detachFromLaunchServices`): it
+    /// opens no document types or links for macOS, and has no extensions.
+    nonisolated static func makeIsolatedCopy(of source: URL, at target: URL, bundleIdentifier: String, bundleName: String? = nil) throws -> PreparedCopy {
         let fm = FileManager.default
         try? fm.removeItem(at: target)
         try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -1144,14 +1161,17 @@ extension MacAppSession {
               var info = try? PropertyListSerialization.propertyList(from: data, options: [.mutableContainersAndLeaves], format: &format) as? [String: Any]
         else { throw MacAppSessionError.failed("\(source.lastPathComponent) has no readable Info.plist.") }
         info["CFBundleIdentifier"] = bundleIdentifier
+        if let bundleName { info["CFBundleName"] = bundleName }
+        detachFromLaunchServices(&info)
         try PropertyListSerialization.data(fromPropertyList: info, format: format, options: 0).write(to: infoURL)
+        removeExtensions(in: target)
 
         let original = entitlements(of: source)
         let (kept, dropped) = sharedEntitlements(original)
         var warnings: [String] = []
-        let restricted = dropped.filter { $0 != sandboxEntitlement }
+        let restricted = dropped.filter(isNoticeable)
         if !restricted.isEmpty {
-            warnings.append("The shared copy runs without \(restricted.sorted().joined(separator: ", ")): they need your team's signature. Features that use them may not work.")
+            warnings.append("The shared copy runs without \(restricted.sorted().joined(separator: ", ")): they need the developer's own signature. Features that use them may not work.")
         }
         let sandboxed = (original[sandboxEntitlement] as? Bool) == true
 
@@ -1169,19 +1189,61 @@ extension MacAppSession {
 
     nonisolated static let sandboxEntitlement = "com.apple.security.app-sandbox"
 
-    /// The entitlements an ad hoc signed copy keeps, and the ones it drops: those only a team's
-    /// signature (and provisioning profile) may carry, and the App Sandbox, whose container would
-    /// put the copy's data in the user's Library instead of the session's home folder.
+    /// The entitlements an ad hoc signed copy keeps, and the ones it drops. Only `com.apple.security.*`
+    /// entitlements are kept (network, files, devices, hardened runtime exceptions): every other one is
+    /// restricted to a team's signature and provisioning profile (iCloud, keychain groups, push) or to
+    /// Apple's own code (`com.apple.private.*` in TextEdit or Calculator), and macOS refuses to start an
+    /// ad hoc signed app that claims one. The App Sandbox and App Groups go too: the sandbox's container
+    /// would put the copy's data in the user's Library instead of the session's home folder.
     nonisolated static func sharedEntitlements(_ entitlements: [String: Any]) -> (kept: [String: Any], dropped: [String]) {
         var kept: [String: Any] = [:]
         var dropped: [String] = []
         for (key, value) in entitlements {
-            let needsTeam = key.hasPrefix("com.apple.developer.") || key == "keychain-access-groups"
-                || key == "com.apple.security.application-groups" || key == "com.apple.application-identifier"
-                || key == "application-identifier" || key == "com.apple.team-identifier"
-            if needsTeam || key == sandboxEntitlement { dropped.append(key) } else { kept[key] = value }
+            let keeps = key.hasPrefix("com.apple.security.") && key != sandboxEntitlement && key != "com.apple.security.application-groups"
+            if keeps { kept[key] = value } else { dropped.append(key) }
         }
         return (kept, dropped.sorted())
+    }
+
+    /// A dropped entitlement the host should hear about: a feature the app may miss (iCloud, keychain
+    /// groups, App Groups, push), not the sandbox or the identifiers and Apple-internal ones that only
+    /// matter to macOS.
+    nonisolated static func isNoticeable(_ entitlement: String) -> Bool {
+        entitlement.hasPrefix("com.apple.developer.") && entitlement != "com.apple.developer.team-identifier"
+            || ["keychain-access-groups", "com.apple.security.application-groups", "aps-environment"].contains(entitlement)
+    }
+
+    /// Changes a copy's Info.plist so macOS never picks the copy instead of the app: its document types
+    /// are kept for the app itself (an NSDocument app needs them) but ranked None, so Finder never opens
+    /// a file with it; its URL schemes and services go; the types it declares become imported ones, so
+    /// the app's own declaration stays the one in force. Launching the copy registers it with Launch
+    /// Services like any app that runs; this keeps that registration from standing in for the app.
+    nonisolated static func detachFromLaunchServices(_ info: inout [String: Any]) {
+        if let types = info["CFBundleDocumentTypes"] as? [[String: Any]] {
+            info["CFBundleDocumentTypes"] = types.map { type in
+                var type = type
+                type["LSHandlerRank"] = "None"
+                return type
+            }
+        }
+        info.removeValue(forKey: "CFBundleURLTypes")
+        info.removeValue(forKey: "NSServices")
+        if let exported = info.removeValue(forKey: "UTExportedTypeDeclarations") as? [Any] {
+            info["UTImportedTypeDeclarations"] = ((info["UTImportedTypeDeclarations"] as? [Any]) ?? []) + exported
+        }
+    }
+
+    /// Removes the copy's app extensions (Contents/PlugIns/*.appex, Contents/Extensions/*.appex): macOS
+    /// would register them next to the app's own (Share, Finder, widgets, Quick Look), under the same
+    /// identifiers. Viewers only ever use the app's windows.
+    nonisolated static func removeExtensions(in bundle: URL) {
+        let fm = FileManager.default
+        for folder in ["Contents/PlugIns", "Contents/Extensions"] {
+            let url = bundle.appendingPathComponent(folder, isDirectory: true)
+            for item in (try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? [] where item.pathExtension == "appex" {
+                try? fm.removeItem(at: item)
+            }
+        }
     }
 
     /// The entitlements `bundle` is signed with (empty when unsigned or unreadable).
@@ -1229,12 +1291,13 @@ extension MacAppSession {
     /// - its preferences, into the copy's own defaults domain.
     ///
     /// A sandboxed app's data comes from its container. For `.empty` it starts bare. Leftover preferences
-    /// of the copy's domain are always removed first. It returns what the card should say didn't come
+    /// of the copy's domain are always removed first, and the copy gets `setSessionDefaults` (unless
+    /// `sessionDefaults` is false: tests that mustn't write a defaults domain). It returns what the card should say didn't come
     /// along: data that couldn't be copied, folders macOS didn't let OpenTraffic read, App Group data the
     /// copy may not find, and iCloud data and keychain items (which never follow).
-    nonisolated static func prepareHome(_ home: URL, data: DataSource, app: MacApp, copyIdentifier: String,
+    nonisolated static func prepareHome(_ home: URL, data: DataSource, app: MacApp, copyIdentifier: String, copyName: String? = nil,
                                         realHome: String, dataHome: String? = nil, sandboxed: Bool,
-                                        entitlements: [String: Any]? = nil) throws -> [String] {
+                                        entitlements: [String: Any]? = nil, sessionDefaults: Bool = true) throws -> [String] {
         let fm = FileManager.default
         let library = home.appendingPathComponent("Library", isDirectory: true)
         let support = library.appendingPathComponent("Application Support", isDirectory: true)
@@ -1242,9 +1305,17 @@ extension MacAppSession {
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
         }
         removePreferences(copyIdentifier, realHome: realHome)
-        guard data == .copy else { return [] }
-
         let entitlements = entitlements ?? Self.entitlements(of: app.bundle)
+        let groups = ((entitlements["com.apple.security.application-groups"] as? [String]) ?? [])
+            .filter { !$0.isEmpty && !$0.contains("/") && $0 != "." && $0 != ".." }
+        guard data == .copy else {
+            if sessionDefaults { setSessionDefaults(copyIdentifier, home: home) }
+            // Nothing is copied, but containerURL still gives the copy the App Group folders in your own
+            // Library (measured): it could read or change them.
+            guard !groups.isEmpty else { return [] }
+            return ["\(app.name) keeps some of its data in App Groups (\(groups.sorted().joined(separator: ", "))), which macOS shows the copy in your own Library even with empty data. If macOS asks whether \(app.name) may access data from other apps, choose Don't Allow: your own data then stays untouched."]
+        }
+
         let sourceHome = dataHome ?? realHome
         var warnings: [String] = []
         var unreadable: [URL] = []
@@ -1288,6 +1359,10 @@ extension MacAppSession {
                 if name == app.bundleIdentifier, copyIdentifier != name {
                     clone(source, to: support.appendingPathComponent(copyIdentifier))
                 }
+                // A renamed copy (`copyBundleName`) that names its folder after its CFBundleName.
+                if name == app.name, let copyName, copyName != name, !copyName.contains("/") {
+                    clone(source, to: support.appendingPathComponent(copyName))
+                }
                 ownFolders.append(source)
             }
 
@@ -1302,8 +1377,6 @@ extension MacAppSession {
         }
 
         // App Group folders, wherever the app is sandboxed or not.
-        let groups = ((entitlements["com.apple.security.application-groups"] as? [String]) ?? [])
-            .filter { !$0.isEmpty && !$0.contains("/") && $0 != "." && $0 != ".." }
         var copiedGroups: [String] = []
         for group in groups.sorted() {
             let source = userLibrary.appendingPathComponent("Group Containers/\(group)", isDirectory: true)
@@ -1361,7 +1434,29 @@ extension MacAppSession {
             let what = [iCloud ? "iCloud data" : nil, keychain ? "keychain items" : nil].compactMap { $0 }.joined(separator: " and ")
             warnings.append("The copy starts without \(app.name)'s \(what): they stay with your own \(app.name) and can't follow a copy.")
         }
+        if sessionDefaults { setSessionDefaults(copyIdentifier, home: home) }
         return warnings
+    }
+
+    /// Preferences every copy starts with, whatever it copied:
+    ///
+    /// - a document app (TextEdit) opens a new document instead of its Open panel at launch, so viewers
+    ///   start in the app rather than in a file dialog;
+    /// - Open and Save dialogs start in the copy's own Documents folder (in its session home), not in
+    ///   yours. Their sidebar still leads to this Mac's folders (mac-apps.md, Open and Save dialogs);
+    /// - Sparkle (the update framework many apps outside the App Store use) doesn't ask viewers whether
+    ///   to check for updates, and never installs one into the copy.
+    nonisolated static func setSessionDefaults(_ copyIdentifier: String, home: URL) {
+        let documents = home.appendingPathComponent("Documents", isDirectory: true)
+        try? FileManager.default.createDirectory(at: documents, withIntermediateDirectories: true)
+        let values: [String: Any] = [
+            "NSShowAppCentricOpenPanelInsteadOfUntitledFile": false,
+            "NSNavLastRootDirectory": documents.path,
+            "SUEnableAutomaticChecks": false,
+            "SUAutomaticallyUpdate": false,
+        ]
+        CFPreferencesSetMultiple(values as CFDictionary, nil, copyIdentifier as CFString, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        CFPreferencesAppSynchronize(copyIdentifier as CFString)
     }
 
     enum Readability: Equatable { case missing, readable, unreadable }
@@ -1424,6 +1519,14 @@ extension MacAppSession {
         return path.hasPrefix(prefix) ? "~/" + path.dropFirst(prefix.count) : path
     }
 
+    /// This user's temporary folder as macOS gives it to apps (`/var/folders/…/T/`).
+    nonisolated static func userTemporaryDirectory() -> URL? {
+        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
+        guard confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, buffer.count) > 0 else { return nil }
+        let path = String(cString: buffer)
+        return path.isEmpty ? nil : URL(fileURLWithPath: path, isDirectory: true)
+    }
+
     /// Removes every preference of the copy's defaults domain and its file.
     ///
     /// cfprefsd writes an emptied domain back to its file a few seconds later (7.5 s measured), even
@@ -1445,6 +1548,11 @@ extension MacAppSession {
         let file = library.appendingPathComponent("Preferences/\(identifier).plist")
         try? FileManager.default.removeItem(at: file)
         try? FileManager.default.removeItem(at: library.appendingPathComponent("Saved Application State/\(identifier).savedState"))
+        // With -ApplePersistenceIgnoreState, AppKit writes new state to the per-user temporary folder
+        // (confstr's, not $TMPDIR, so not the session's).
+        if let temporary = userTemporaryDirectory() {
+            try? FileManager.default.removeItem(at: temporary.appendingPathComponent("\(identifier).savedState"))
+        }
         guard followUp else { return }
         for delay in [10.0, 30.0] {
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay) {

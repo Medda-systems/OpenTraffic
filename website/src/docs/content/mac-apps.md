@@ -2,21 +2,57 @@
 
 A Mac app you're building with SwiftUI, AppKit, or Catalyst shows up in the menu bar under **Mac Apps**, below your web servers and Electron apps, as `Orbit` with `Mac app · ~/code/orbit` under it. **Share** works as it does for a web page: one click, the link is on your clipboard, and live collaboration is on. People who open it use the real app in their browser, with cursors and comments pinned to its buttons and labels, and nothing to install.
 
-The list has three kinds of app:
+The list has three kinds of app you're building, then the apps you installed:
 
 - **Debug builds that are running:** built by Xcode, built into a project's `.build` or `dist` folder, or any app that isn't signed or is signed ad hoc, as long as it isn't in Applications.
 - **Recent Xcode builds:** the newest debug build of each app from the last 30 days, while its project still exists. It doesn't have to be running.
 - **Apps you chose or shared before:** an app you picked with **Choose App…** or shared once stays in the list, running or not, wherever it was built (a `swift build`, or a script that leaves it in `dist/`). Right-click it, or open **Share ▾**, and choose **Remove from List** when you no longer want it there; its saved shares stay.
+- **Installed:** a collapsed group under your own apps, **Installed (7)**. Click it to see the installed apps that are running (TextEdit, an app from the App Store, another developer's app) and the installed apps you shared before. They share the same way: see [Installed apps](/docs/mac-apps#installed-apps).
 
-**Mac Apps** is always there, even when it finds nothing: it then says how apps get there and has a **Choose App…** button. Below a list, **Choose App…** sits under the apps, like **Show More**. It opens a file dialog, starting in Applications or in the folder you chose from last time, with the **Share ▾** choices under it: **Share at** a temporary public URL or a lasting OpenTunnel address, and **Share with Empty Data**. Pick the .app and click **Share**. OpenTraffic checks it as `opentraffic share <path>` does; when it can't share the app, it says why (an Electron app, OpenTraffic itself, an app by another developer) and offers **Choose Another App…**. The same dialog opens from **Share a Mac App…** in the File menu and in the main window when it has no shares yet.
+**Mac Apps** is always there, even when it finds nothing: it then says how apps get there and has a **Choose App…** button. Below a list, **Choose App…** sits under the apps, like **Show More**. It opens a file dialog, starting in Applications or in the folder you chose from last time, with the **Share ▾** choices under it: **Share at** a temporary public URL or a lasting OpenTunnel address, and **Share with Empty Data**. Pick the .app and click **Share**. OpenTraffic checks it as `opentraffic share <path>` does; when it can't share the app, it says why (an Electron app, OpenTraffic itself, a part of macOS, or an app that can't run as a copy) and offers **Choose Another App…**. The same dialog opens from **Share a Mac App…** in the File menu and in the main window when it has no shares yet.
 
 iPhone apps you built in Xcode and installed in a booted Simulator are listed too, as `Orbit · iPhone 17 Simulator`, and share the same way: see [iPhone apps in the Simulator](/docs/mac-apps#iphone-apps-in-the-simulator).
 
-Apps you only installed, apps that come with macOS, and apps signed by someone else's team aren't listed. Electron apps have their own list: see [Electron apps](/docs/electron-apps). Like the other lists, it shows the first 5; **Show More** reveals the rest.
+Electron apps have their own list: see [Electron apps](/docs/electron-apps). Like the other lists, it shows the first 5 of your own apps; **Show More** reveals the rest.
 
 **Share ▾** has **Temporary Public URL**, **Lasting Address with OpenTunnel**, and **Share with Empty Data**. A plain click on **Share** uses a temporary URL, or OpenTunnel when that's what your Share button uses.
 
-From the terminal: `opentraffic share Orbit`, or the app's path, `opentraffic share dist/Orbit.app`. A path works for any app of yours, listed or not: one built inside a project folder, not signed or signed ad hoc, or signed with one of your own signing identities.
+From the terminal: `opentraffic share Orbit`, or the app's path, `opentraffic share dist/Orbit.app`. A path works for any Mac app, listed or not: one of yours, or an installed one, `opentraffic share /System/Applications/TextEdit.app`.
+
+## Installed apps
+
+Apps you didn't build can be shared too: TextEdit, Calculator, an app from the App Store, or another developer's app. Viewers use a copy of the app, as with your own, with a copy of its data (or none, with **Share with Empty Data**). Your own copy of the app, its windows, and its data stay as they are; your app keeps running while the copy runs.
+
+The first time you share one, the Live Collaboration card says so: **Viewers use a copy of TextEdit**, with a copy of its data, and some things (iCloud, keychain items, App Groups) stay with your own app. **Got It** hides the note for good. The card's section is called **Installed app, isolated copy**.
+
+An installed app isn't rebuilt: it has no project here. **Restart App** and **Reset Data** work as for your own apps.
+
+Some apps can't run as a copy at all. OpenTraffic refuses them before anything starts, says why, and doesn't list them under Installed:
+
+- **Apps that use CloudKit** (iCloud's database), like many App Store apps. CloudKit only works for the app signed by its developer, and stops a copy as soon as the app asks for it, usually at launch.
+- **Parts of macOS** that aren't apps you use on their own: the Dock, the Finder, Siri, and the like in `/System/Library`.
+
+Others run, without what their developer's signature gives them: iCloud Drive documents, keychain items, App Groups, push notifications, Sign in with Apple. The card names what the copy runs without.
+
+What we found on macOS 27:
+
+| App | Where it comes from | Result |
+| --- | --- | --- |
+| TextEdit 1.21 | macOS (`/System/Applications`) | Works: opens a new document; viewers type into it and use its formatting bar and menus. Runs without iCloud Drive. |
+| Calculator 12.0 | macOS (`/System/Applications`) | Works: viewers press its buttons (7 × 6 = 42). |
+| CotEditor 5.2 | another developer, downloaded | Works: viewers type into a new document. Runs without iCloud Drive. |
+| MarkEdit 1.27 | another developer, downloaded | Works: starts in its Open dialog, in the copy's own Documents folder; it also shows its own update alert. |
+| MindNode 2026.2 | App Store | Refused: it uses CloudKit, and a copy quit at launch. |
+| Developer | App Store (Apple) | Refused: it uses CloudKit. |
+| Dock | macOS (`/System/Library`) | Refused: a part of macOS. |
+
+We tested with **Share with Empty Data**, so the copies never read the apps' real data. An app from another developer that keeps its data in its sandbox container needs your permission to read it: allow OpenTraffic when macOS asks about data from other apps, or share with empty data.
+
+While the copy runs, it can't stand in for your app:
+
+- Its .app and its name have ` (Shared)` added, `TextEdit (Shared).app`, so AppleScript, Shortcuts, and `osascript` still find your TextEdit, not the copy. The share's bar still says TextEdit; an app without translated names shows `TextEdit (Shared)` in its menu bar.
+- It opens no files or links for macOS: Finder keeps opening your files with your own apps, and the copy's Share, Finder, widget, and Quick Look extensions are left out.
+- It never updates itself (apps that use Sparkle don't ask viewers about updates).
 
 ## How it works
 
@@ -72,7 +108,8 @@ Each share runs its own copy of the app:
 
   A sandboxed app's data is read from its container. **Share with Empty Data** starts it as on a first launch.
 - What can't come along is on the Live Collaboration card: a folder macOS didn't let OpenTraffic read (another app's container: allow OpenTraffic when macOS asks to access data from other apps, or give it Full Disk Access, then use **Reset Data**), App Group data the copy may not find (macOS shows an app its App Group folder in your own Library; if it asks whether the copy may access data from other apps, choose **Don't Allow**), and the app's iCloud data and keychain items, which stay with your own copy of the app.
-- Its preferences are kept under `<bundle id>.opentraffic` and removed when the share stops.
+- Its preferences are kept under `<bundle id>.opentraffic` and removed when the share stops, with the windows it saved.
+- It starts a document app with a new document rather than its Open dialog, and its Open and Save dialogs start in its own Documents folder, in its home folder (see the limit on file dialogs below).
 - What the app prints, including its `Logger` and `os_log` messages, is in the share's **Logs**.
 
 The share's Live Collaboration card has a Mac app section with the copy's state and how many people are viewing:
@@ -112,7 +149,8 @@ Agents that read comments through MCP, the REST API, or the `opentraffic` comman
 ## From the terminal and from agents
 
 ```sh
-opentraffic services                          # web servers, then the Mac apps you're building
+opentraffic services                          # web servers, the Mac apps you're building, then installed apps that run
+opentraffic share /System/Applications/TextEdit.app --empty-data   # an installed app
 opentraffic share Orbit                       # share it by name, on a temporary URL
 opentraffic share dist/Orbit.app --via opentunnel --empty-data --name "Orbit review"
 opentraffic set Orbit --control watch-only    # viewers watch; --control ask, or everyone again
@@ -126,8 +164,8 @@ opentraffic stop Orbit
 
 - A name is matched against the apps `services` lists, ignoring case. When two builds have the same name, the running one wins; otherwise give the path.
 - Mac apps are shared with `--via quick` (the default) or `--via opentunnel`, always with live collaboration. Sharing the same app the same way again starts that share. `--save` isn't supported.
-- [REST API](/docs/rest-api): `POST /v1/shares` with `macApp` (the path or name) and `macAppData` (`copy` or `empty`); `PATCH /v1/shares/{ref}` with `macAppControl`, `macAppAppearance` and `macAppWindowSize`; `POST /v1/shares/{ref}/restart-app` and `/reset-data`; `POST /v1/shares/{ref}/control` with `action` `allow`, `deny` or `take-back` (and a `viewer`) answers requests to control, which a share's `macApp.control` lists and the `control.requested` event announces; a share's `macApp.build` says whether the app is being rebuilt or its last build failed (`state` `idle`, `building` or `failed`, with the `message`, the `log` and the `command`), and `build.started`, `build.failed` and `build.succeeded` events announce each build; `GET /v1/services` lists the apps under `apps`. A share without the permissions is refused with 409 `missing_permissions`; a restart whose app doesn't come back fails with 502 `restart_failed`.
-- [MCP](/docs/mcp): the `share` tool takes `mac_app` and `mac_app_data`, `restart_mac_app` restarts the app (`reset_data` to start over), `control_mac_app` allows, denies, or takes back control, and `list_shares` reports a failed rebuild in `macApp.build`.
+- [REST API](/docs/rest-api): `POST /v1/shares` with `macApp` (the path or name) and `macAppData` (`copy` or `empty`); `PATCH /v1/shares/{ref}` with `macAppControl`, `macAppAppearance` and `macAppWindowSize`; `POST /v1/shares/{ref}/restart-app` and `/reset-data`; `POST /v1/shares/{ref}/control` with `action` `allow`, `deny` or `take-back` (and a `viewer`) answers requests to control, which a share's `macApp.control` lists and the `control.requested` event announces; a share's `macApp.build` says whether the app is being rebuilt or its last build failed (`state` `idle`, `building` or `failed`, with the `message`, the `log` and the `command`), and `build.started`, `build.failed` and `build.succeeded` events announce each build; `GET /v1/services` lists the apps under `apps`, installed ones with `installed: true` (a share's `macApp.installed` too). A share without the permissions is refused with 409 `missing_permissions`; a restart whose app doesn't come back fails with 502 `restart_failed`.
+- [MCP](/docs/mcp): `list_mac_apps` lists the apps to share (installed ones with `installed`), the `share` tool takes `mac_app` and `mac_app_data`, `restart_mac_app` restarts the app (`reset_data` to start over), `control_mac_app` allows, denies, or takes back control, and `list_shares` reports a failed rebuild in `macApp.build`.
 
 ## iPhone apps in the Simulator
 
@@ -148,14 +186,15 @@ Sharing an iPhone app shows viewers the Simulator's window for its device, cut t
 - No drag and drop between the app and other apps or the browser.
 - There's a short delay between a click and the change on screen, longer on a slow connection.
 - The copy isn't sandboxed. It runs as you, without the App Sandbox even when your app uses it, so it can reach what your app's own code can reach on this Mac. Viewers can only do what the app's windows and menus let them do, but share it with people you'd let use the app on your Mac.
-- Entitlements that need your team's signature (iCloud, app groups, keychain sharing, push notifications, and the like) are left out of the copy. The card warns you, and features that use them may not work.
+- Entitlements that need your team's signature (iCloud, app groups, keychain sharing, push notifications, and the like) are left out of the copy. The card warns you, and features that use them may not work. So are the private ones of Apple's own apps.
+- **File dialogs reach your files.** An Open or Save dialog in the copy starts in the copy's own Documents folder, but its sidebar leads to your folders (Desktop, Documents, iCloud Drive), and the copy can open and save files there as you can. Choose **Watch only** or **Ask to control** when you share an app whose File menu viewers shouldn't use.
 - From the first Mac app share until OpenTraffic quits, System Settings → Displays and Mission Control show a display called "OpenTraffic". That's where the copy's windows are kept, off screen.
 - The viewer's menus leave out the Apple menu, Services, Hide, Quit, full screen, and window tiling.
 - If OpenTraffic quits right after a share stops, an empty `<bundle id>.opentraffic` preferences file can stay behind. It holds no data.
 
 ## Troubleshooting
 
-- **The app isn't listed:** only debug builds and recent Xcode builds are. Share it by its path; if it's refused, the message says why (installed, signed by another team, or an Electron app).
+- **The app isn't listed:** your own apps are listed while they run, as recent Xcode builds, or once you chose them; installed apps while they run, under **Installed**. Share it by its path or with **Choose App…**; if it's refused, the message says why (an Electron app, a part of macOS, or an app that uses CloudKit).
 - **The share waits:** a permission is missing, and the Mac Apps list says which. Click **Set Up…**, or see [Permissions](/docs/mac-apps#permissions).
 - **"… is already shared by …":** that app is running in another share. Stop that one first.
 - **"The window server isn't answering", or the share takes long to start:** macOS's display system is slow to answer. It happens more while another OpenTraffic or a test run has its own off-screen display; the card warns about that. Wait a moment and try again. If it keeps happening, log out and back in, or restart the Mac.

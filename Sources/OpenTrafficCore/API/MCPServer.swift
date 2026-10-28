@@ -96,6 +96,8 @@ struct MCPServer: Sendable {
         switch name {
         case "list_shares":
             return Self.result(SharesResult(shares: await backend.listShares()))
+        case "list_mac_apps":
+            return Self.result(MacAppsResult(apps: await backend.macApps()))
         case "share":
             let request = APIShareRequest(
                 port: try arguments.int("port"),
@@ -212,6 +214,7 @@ struct MCPServer: Sendable {
     }
 
     private struct SharesResult: Encodable { let shares: [APIShare] }
+    private struct MacAppsResult: Encodable { let apps: [APIMacApp] }
     private struct CommentsResult: Encodable {
         let comments: [APIComment]
         var notice = MCPServer.visitorContentNotice
@@ -278,8 +281,8 @@ struct MCPServer: Sendable {
     file first. `edits` are exact changes the commenter made on the page (new text, or new style values): apply them \
     as given. `area` means the comment is about a region of that size, not just one element.
 
-    A Mac app you're building is shared with `share` and `mac_app` (its .app path or name); viewers use its \
-    window in the browser and pin comments to its controls. After rebuilding it to fix a comment, call \
+    A Mac app you're building, or an installed one (`list_mac_apps`), is shared with `share` and `mac_app` (its \
+    .app path or name); viewers use a copy of it in the browser and pin comments to its controls. After rebuilding it to fix a comment, call \
     `restart_mac_app` so the share shows the new build (a share that rebuilds the app when its sources \
     change does that itself: check `list_shares`' `macApp.build`, and fix the error when its state is \
     failed). When the user set the share to ask to control, \
@@ -324,8 +327,13 @@ struct MCPServer: Sendable {
             readOnly: true
         ),
         tool(
+            "list_mac_apps", "List Mac apps to share",
+            "Lists the Mac apps OpenTraffic can share, as `opentraffic services` does: the apps you're building (running debug builds, recent builds, apps shared before; with `projectDirectory`) and the installed apps that are running (`installed`: TextEdit, an App Store app, another developer's app). Pass an app's `bundle` path (or its name) to `share` as `mac_app`.",
+            readOnly: true
+        ),
+        tool(
             "share", "Share a local server",
-            "Publishes a local server (give `port`, or `url` such as http://localhost:3000) or a Mac app you're building (`mac_app`) on a public URL, with live collaboration on so people can pin comments on the page. OpenTraffic may ask the user to confirm in the app first; if they decline, this fails. Waits up to 30 s for the public URL. Give the user the returned `publicURL`.",
+            "Publishes a local server (give `port`, or `url` such as http://localhost:3000) or a Mac app (`mac_app`) on a public URL, with live collaboration on so people can pin comments on the page. OpenTraffic may ask the user to confirm in the app first; if they decline, this fails. Waits up to 30 s for the public URL. Give the user the returned `publicURL`.",
             readOnly: false, openWorld: true,
             properties: [
                 "port": ["type": "integer", "minimum": 1, "maximum": 65535, "description": "Port of a server on this Mac (127.0.0.1)."],
@@ -334,7 +342,7 @@ struct MCPServer: Sendable {
                 "name": ["type": "string", "description": "Name for the share in OpenTraffic."],
                 "collaboration": ["type": "boolean", "description": "Turn on live collaboration (comments, presence). Default true."],
                 "branch": ["type": "boolean", "description": "While it runs, work on a branch of its own (each resolved comment committed there); stopping merges it back into the current branch when that's clean. Only when the user asks for it."],
-                "mac_app": ["type": "string", "description": "A Mac app you're building, instead of `port` or `url`: the full path of its .app, or its name. Runs as an isolated copy; provider quick or opentunnel."],
+                "mac_app": ["type": "string", "description": "A Mac app, instead of `port` or `url`: the full path of its .app (one you're building or an installed one, like /System/Applications/TextEdit.app), or its name as list_mac_apps gives it. Runs as an isolated copy; provider quick or opentunnel."],
                 "mac_app_data": ["type": "string", "enum": ["copy", "empty"], "description": "With `mac_app`: start its copy with a copy of the app's data (default) or with none."],
             ]
         ),

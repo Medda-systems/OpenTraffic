@@ -377,6 +377,8 @@ const readPreference = (key, format) => {
   return format === "json" ? JSON.parse(x.stdout) : x.stdout.replace(/\n$/, "");
 };
 const preferencesBefore = { rememberedMacApps: readPreference("rememberedMacApps", "json"), selectedTunnelID: readPreference("selectedTunnelID", "raw") };
+// Installed apps the run shares (and so remembers), outside the work folder.
+const INSTALLED_APP = "/System/Applications/TextEdit.app";
 cleanups.push(async () => {
   if (KEEP) return;
   const put = (key, args) => {
@@ -388,7 +390,7 @@ cleanups.push(async () => {
   const before = preferencesBefore.rememberedMacApps;
   const remembered = readPreference("rememberedMacApps", "json");
   if (remembered) {
-    const kept = remembered.filter((p) => (before || []).includes(p) || !work.some((w) => p.startsWith(w)));
+    const kept = remembered.filter((p) => (before || []).includes(p) || (!work.some((w) => p.startsWith(w)) && p !== INSTALLED_APP));
     if (kept.length !== remembered.length) put("rememberedMacApps", !before && !kept.length ? null : ["-array", ...kept]);
   }
   const tunnel = readPreference("selectedTunnelID", "raw");
@@ -1057,6 +1059,63 @@ await step("Empty Data starts with the sample orders", async () => {
   assert(!(await page.eval(NOTE_FIELD(HOST_NOTE))), "the host's note shows in an empty share");
   assert(Buffer.compare(fs.readFileSync(ORBIT_FILE), hostOrders) === 0, "the host's orders.json changed");
   return url;
+});
+
+// ---------------------------------------------------------------- an installed app
+
+// TextEdit as installed (/System/Applications, SIP-protected, Apple's): shared with Empty Data, so the copy
+// never reads or writes TextEdit's real data; viewers type into its document from the page. Your own
+// TextEdit, if it runs, stays as it is, and AppleScript still finds it, not the copy.
+const TEXTEDIT_SHARE = "TextEdit E2E";
+const TYPED = "Typed by a viewer " + Date.now().toString(36);
+const textEditPIDs = () => run("/usr/bin/pgrep", ["-f", INSTALLED_APP + "/Contents/MacOS/TextEdit"]).stdout.trim().split("\n").filter(Boolean).map(Number);
+await step("an installed app (TextEdit) is shared and takes typing", async () => {
+  if (!fs.existsSync(INSTALLED_APP)) throw new Skip("no TextEdit on this Mac");
+  const ownBefore = textEditPIDs();
+  const out = cli(["share", INSTALLED_APP, "--via", VIA, "--name", TEXTEDIT_SHARE, "--empty-data"]);
+  const url = (out.match(/https:\/\/\S+/) || [])[0];
+  assert(url, "no public URL in: " + out.trim());
+  assert(out.includes("your own TextEdit and its data stay as they are"), "the share doesn't say viewers use a copy: " + out.trim());
+  cleanups.push(async () => { if (!KEEP) removeShare(TEXTEDIT_SHARE); });
+  const status = await until(() => { const s = cli(["status", TEXTEDIT_SHARE], { json: true }); return s.macApp?.state === "running" && s; }, "TextEdit's copy to run", 60_000);
+  assert(status.macApp.installed === true && status.macApp.data === "empty", "status: " + JSON.stringify(status.macApp));
+  assert(!status.macApp.build, "an installed app is rebuilt: " + JSON.stringify(status.macApp.build));
+  // The copy runs under its own name and identifier, from its session folder.
+  const sessions = path.join(HOME, "Library", "Application Support", "OpenTraffic", "Mac App Sessions");
+  const copy = fs.readdirSync(sessions).map((s) => path.join(sessions, s, "app", "TextEdit (Shared).app")).find((p) => fs.existsSync(p));
+  assert(copy, "no TextEdit (Shared).app in a session folder");
+  const info = JSON.parse(run("/usr/bin/plutil", ["-convert", "json", "-o", "-", path.join(copy, "Contents", "Info.plist")]).stdout);
+  assert(info.CFBundleIdentifier === "com.apple.TextEdit.opentraffic" && info.CFBundleName === "TextEdit (Shared)", "copy's Info.plist: " + info.CFBundleIdentifier + ", " + info.CFBundleName);
+  assert((info.CFBundleDocumentTypes || []).length && info.CFBundleDocumentTypes.every((t) => t.LSHandlerRank === "None"), "the copy's document types can open files for macOS");
+  const resolved = run("/usr/bin/osascript", ["-e", 'id of application "TextEdit"'], { timeout: 15_000 }).stdout.trim();
+  assert(resolved === "com.apple.TextEdit", "AppleScript's TextEdit is " + resolved);
+  await until(async () => (await fetch(url)).status === 200, "the public URL to answer 200", 60_000, 1000);
+  await page.cdp("Page.navigate", { url });
+  await page.waitFor(`document.getElementById('otm-dot')?.dataset.state === 'live' && !!${NODES()}.find((el) => el.dataset.role === 'AXTextArea')`, "TextEdit's window with its text area", 30_000);
+  assert(await page.eval(`document.getElementById('otm-name').textContent`) === "TextEdit", "the bar doesn't name TextEdit");
+  const area = `${NODES()}.find((el) => el.dataset.role === 'AXTextArea')`;
+  await page.click(await centerOf(area, "TextEdit's text"));
+  await page.waitFor(`document.activeElement?.dataset?.role === 'AXTextArea'`, "the text to take focus");
+  await page.cdp("Input.insertText", { text: TYPED });
+  await page.waitFor(`(${area})?.value === ${JSON.stringify(TYPED)}`, "the typed text in TextEdit's document", 10_000);
+  const ownAfter = textEditPIDs();
+  assert(JSON.stringify(ownAfter) === JSON.stringify(ownBefore), `your own TextEdit changed: ${ownBefore} → ${ownAfter}`);
+  return `${url}; your TextEdit ${ownBefore.length ? "(pid " + ownBefore.join(", ") + ") kept running" : "wasn't running"}`;
+});
+
+await step("stopping the installed app leaves nothing behind", async () => {
+  if (!fs.existsSync(INSTALLED_APP)) throw new Skip("no TextEdit on this Mac");
+  cli(["stop", TEXTEDIT_SHARE]);
+  const id = "com.apple.TextEdit.opentraffic";
+  const prefs = path.join(os.homedir(), "Library", "Preferences", id + ".plist");
+  const temp = run("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"]).stdout.trim();
+  // cfprefsd writes an emptied domain back to its file about 7.5 s later; OpenTraffic deletes it again at 10 s.
+  await sleep(11_000);
+  await until(() => !fs.existsSync(prefs) && !fs.existsSync(path.join(temp, id + ".savedState")) && !run("/usr/bin/pgrep", ["-f", "TextEdit (Shared).app"]).stdout.trim(),
+    "the copy, its preferences and saved state to go", 20_000, 300);
+  const sessions = path.join(HOME, "Library", "Application Support", "OpenTraffic", "Mac App Sessions");
+  const left = (fs.existsSync(sessions) ? fs.readdirSync(sessions) : []).filter((s) => fs.existsSync(path.join(sessions, s, "app", "TextEdit (Shared).app")));
+  assert(!left.length, "TextEdit's session folder is left: " + left);
 });
 
 await finish(0);

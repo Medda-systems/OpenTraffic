@@ -38,6 +38,9 @@ public struct MacApp: Sendable, Equatable, Hashable, Identifiable {
     /// When the app was last built (its executable's modification date).
     public var builtAt: Date?
     public var runtime: Runtime
+    /// An app installed on this Mac or made by another developer (TextEdit, an App Store app), not one
+    /// you're building: listed under Installed, shared as a copy like your own, never rebuilt.
+    public var isInstalled: Bool
 
     /// The Simulator device the app is installed in, nil for a Mac app.
     public var simulator: SimulatorDevice? {
@@ -47,7 +50,8 @@ public struct MacApp: Sendable, Equatable, Hashable, Identifiable {
 
     public init(
         name: String, bundle: URL, bundleIdentifier: String?, version: String? = nil, projectDirectory: URL?,
-        isRunning: Bool, pid: Int32? = nil, iconFile: URL? = nil, builtAt: Date? = nil, runtime: Runtime = .mac
+        isRunning: Bool, pid: Int32? = nil, iconFile: URL? = nil, builtAt: Date? = nil, runtime: Runtime = .mac,
+        isInstalled: Bool = false
     ) {
         self.name = name
         self.bundle = bundle
@@ -59,6 +63,7 @@ public struct MacApp: Sendable, Equatable, Hashable, Identifiable {
         self.iconFile = iconFile
         self.builtAt = builtAt
         self.runtime = runtime
+        self.isInstalled = isInstalled
     }
 }
 
@@ -70,9 +75,10 @@ public struct MacAppRefusal: Error, LocalizedError, Equatable, Sendable {
 }
 
 /// Finds the Mac apps you are building: running debug builds and recent Xcode builds, each with the
-/// project folder it comes from, plus the apps you chose or shared before (`remembered`). Installed
-/// apps, apps by other developers, Electron apps, OpenTraffic itself and the copies OpenTraffic runs
-/// for share sessions are never offered.
+/// project folder it comes from, plus the apps you chose or shared before (`remembered`) and the
+/// installed apps that are running (TextEdit, an App Store app, another developer's app: `isInstalled`).
+/// Electron apps, OpenTraffic itself, the copies OpenTraffic runs for share sessions, parts of macOS
+/// that aren't apps you use (the Finder, the Dock) and apps known not to work as a copy are never offered.
 public enum MacAppDiscovery {
     /// Where to look and what counts as yours; `current` is this Mac, tests pass their own.
     public struct Context: Sendable {
@@ -112,8 +118,11 @@ public enum MacAppDiscovery {
         var teams: Set<String> { ownTeams ?? SignatureCache.shared.ownTeams() }
     }
 
-    /// Every Mac app you are building: running ones first, then recent builds, each by name.
+    /// Every Mac app you are building (running ones first, then recent builds, each by name), then the
+    /// installed apps that are running (`isInstalled`), by name.
     public static func scan(_ context: Context = .current) async -> [MacApp] {
+        var context = context
+        if context.processes == nil { context.processes = userProcesses() } // looked at once
         let running = runningApps(context)
         var apps = running
         let runningPaths = Set(running.map(\.id))
@@ -121,15 +130,20 @@ public enum MacAppDiscovery {
         for build in recentBuilds(context) where !runningPaths.contains(build.id) && !runningProducts.contains(productKey(build)) {
             apps.append(build)
         }
-        return apps.sorted { a, b in
+        apps.sort { a, b in
             if a.isRunning != b.isRunning { return a.isRunning }
             return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
         }
+        let listed = Set(apps.map(\.id))
+        return apps + runningInstalledApps(context).filter { !listed.contains($0.id) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    /// The app at `path` (an .app you name explicitly), when it is yours to share; otherwise a refusal
-    /// that says why. Accepts builds inside a project folder, unsigned or ad hoc signed builds, and
-    /// apps signed by one of your own signing identities.
+    /// The app at `path` (an .app you name explicitly), or a refusal that says why. Any macOS
+    /// application is accepted: your builds (in a project folder, unsigned or ad hoc signed, or signed
+    /// by one of your own signing identities) and installed apps or other developers' (`isInstalled`),
+    /// except OpenTraffic itself, its session copies, Electron apps, parts of macOS that aren't apps you
+    /// use, and apps known not to work as a copy (`knownProblem`).
     public static func resolve(path: String, context: Context = .current) throws -> MacApp {
         let expanded = path.hasPrefix("~") ? context.homeDirectory + path.dropFirst() : path
         let url = URL(fileURLWithPath: expanded)
@@ -143,11 +157,13 @@ public enum MacAppDiscovery {
         }
         let name = displayName(bundle, info)
         if let reason = exclusion(bundle, info: info, context: context) { throw MacAppRefusal(reason(name)) }
-        let project = projectDirectory(of: bundle, context: context)
-        if let reason = refusal(name, project: project, signer: SignatureCache.shared.signer(bundle), ownTeams: context.teams) {
-            throw MacAppRefusal(reason)
-        }
-        return app(bundle: bundle, info: info, project: project, pid: runningPID(of: bundle, context: context))
+        var project = projectDirectory(of: bundle, context: context)
+        let yours = refusal(name, project: project, signer: SignatureCache.shared.signer(bundle), ownTeams: context.teams) == nil
+        let installed = !yours || (project == nil && isInstalled(bundle, context: context))
+        if let reason = knownProblem(bundle, info: info, installed: installed) { throw MacAppRefusal(reason(name)) }
+        // Comments on another developer's app aren't fixed in whatever folder happens to hold it.
+        if !yours { project = nil }
+        return app(bundle: bundle, info: info, project: project, pid: runningPID(of: bundle, context: context), installed: installed)
     }
 
     /// The apps at `paths` (chosen with Choose App… or shared before) that can still be shared, in the
@@ -182,6 +198,38 @@ public enum MacAppDiscovery {
             found[bundle.path] = app(bundle: bundle, info: info, project: project, pid: pid)
         }
         return Array(found.values)
+    }
+
+    /// Running apps that aren't builds of yours: installed ones (in /Applications, part of macOS, on a
+    /// disk image) and other developers' apps anywhere, `isInstalled`. Only apps with a place in the
+    /// Dock: not background or menu bar apps (LSUIElement), not parts of macOS that aren't apps you
+    /// use (`isSystemComponent`), and not the apps `knownProblem` refuses.
+    public static func runningInstalledApps(_ context: Context) -> [MacApp] {
+        let own = Set(runningApps(context).map(\.bundle.path))
+        var found: [String: MacApp] = [:]
+        for (pid, executable) in context.processes ?? userProcesses() {
+            guard let bundleURL = ElectronDiscovery.appBundle(forExecutable: executable) else { continue }
+            let bundle = ElectronDiscovery.realURL(bundleURL)
+            guard !own.contains(bundle.path) else { continue }
+            if let existing = found[bundle.path], let other = existing.pid, other < pid { continue }
+            guard !isNested(bundle), let info = macInfo(bundle), exclusion(bundle, info: info, context: context) == nil,
+                  info["LSBackgroundOnly"] as? Bool != true, !isAgent(info), !isSystemComponent(bundle),
+                  knownProblem(bundle, info: info, installed: true) == nil else { continue }
+            let project = projectDirectory(of: bundle, context: context)
+            if !isInstalled(bundle, context: context),
+               refusal("", project: project, signer: SignatureCache.shared.signer(bundle), ownTeams: context.teams) == nil {
+                continue // yours, though not a build runningApps lists (a signed release build of yours)
+            }
+            found[bundle.path] = app(bundle: bundle, info: info, project: nil, pid: pid, installed: true)
+        }
+        return Array(found.values)
+    }
+
+    /// A menu bar or background agent (LSUIElement): no Dock icon, usually no window of its own.
+    static func isAgent(_ info: [String: Any]) -> Bool {
+        if let flag = info["LSUIElement"] as? Bool { return flag }
+        if let flag = info["LSUIElement"] as? String { return flag == "1" || flag.lowercased() == "true" }
+        return false
     }
 
     // MARK: Xcode builds
@@ -279,18 +327,19 @@ public enum MacAppDiscovery {
 
     // MARK: Yours or not
 
-    /// Why an app isn't yours to share (nil when it is), by the Electron feature's rule
+    /// Why an app isn't one you build (nil when it is), by the Electron feature's rule
     /// (`ElectronDiscovery.isOwnBuild`): built in a project folder, not signed or signed ad hoc, or
     /// signed by one of your identities. Apple's own apps carry no team ID (CodeSignature reads them
-    /// as ad hoc), so code anchored to Apple is never yours.
+    /// as ad hoc), so code anchored to Apple is never yours. An app that isn't yours is still shared,
+    /// as an installed app (`MacApp.isInstalled`): no project, never rebuilt.
     public static func refusal(_ name: String, project: URL?, signer: Signer, ownTeams: Set<String>) -> String? {
-        if signer.isApple { return "\(name) is part of macOS or made by Apple; only apps you build can be shared." }
+        if signer.isApple { return "\(name) is part of macOS or made by Apple." }
         if project != nil { return nil }
         switch signer.signer {
         case .unsigned, .adHoc: return nil
         case .team(let team) where ownTeams.contains(team): return nil
         case .team(let team):
-            return "\(name) is signed by another developer (team \(team)), not by one of your signing identities; only apps you build can be shared."
+            return "\(name) is signed by another developer (team \(team)), not by one of your signing identities."
         case .unreadable:
             return "\(name)'s code signature can't be read, so OpenTraffic can't tell whether you built it."
         }
@@ -344,6 +393,47 @@ public enum MacAppDiscovery {
         return nil
     }
 
+    /// Parts of macOS that run as apps but aren't apps a person uses on their own (the Finder, the
+    /// Dock, Siri, Control Center, setup assistants): /System/Library and /Library/Apple. Listing them
+    /// would only clutter Installed, and a copy of one would fight the real one.
+    static func isSystemComponent(_ bundle: URL) -> Bool {
+        let path = bundle.path
+        return path.hasPrefix("/System/Library/") || path.hasPrefix("/Library/Apple/") || path.hasPrefix("/System/iOSSupport/")
+    }
+
+    /// An app inside another bundle (a crash reporter in a framework, a helper in an app's Library):
+    /// part of something else, not an app of its own.
+    static func isNested(_ bundle: URL) -> Bool {
+        let bundleExtensions: Set<String> = ["app", "framework", "bundle", "plugin", "xpc", "appex", "kext", "systemextension"]
+        return bundle.deletingLastPathComponent().pathComponents.contains { bundleExtensions.contains(($0 as NSString).pathExtension.lowercased()) }
+    }
+
+    /// Why an app is known not to work as a copy (nil when nothing is known), checked before a share
+    /// starts so the host hears it up front instead of seeing the copy crash:
+    ///
+    /// - parts of macOS that aren't apps a person uses (`isSystemComponent`);
+    /// - an installed app (or another developer's) that uses CloudKit: CloudKit stops a process that
+    ///   isn't signed with the app's iCloud entitlement, which only its developer can sign, so the
+    ///   copy quits as it starts (MindNode, measured). Your own builds may use CloudKit only later, or
+    ///   not at all in a debug build; they get the warning about entitlements the copy runs without.
+    static func knownProblem(_ bundle: URL, info: [String: Any], installed: Bool) -> ((String) -> String)? {
+        if isSystemComponent(bundle) {
+            return { "\($0) is part of macOS itself; a copy of it can't run on its own." }
+        }
+        if installed, usesCloudKit(MacAppSession.entitlements(of: bundle)) {
+            return { "\($0) keeps its data in iCloud (CloudKit), which only \($0) itself, signed by its developer, may use: a copy of it quits as it starts. OpenTraffic can't share it." }
+        }
+        return nil
+    }
+
+    /// Whether an app's entitlements ask for CloudKit.
+    static func usesCloudKit(_ entitlements: [String: Any]) -> Bool {
+        let services = entitlements["com.apple.developer.icloud-services"]
+        if let list = services as? [String] { return list.contains { $0.hasPrefix("CloudKit") } }
+        if let one = services as? String { return one == "*" || one.hasPrefix("CloudKit") }
+        return false
+    }
+
     /// Installed apps: in /Applications (yours or anyone's), part of macOS, on a mounted disk image,
     /// or run from a quarantine copy.
     static func isInstalled(_ bundle: URL, context: Context) -> Bool {
@@ -386,7 +476,7 @@ public enum MacAppDiscovery {
         return FileManager.default.fileExists(atPath: file.path) ? file : nil
     }
 
-    static func app(bundle: URL, info: [String: Any], project: URL?, pid: Int32?) -> MacApp {
+    static func app(bundle: URL, info: [String: Any], project: URL?, pid: Int32?, installed: Bool = false) -> MacApp {
         MacApp(
             name: displayName(bundle, info),
             bundle: bundle,
@@ -396,7 +486,8 @@ public enum MacAppDiscovery {
             isRunning: pid != nil,
             pid: pid,
             iconFile: iconFile(bundle, info),
-            builtAt: buildDate(bundle, info)
+            builtAt: buildDate(bundle, info),
+            isInstalled: installed
         )
     }
 

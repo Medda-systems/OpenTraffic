@@ -115,7 +115,7 @@ private struct Workbench {
     #expect(apps.first { $0.name == "Notes" }?.projectDirectory?.path == notes.path)
 }
 
-@Test func runningDebugBuildsAreListedAndEverythingElseIsNot() async throws {
+@Test func runningDebugBuildsAreListedThenRunningInstalledAppsAndNothingElse() async throws {
     let bench = try Workbench()
     defer { bench.remove() }
     let orbit = try bench.project("code/Orbit", xcode: "Orbit")
@@ -126,8 +126,12 @@ private struct Workbench {
     let distBuild = try bench.app("code/Tool/dist/Tool Preview.app", identifier: "com.example.tool.preview")
     let loose = try bench.app("Downloads/Loose.app", identifier: "com.example.loose") // unsigned, no project
     let notRunning = try bench.app("code/Tool/dist/Idle.app", identifier: "com.example.idle")
-    // Never listed, even though they're unsigned or sit in a project:
+    // Listed under Installed: an app in an Applications folder (unsigned or not), and macOS's own Calculator.
     let installed = try bench.app("Applications/Installed.app", identifier: "com.example.installed")
+    let notRunningInstalled = try bench.app("Applications/Idle.app", identifier: "com.example.installed.idle")
+    // Never listed, even though they're unsigned or sit in a project:
+    let menuBar = try bench.app("Applications/Menu Bar.app", identifier: "com.example.menubar", extra: ["LSUIElement": true])
+    let menuBarString = try bench.app("Applications/Agent.app", identifier: "com.example.agent", extra: ["LSUIElement": "1"])
     let electron = try bench.app("code/Tool/dist/Desk.app", identifier: "com.example.desk", electron: true)
     let session = try bench.app("Sessions/Orbit.app", identifier: "com.example.orbit.opentraffic")
     let openTraffic = try bench.app("code/OpenTraffic/dist/OpenTraffic.app", identifier: "se.medda.opentraffic")
@@ -143,9 +147,19 @@ private struct Workbench {
         (108, bench.executable(of: openTraffic)), (109, bench.executable(of: testCopy)), (110, bench.executable(of: thisProcess)),
         (111, bench.executable(of: daemon)), (112, bench.executable(of: helper)),
         (113, "/System/Applications/Calculator.app/Contents/MacOS/Calculator"), (114, "/usr/bin/swift"),
+        (115, bench.executable(of: menuBar)), (116, bench.executable(of: menuBarString)),
+        (117, "/System/Library/CoreServices/Dock.app/Contents/MacOS/Dock"),
     ]
-    let apps = await MacAppDiscovery.scan(bench.context(processes: processes, excluded: [thisProcess.path]))
+    let found = await MacAppDiscovery.scan(bench.context(processes: processes, excluded: [thisProcess.path]))
+    let apps = found.filter { !$0.isInstalled }
     #expect(Set(apps.map(\.bundle.path)) == Set([xcodeBuild, swiftPMBuild, distBuild, loose].map(\.path)))
+    // The apps being built come first, then the installed ones, by name.
+    let installedApps = Array(found.drop { !$0.isInstalled })
+    #expect(installedApps.allSatisfy { $0.isInstalled } && installedApps.count == found.count - apps.count)
+    #expect(installedApps.map(\.bundle.path) == ["/System/Applications/Calculator.app", installed.path])
+    #expect(installedApps.allSatisfy { $0.isRunning && $0.projectDirectory == nil })
+    #expect(installedApps.first { $0.bundle.path == installed.path }?.pid == 105)
+    #expect(!found.contains { $0.bundle.path == notRunningInstalled.path })
     // The running Xcode build is the same product as the DerivedData build: listed once, as running.
     let orbitApp = try #require(apps.first { $0.bundle.path == xcodeBuild.path })
     #expect(orbitApp.isRunning && orbitApp.pid == 99)
@@ -183,8 +197,58 @@ private struct Workbench {
     #expect(refusal(session.path) == "Tool is a copy OpenTraffic made for a share session, not your app.")
     let openTraffic = try bench.app("code/OpenTraffic/dist/OpenTraffic.app", identifier: "se.medda.opentraffic")
     #expect(refusal(openTraffic.path) == "OpenTraffic can't share itself.")
-    // macOS's own apps have no team ID, which CodeSignature reads as ad hoc: the Apple anchor decides.
-    #expect(refusal("/System/Applications/Calculator.app")?.contains("part of macOS or made by Apple") == true)
+    // Installed apps and macOS's own are shared too, marked installed and never tied to a project.
+    let calculator = try MacAppDiscovery.resolve(path: "/System/Applications/Calculator.app", context: bench.context())
+    #expect(calculator.isInstalled && calculator.projectDirectory == nil && calculator.bundleIdentifier == "com.apple.calculator")
+    let installed = try bench.app("Applications/Installed.app", identifier: "com.example.installed")
+    #expect(try MacAppDiscovery.resolve(path: installed.path, context: bench.context()).isInstalled)
+    #expect(!app.isInstalled && !viaHome.isInstalled)
+    // Parts of macOS that aren't apps a person uses are refused before anything starts.
+    #expect(refusal("/System/Library/CoreServices/Dock.app") == "Dock is part of macOS itself; a copy of it can't run on its own.")
+}
+
+@Test func anInstalledAppThatUsesCloudKitIsRefusedBeforeItStarts() throws {
+    let bench = try Workbench()
+    defer { bench.remove() }
+    // A real executable signed ad hoc with the iCloud entitlements an App Store app has (MindNode's).
+    func signedApp(_ path: String, identifier: String, entitlements: [String: Any]) throws -> URL {
+        let bundle = try bench.app(path, identifier: identifier)
+        let executable = URL(fileURLWithPath: bench.executable(of: bundle))
+        try FileManager.default.removeItem(at: executable)
+        try FileManager.default.copyItem(atPath: "/usr/bin/true", toPath: executable.path)
+        let file = bench.root.appendingPathComponent(identifier + ".entitlements")
+        try PropertyListSerialization.data(fromPropertyList: entitlements, format: .xml, options: 0).write(to: file)
+        #expect(ToolOutput.run("/usr/bin/codesign", ["--force", "--sign", "-", "--entitlements", file.path, bundle.path], timeout: 60) != nil)
+        return bundle
+    }
+    let cloudKit: [String: Any] = ["com.apple.developer.icloud-services": ["CloudKit"], "com.apple.developer.icloud-container-identifiers": ["iCloud.com.example.maps"]]
+    let installed = try signedApp("Applications/Maps Pro.app", identifier: "com.example.mapspro", entitlements: cloudKit)
+    #expect(throws: MacAppRefusal("Maps Pro keeps its data in iCloud (CloudKit), which only Maps Pro itself, signed by its developer, may use: a copy of it quits as it starts. OpenTraffic can't share it.")) {
+        try MacAppDiscovery.resolve(path: installed.path, context: bench.context())
+    }
+    // Not listed under Installed either, while it runs.
+    let processes: [(pid: Int32, executable: String)] = [(201, bench.executable(of: installed))]
+    #expect(MacAppDiscovery.runningInstalledApps(bench.context(processes: processes)).isEmpty)
+    // iCloud Documents alone (CotEditor) is fine: the copy runs without it.
+    let documents = try signedApp("Applications/Notes Pro.app", identifier: "com.example.notespro",
+                                  entitlements: ["com.apple.developer.icloud-services": ["CloudDocuments"]])
+    #expect(try MacAppDiscovery.resolve(path: documents.path, context: bench.context()).isInstalled)
+    // Your own build may use CloudKit: it's shared, with the warning about what the copy runs without.
+    _ = try bench.project("code/Maps")
+    let own = try signedApp("code/Maps/dist/Maps.app", identifier: "com.example.maps", entitlements: cloudKit)
+    #expect(try !MacAppDiscovery.resolve(path: own.path, context: bench.context()).isInstalled)
+    #expect(MacAppDiscovery.usesCloudKit(["com.apple.developer.icloud-services": "*"]))
+    #expect(!MacAppDiscovery.usesCloudKit(["com.apple.developer.icloud-services": ["CloudDocuments"]]))
+}
+
+@Test func appsInsideOtherBundlesAreNotListedAsInstalled() throws {
+    let bench = try Workbench()
+    defer { bench.remove() }
+    let nested = try bench.app("Applications/Tools.framework/Versions/A/Crash Reporter.app", identifier: "com.example.crash")
+    let top = try bench.app("Applications/Editor.app", identifier: "com.example.editor")
+    let processes: [(pid: Int32, executable: String)] = [(301, bench.executable(of: nested)), (302, bench.executable(of: top))]
+    #expect(MacAppDiscovery.runningInstalledApps(bench.context(processes: processes)).map(\.bundle.path) == [top.path])
+    #expect(MacAppDiscovery.isNested(nested) && !MacAppDiscovery.isNested(top))
 }
 
 @Test func appsYouChoseOrSharedBeforeAreListedEvenWhenNotRunning() async throws {
@@ -215,7 +279,7 @@ private struct Workbench {
     #expect(MacAppDiscovery.refusal("Orbit", project: nil, signer: .init(.adHoc), ownTeams: teams) == nil)
     #expect(MacAppDiscovery.refusal("Orbit", project: nil, signer: .init(.unsigned), ownTeams: teams) == nil)
     #expect(MacAppDiscovery.refusal("Chat", project: nil, signer: .init(.team("QQQQQ11111")), ownTeams: teams)
-        == "Chat is signed by another developer (team QQQQQ11111), not by one of your signing identities; only apps you build can be shared.")
+        == "Chat is signed by another developer (team QQQQQ11111), not by one of your signing identities.")
     #expect(MacAppDiscovery.refusal("Odd", project: nil, signer: .init(.unreadable), ownTeams: teams)?.contains("can't be read") == true)
     // In a project folder, a build signed for distribution by someone else's team is still your build...
     #expect(MacAppDiscovery.refusal("Orbit", project: URL(fileURLWithPath: "/code/Orbit"), signer: .init(.team("ZZZZZ99999")), ownTeams: teams) == nil)
@@ -273,15 +337,20 @@ func aRunningBuildIsFoundAmongThisMacsProcesses() async throws {
     #expect(app.name == "Live")
 }
 
-@Test func installedAndOtherPeoplesAppsNeverShowUpOnThisMac() async {
+@Test func onThisMacInstalledAppsAreMarkedAndExcludedOnesNeverShowUp() async {
     let apps = await MacAppDiscovery.scan(MacAppDiscovery.Context(ownTeams: []))
     for app in apps {
-        #expect(!app.bundle.path.hasPrefix("/Applications/") && !app.bundle.path.hasPrefix("/System/"), "\(app.bundle.path)")
+        if app.bundle.path.hasPrefix("/Applications/") || app.bundle.path.hasPrefix("/System/") || (app.bundleIdentifier ?? "").hasPrefix("com.apple.") {
+            #expect(app.isInstalled && app.isRunning && app.projectDirectory == nil, "\(app.bundle.path)")
+        }
+        #expect(!app.bundle.path.hasPrefix("/System/Library/"), "\(app.bundle.path)")
         #expect(!(app.bundleIdentifier ?? "").hasSuffix(".opentraffic"), "\(app.bundle.path)")
         #expect(!(app.bundleIdentifier ?? "").hasPrefix("se.medda.opentraffic"), "\(app.bundle.path)")
-        #expect(!(app.bundleIdentifier ?? "").hasPrefix("com.apple."), "\(app.bundle.path)")
         #expect(!FileManager.default.fileExists(atPath: app.bundle.appendingPathComponent("Contents/Frameworks/Electron Framework.framework").path), "\(app.bundle.path)")
     }
+    // Your builds first, then the installed apps.
+    let tail = Array(apps.drop { !$0.isInstalled })
+    #expect(tail.allSatisfy { $0.isInstalled })
 }
 
 @Test(.enabled(if: hasFixtureApp, "sh Examples/macapp-orbit/package.sh"))

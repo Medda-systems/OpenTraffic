@@ -75,7 +75,7 @@ private func text(_ result: [String: Any]) throws -> [String: Any] {
     let tools = try #require(try await api.mcpResult("tools/list")["tools"] as? [[String: Any]])
     let names = Set(tools.compactMap { $0["name"] as? String })
     #expect(names == [
-        "list_shares", "share", "start_share", "stop_share", "get_feedback", "resolve_comment", "reply_to_comment",
+        "list_shares", "list_mac_apps", "share", "start_share", "stop_share", "get_feedback", "resolve_comment", "reply_to_comment",
         "get_screenshot", "get_errors", "get_logs", "wait_for_feedback", "claim_comment", "release_comment", "restart_mac_app", "control_mac_app",
     ])
     for tool in tools {

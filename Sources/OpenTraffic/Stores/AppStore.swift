@@ -233,6 +233,9 @@ final class AppStore {
     /// The ids of detected Mac apps listed only because the host chose or shared them (they can be
     /// removed from the list).
     var rememberedMacAppIDs: Set<String> = []
+    /// Whether the host has read the note a share of an installed app shows once (viewers use a copy
+    /// of the app with a copy of its data), with Got It on the share's card.
+    var hasSeenInstalledMacAppNote = UserDefaults.standard.bool(forKey: AppStore.installedMacAppNoteKey)
     /// Shared Mac apps' isolated copies, the tasks reading their logs and events, and copies still
     /// quitting (OpenTraffic waits for those before it quits, and before it starts another copy).
     @ObservationIgnored var macAppSessions: [UUID: MacAppSession] = [:]

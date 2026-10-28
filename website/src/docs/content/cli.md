@@ -14,6 +14,7 @@ opentraffic share 5173 --collab               # a temporary public URL with live
 opentraffic share 5173 --via opentunnel       # a lasting OpenTunnel address
 opentraffic share dist/mac-arm64/Orbit.app    # an Electron app you built (see Electron apps)
 opentraffic share Orbit --via opentunnel      # a Mac app you're building, by name or .app path
+opentraffic share /System/Applications/TextEdit.app --empty-data   # an installed app, as a copy
 opentraffic share 3000 --via domain --hostname app.example.com
 opentraffic                                   # your shares (same as `opentraffic list`)
 opentraffic status Orbit                      # URL, connection path, who's there, protection
@@ -34,7 +35,7 @@ opentraffic stop --all
 | `list` (`ls`) | Your shares, their state, public URL, people, and open comments. The default command. |
 | `status <share>` | One share in detail: public and local URL, way of sharing, who can open it, collaboration and who's there, project, schedule, health of each hop, last error. For a Mac app, its state and viewers, and who may control it: with ask to control, who has control and who asks, with their number; when it rebuilds the app from its sources, whether a build runs or the last one failed, with the compiler's first error and the build log. |
 | `share <port\|host:port\|url> [options]` | Share a local server. See below. |
-| `share <app name\|App.app> [--via quick\|opentunnel] [--empty-data]` | Share a Mac app you're building (SwiftUI, AppKit, Catalyst), by its name as `services` lists it or its .app path: an isolated copy runs hidden on this Mac and viewers use its window in the browser, with live collaboration. `--empty-data` starts the copy without the app's data. Needs Accessibility and Screen Recording for OpenTraffic. See [Mac apps](/docs/mac-apps). |
+| `share <app name\|App.app> [--via quick\|opentunnel] [--empty-data]` | Share a Mac app you're building (SwiftUI, AppKit, Catalyst), by its name as `services` lists it or its .app path, or an installed app by its path (`/System/Applications/TextEdit.app`, an App Store app, another developer's): an isolated copy runs hidden on this Mac and viewers use its window in the browser, with live collaboration. Apps that can't run as a copy (they use CloudKit, or are part of macOS) are refused with the reason. `--empty-data` starts the copy without the app's data. Needs Accessibility and Screen Recording for OpenTraffic. See [Mac apps](/docs/mac-apps). |
 | `start <share>` / `stop <share>` / `stop --all` / `restart <share>` | Start, stop, restart. |
 | `restart <share> --app` / `--reset-data` | Mac app shares: start just the app again from its latest build on the same address (after rebuilding it to show a fix), or start it over from the data it started with. |
 | `remove <share> [--yes]` (`rm`) | Remove a share with its settings and comments. Asks first on a terminal; scripts pass `--yes`. |
@@ -90,7 +91,7 @@ opentraffic stop --all
 
 | Command | Does |
 | --- | --- |
-| `services` | Web servers running on this Mac, their page title, process, how long they've been up, and which share publishes them; then the Mac apps you're building (running debug builds, recent builds, and apps you chose with **Choose App…** or shared before), with their project folder. |
+| `services` | Web servers running on this Mac, their page title, process, how long they've been up, and which share publishes them; then the Mac apps you're building (running debug builds, recent builds, and apps you chose with **Choose App…** or shared before), with their project folder; then **Installed apps**: the installed apps and other developers' apps that are running, or that you shared before, with their path. |
 | `projects` / `project start\|stop <name>` | Projects: shares that start and stop together. |
 | `domains` | Domains in your Cloudflare account. |
 | `doctor` | Checks OpenTraffic, its API, and whether each way of sharing is ready (and why not). |

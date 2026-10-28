@@ -14,7 +14,8 @@ the background. Environment:
 | Tool | Does |
 | --- | --- |
 | `list_shares` | Shares with state, URLs, people in the session, comment counts; for a Mac app share, how its app runs, who may control it, and whether its rebuild failed (`macApp.build`). |
-| `share` | Publishes a local `port` or `url` (`provider`: `quick`, `tailscale`, `ngrok`, `opentunnel`; `name`; `collaboration`, default on), or a Mac app you're building (`mac_app`: its .app path or name; `mac_app_data`: `copy` or `empty`; see [Mac apps](/docs/mac-apps)). |
+| `list_mac_apps` | The Mac apps to share, as `opentraffic services` lists them: the ones you're building (with `projectDirectory`), then the installed apps that are running (`installed`: TextEdit, App Store apps, other developers' apps). |
+| `share` | Publishes a local `port` or `url` (`provider`: `quick`, `tailscale`, `ngrok`, `opentunnel`; `name`; `collaboration`, default on), or a Mac app (`mac_app`: its .app path or name, one you're building or an installed one; `mac_app_data`: `copy` or `empty`; see [Mac apps](/docs/mac-apps)). |
 | `start_share`, `stop_share` | By id or name. |
 | `restart_mac_app` | Starts a shared Mac app again from its latest build on the same URL, after rebuilding it to show a fix (`reset_data`: over from its starting data). |
 | `control_mac_app` | For a Mac app share set to ask to control: `allow` a viewer who asks, `deny` a request, or `take_back` control. `list_shares` shows who asks (`macApp.control.requests`) and who has control. |
@@ -33,6 +34,7 @@ smaller `timeout_seconds`.
 | Tool | Required arguments | Optional arguments |
 | --- | --- | --- |
 | `list_shares` | None | None |
+| `list_mac_apps` | None | None |
 | `share` | `port`, `url`, or `mac_app` | `provider`, `name`, `collaboration` (default true), `mac_app_data` (`copy` or `empty`; default `copy`) |
 | `start_share` / `stop_share` | `share` | None |
 | `restart_mac_app` | `share` | `reset_data` (default false) |

@@ -56,7 +56,7 @@ through `OPENTRAFFIC_TEST_DATA_HOME`: the run never reads or writes Orbit's data
 `summary.json` with every step's result and duration. At the end the shares are stopped, which removes
 their OpenTunnel routes, and removed with their comments, and the copy quits (SIGTERM to the process the
 script started). The copy's preferences aren't isolated by its home: the script then puts back what the
-run changed in them (the scratch Orbit it remembered under `rememberedMacApps`, and `selectedTunnelID`).
+run changed in them (the scratch Orbit and TextEdit it remembered under `rememberedMacApps`, and `selectedTunnelID`).
 
 ## The steps
 
@@ -103,6 +103,8 @@ run changed in them (the scratch Orbit it remembered under `rememberedMacApps`, 
 | no page errors | no JavaScript errors on the page |
 | the host's saved orders are untouched | after everything above (restarts, Reset Data, rebuilds), the host's `orders.json` is unchanged and alone in its folder |
 | Empty Data starts with the sample orders | the share is stopped and Orbit shared again with `--empty-data`: status says `empty`, the page shows the 30 sample orders and Gift wrap, not the host's note |
+| an installed app (TextEdit) is shared and takes typing | `opentraffic share /System/Applications/TextEdit.app --empty-data` (Empty Data, so TextEdit's real data is never read or written): the command says viewers use a copy, the status has `installed: true` and no `build`; the copy is `TextEdit (Shared).app` with the identifier `com.apple.TextEdit.opentraffic`, its document types ranked None; `osascript -e 'id of application "TextEdit"'` still answers `com.apple.TextEdit`; the page shows TextEdit's new document and the text typed there arrives in it; your own TextEdit, if it runs, keeps its process. Skipped without TextEdit |
+| stopping the installed app leaves nothing behind | after `stop`: no `TextEdit (Shared)` process, no `com.apple.TextEdit.opentraffic` preferences or saved state, no session folder for it |
 
 ## Results
 
@@ -123,3 +125,8 @@ fix shown in 22 s).
 28 October 2026, the same Mac, with Orbit saving its orders: all steps passed in 65 to 84 s without
 `--card`; the copy showed the host's saved note, saved the page's new order in its own home, and the
 host's file stayed byte for byte the same; the Empty Data share started in 4 to 5 s.
+
+28 October 2026, the same Mac, with an installed app: all steps passed in 106 s without `--card` (load
+average about 10); TextEdit's copy started in under 7 s, took the typed text, and AppleScript and the
+user's own running TextEdit were unaffected; stopping it left no preferences, saved state or session
+folder (12 s, most of it waiting out cfprefsd's write-back).

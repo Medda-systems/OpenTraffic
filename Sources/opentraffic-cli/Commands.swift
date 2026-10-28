@@ -17,9 +17,10 @@ enum Commands {
             open in the browser and its main process runs sandboxed on this Mac (quick, opentunnel).
 
             Mac apps: share a native app you're building (SwiftUI, AppKit, Catalyst) by its name as
-            `opentraffic services` lists it, or by its .app path. An isolated copy runs hidden on this
-            Mac and viewers use its window in the browser, with live collaboration (quick, opentunnel).
-            The copy starts with a copy of the app's data; --empty-data starts it with none.
+            `opentraffic services` lists it, or any Mac app by its .app path, installed ones included
+            (/System/Applications/TextEdit.app). An isolated copy runs hidden on this Mac and viewers
+            use its window in the browser, with live collaboration (quick, opentunnel). The copy starts
+            with a copy of the app's data; --empty-data starts it with none.
             OpenTraffic needs Accessibility and Screen Recording for it.
 
             Ways to share (--via):
@@ -132,7 +133,7 @@ enum Commands {
         CommandSpec(name: "logs", group: "Feedback", usage: "logs <share> [-n LINES] [-f]", summary: "The share's log; -f keeps following it", flags: ["follow"], options: ["lines"], arguments: 1...1),
         CommandSpec(name: "watch", group: "Feedback", usage: "watch [share]", summary: "Follow what happens: shares starting, people joining, comments", arguments: 0...1),
         // This Mac
-        CommandSpec(name: "services", group: "This Mac", usage: "services", summary: "Web servers running on this Mac, with how long they've been up, and the Mac apps you're building"),
+        CommandSpec(name: "services", group: "This Mac", usage: "services", summary: "Web servers running on this Mac, with how long they've been up, the Mac apps you're building, and the installed apps that are running"),
         CommandSpec(name: "projects", group: "This Mac", usage: "projects", summary: "Projects: shares that start and stop together"),
         CommandSpec(name: "project", group: "This Mac", usage: "project start|stop <name>", summary: "Start or stop every share in a project", arguments: 2...2),
         CommandSpec(name: "domains", group: "This Mac", usage: "domains", summary: "Domains in your Cloudflare account, for --via domain"),
@@ -381,8 +382,12 @@ struct Context {
             say("\(style.bold(share.name)) is \(share.state)… follow it with `opentraffic status \"\(share.name)\"`.")
         }
         if let extra { say(extra) }
-        if invocation.command == "share", share.macApp != nil, share.state != "failed" {
-            say(style.dim("  After rebuilding the app, `opentraffic restart \"\(share.name)\" --app` shows the new build."))
+        if invocation.command == "share", let app = share.macApp, share.state != "failed" {
+            if app.installed == true {
+                say(style.dim("  Viewers use a copy of \(app.name) with \(app.data == "empty" ? "no data" : "a copy of its data"); your own \(app.name) and its data stay as they are."))
+            } else {
+                say(style.dim("  After rebuilding the app, `opentraffic restart \"\(share.name)\" --app` shows the new build."))
+            }
         }
     }
 
@@ -835,8 +840,11 @@ struct Context {
         sayMacApps(apps)
     }
 
-    /// The Mac apps being built here, after the web servers.
+    /// The Mac apps being built here, after the web servers, then the installed apps that run.
     func sayMacApps(_ apps: [MacAppEntry]) {
+        let installed = apps.filter { $0.installed == true }
+        let apps = apps.filter { $0.installed != true }
+        defer { sayInstalledApps(installed) }
         guard !apps.isEmpty else { return }
         say("\n\(style.bold("Mac apps"))")
         var table = Table(header: ["NAME", "STATE", "PROJECT", "SHARED AS"])
@@ -852,6 +860,25 @@ struct Context {
         if let app = apps.first(where: { $0.sharedAs == nil && $0.device == nil }) {
             let name = app.name.contains(" ") ? "\"\(app.name)\"" : app.name
             say(style.dim("\nShare one with `opentraffic share \(name)`."))
+        }
+    }
+
+    /// Installed apps and other developers' that are running: shared as a copy, like yours.
+    func sayInstalledApps(_ apps: [MacAppEntry]) {
+        guard !apps.isEmpty else { return }
+        say("\n\(style.bold("Installed apps"))")
+        var table = Table(header: ["NAME", "STATE", "APP", "SHARED AS"])
+        for app in apps {
+            table.rows.append([
+                style.bold(app.name),
+                app.running ? style.green("running") : "not running",
+                (app.bundle as NSString).abbreviatingWithTildeInPath,
+                app.sharedAs.map { style.cyan($0) } ?? style.dim("not shared"),
+            ])
+        }
+        say(table.render(style: style))
+        if let app = apps.first(where: { $0.sharedAs == nil }) {
+            say(style.dim("\nShare one with `opentraffic share \(app.bundle.contains(" ") ? "\"\(app.bundle)\"" : app.bundle)`: viewers use a copy of it, with a copy of its data."))
         }
     }
 

@@ -22,7 +22,7 @@ struct MacAppSessionPieceTests {
         #expect(MacAppSession.copyIdentifier(for: bare) == "se.medda.opentraffic.shared.my-app-2")
     }
 
-    @Test func entitlementsThatNeedATeamAndTheSandboxAreDropped() {
+    @Test func entitlementsThatNeedATeamOrAppleAndTheSandboxAreDropped() {
         let (kept, dropped) = MacAppSession.sharedEntitlements([
             "com.apple.security.app-sandbox": true,
             "com.apple.security.network.client": true,
@@ -31,10 +31,100 @@ struct MacAppSessionPieceTests {
             "keychain-access-groups": ["TEAM.*"],
             "com.apple.developer.icloud-services": ["CloudKit"],
             "com.apple.application-identifier": "TEAM.se.medda.orbit",
+            // Apple's own apps (TextEdit, Calculator) and push: macOS kills an ad hoc signed app claiming these.
+            "com.apple.private.hid.client.event-dispatch.internal": true,
+            "com.apple.runningboard.terminateprocess": true,
+            "user-preference-write": true,
+            "aps-environment": "production",
         ])
         #expect(Set(kept.keys) == ["com.apple.security.network.client", "com.apple.security.get-task-allow"])
-        #expect(dropped == ["com.apple.application-identifier", "com.apple.developer.icloud-services", "com.apple.security.app-sandbox",
-                            "com.apple.security.application-groups", "keychain-access-groups"])
+        #expect(dropped == ["aps-environment", "com.apple.application-identifier", "com.apple.developer.icloud-services",
+                            "com.apple.private.hid.client.event-dispatch.internal", "com.apple.runningboard.terminateprocess",
+                            "com.apple.security.app-sandbox", "com.apple.security.application-groups", "keychain-access-groups",
+                            "user-preference-write"])
+        // The card names the features the app may miss, not the sandbox, identifiers or Apple's internals.
+        #expect(dropped.filter(MacAppSession.isNoticeable) == ["aps-environment", "com.apple.developer.icloud-services",
+                                                              "com.apple.security.application-groups", "keychain-access-groups"])
+    }
+
+    @Test func anInstalledAppsCopyGoesByAnotherNameSoAppleScriptFindsTheRealOne() {
+        var app = MacApp(name: "TextEdit", bundle: URL(fileURLWithPath: "/System/Applications/TextEdit.app"), bundleIdentifier: "com.apple.TextEdit",
+                         projectDirectory: nil, isRunning: true, isInstalled: true)
+        #expect(MacAppSession.copyBundleName(for: app) == "TextEdit (Shared)")
+        app.isInstalled = false
+        #expect(MacAppSession.copyBundleName(for: app) == nil)
+    }
+
+    @Test func theSavedStateAppKitWritesToTheTemporaryFolderIsRemoved() throws {
+        let temporary = try #require(MacAppSession.userTemporaryDirectory())
+        #expect(temporary.path.hasPrefix("/var/folders/") || temporary.path.hasPrefix("/private/var/folders/"))
+        let identifier = "se.medda.opentraffic.statetest.opentraffic"
+        let state = temporary.appendingPathComponent("\(identifier).savedState")
+        try FileManager.default.createDirectory(at: state, withIntermediateDirectories: true)
+        MacAppSession.removePreferences(identifier, realHome: ElectronSandbox.realHomeDirectory)
+        #expect(!FileManager.default.fileExists(atPath: state.path))
+        // Never another app's.
+        let other = temporary.appendingPathComponent("se.medda.opentraffic.statetest.savedState")
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: other) }
+        MacAppSession.removePreferences("se.medda.opentraffic.statetest", realHome: ElectronSandbox.realHomeDirectory)
+        #expect(FileManager.default.fileExists(atPath: other.path))
+    }
+
+    @Test func theCopyNeverStandsInForTheAppInLaunchServices() {
+        var info: [String: Any] = [
+            "CFBundleDocumentTypes": [["CFBundleTypeName": "Text", "LSItemContentTypes": ["public.plain-text"], "LSHandlerRank": "Default"],
+                                      ["CFBundleTypeName": "Note", "LSItemContentTypes": ["com.example.note"]]],
+            "CFBundleURLTypes": [["CFBundleURLSchemes": ["example"]]],
+            "NSServices": [["NSMenuItem": ["default": "Make Note"]]],
+            "UTExportedTypeDeclarations": [["UTTypeIdentifier": "com.example.note"]],
+            "UTImportedTypeDeclarations": [["UTTypeIdentifier": "com.other.thing"]],
+            "CFBundleIdentifier": "com.example.notes.opentraffic",
+        ]
+        MacAppSession.detachFromLaunchServices(&info)
+        let types = info["CFBundleDocumentTypes"] as? [[String: Any]] ?? []
+        #expect(types.count == 2 && types.allSatisfy { $0["LSHandlerRank"] as? String == "None" })
+        #expect(types.first?["LSItemContentTypes"] as? [String] == ["public.plain-text"])
+        #expect(info["CFBundleURLTypes"] == nil && info["NSServices"] == nil && info["UTExportedTypeDeclarations"] == nil)
+        let imported = (info["UTImportedTypeDeclarations"] as? [[String: Any]] ?? []).compactMap { $0["UTTypeIdentifier"] as? String }
+        #expect(imported == ["com.other.thing", "com.example.note"])
+        #expect(info["CFBundleIdentifier"] as? String == "com.example.notes.opentraffic")
+    }
+
+    /// TextEdit as installed: SIP-protected, Apple-signed with private entitlements. Its copy must be
+    /// signed validly without them and leave the original as it was.
+    @Test(.enabled(if: FileManager.default.fileExists(atPath: "/System/Applications/TextEdit.app/Contents/Info.plist")))
+    func anInstalledAppleAppIsCopiedWithoutItsPrivateEntitlements() throws {
+        let scratch = try Scratch()
+        let original = URL(fileURLWithPath: "/System/Applications/TextEdit.app")
+        let before = try Data(contentsOf: original.appendingPathComponent("Contents/Info.plist"))
+        let copy = scratch.url.appendingPathComponent("session/app/TextEdit.app")
+        let prepared = try MacAppSession.makeIsolatedCopy(of: original, at: copy, bundleIdentifier: "com.apple.TextEdit.opentraffic")
+        #expect(prepared.wasSandboxed)
+        #expect(Bundle(url: copy)?.bundleIdentifier == "com.apple.TextEdit.opentraffic")
+        let entitlements = MacAppSession.entitlements(of: copy)
+        #expect(!entitlements.isEmpty && entitlements.keys.allSatisfy { $0.hasPrefix("com.apple.security.") })
+        #expect(entitlements["com.apple.security.app-sandbox"] == nil)
+        #expect(codesignVerifies(copy))
+        // iCloud is named on the card; the private entitlements and the sandbox aren't.
+        #expect(prepared.warnings.count == 1 && prepared.warnings[0].contains("com.apple.developer.ubiquity-container-identifiers"))
+        #expect(!prepared.warnings[0].contains("com.apple.private"))
+        let types = Bundle(url: copy)?.object(forInfoDictionaryKey: "CFBundleDocumentTypes") as? [[String: Any]] ?? []
+        #expect(!types.isEmpty && types.allSatisfy { $0["LSHandlerRank"] as? String == "None" })
+        #expect(try Data(contentsOf: original.appendingPathComponent("Contents/Info.plist")) == before)
+        #expect(Bundle(url: original)?.bundleIdentifier == "com.apple.TextEdit")
+    }
+
+    @Test func theCopysExtensionsAreRemovedAndItsOtherPlugInsKept() throws {
+        let scratch = try Scratch()
+        let bundle = scratch.url.appendingPathComponent("Notes.app")
+        for item in ["Contents/PlugIns/Share.appex", "Contents/PlugIns/Importer.bundle", "Contents/Extensions/Widget.appex", "Contents/XPCServices/Worker.xpc"] {
+            try FileManager.default.createDirectory(at: bundle.appendingPathComponent(item), withIntermediateDirectories: true)
+        }
+        MacAppSession.removeExtensions(in: bundle)
+        let exists = { (item: String) in FileManager.default.fileExists(atPath: bundle.appendingPathComponent(item).path) }
+        #expect(!exists("Contents/PlugIns/Share.appex") && !exists("Contents/Extensions/Widget.appex"))
+        #expect(exists("Contents/PlugIns/Importer.bundle") && exists("Contents/XPCServices/Worker.xpc"))
     }
 
     @Test func pointerMovesAreNotRecordedButEverythingThatChangesTheAppIs() {
@@ -104,6 +194,12 @@ struct MacAppSessionPieceTests {
         #expect(try String(contentsOf: home.appendingPathComponent("Library/Application Support/Stub/orders.json"), encoding: .utf8) == "orders")
         #expect(try String(contentsOf: home.appendingPathComponent("Library/Application Support/\(identifier)/state"), encoding: .utf8) == "cache")
         #expect(CFPreferencesCopyAppValue("theme" as CFString, copyIdentifier as CFString) as? String == "dark")
+        // A document app opens a new document, not its Open panel; file dialogs start in the copy's own
+        // Documents; Sparkle doesn't ask viewers about updates.
+        #expect(CFPreferencesCopyAppValue("NSShowAppCentricOpenPanelInsteadOfUntitledFile" as CFString, copyIdentifier as CFString) as? Bool == false)
+        #expect(CFPreferencesCopyAppValue("NSNavLastRootDirectory" as CFString, copyIdentifier as CFString) as? String == home.appendingPathComponent("Documents").path)
+        #expect(FileManager.default.fileExists(atPath: home.appendingPathComponent("Documents").path))
+        #expect(CFPreferencesCopyAppValue("SUEnableAutomaticChecks" as CFString, copyIdentifier as CFString) as? Bool == false)
 
         // The copy writes; the original doesn't change.
         try Data("changed".utf8).write(to: home.appendingPathComponent("Library/Application Support/Stub/orders.json"))
@@ -118,6 +214,7 @@ struct MacAppSessionPieceTests {
         #expect(FileManager.default.fileExists(atPath: empty.appendingPathComponent("Library/Application Support").path))
         #expect((try FileManager.default.contentsOfDirectory(atPath: empty.appendingPathComponent("Library/Application Support").path)).isEmpty)
         #expect(CFPreferencesCopyAppValue("theme" as CFString, copyIdentifier as CFString) == nil)
+        #expect(CFPreferencesCopyAppValue("NSShowAppCentricOpenPanelInsteadOfUntitledFile" as CFString, copyIdentifier as CFString) as? Bool == false)
 
         // Only ever the copy's own domain is removed.
         MacAppSession.removePreferences(identifier, realHome: ElectronSandbox.realHomeDirectory)
@@ -186,6 +283,16 @@ struct MacAppSessionPieceTests {
         #expect(warnings[0].contains("App Group data (ABCDE12345.group.stub)") && warnings[0].contains("Don't Allow"))
         // The original is only read.
         #expect(try String(contentsOf: world.real.appendingPathComponent("Library/Group Containers/ABCDE12345.group.stub/Library/state.json"), encoding: .utf8) == "shared")
+    }
+
+    @Test func withEmptyDataAnAppWithAppGroupsStillGetsTheWarning() throws {
+        let scratch = try Scratch()
+        let world = try DataWorld(scratch)
+        try world.write("Library/Group Containers/ABCDE12345.group.stub/Library/state.json", "shared")
+        let warnings = try world.prepare(data: .empty, entitlements: ["com.apple.security.application-groups": ["ABCDE12345.group.stub"]])
+        #expect(!world.exists("Library/Group Containers"))
+        #expect(warnings.count == 1 && warnings[0].contains("App Groups (ABCDE12345.group.stub)") && warnings[0].contains("even with empty data"))
+        #expect(try world.prepare(fresh: true, data: .empty).isEmpty)
     }
 
     @Test func aFolderMacOSWontLetOpenTrafficReadIsNamedInTheWarning() throws {
@@ -622,7 +729,7 @@ private struct DataWorld {
         if fresh { try? FileManager.default.removeItem(at: home) }
         return try MacAppSession.prepareHome(home, data: data, app: app, copyIdentifier: identifier + ".opentraffic",
                                              realHome: ElectronSandbox.realHomeDirectory, dataHome: real.path,
-                                             sandboxed: sandboxed, entitlements: entitlements)
+                                             sandboxed: sandboxed, entitlements: entitlements, sessionDefaults: false)
     }
 
     func copied(_ path: String) throws -> String { try String(contentsOf: home.appendingPathComponent(path), encoding: .utf8) }

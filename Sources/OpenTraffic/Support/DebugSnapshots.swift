@@ -130,8 +130,10 @@ enum DebugSnapshots {
     // MARK: Mac Apps in the menu bar
 
     /// The popover's Mac Apps section with no app found, then with a running Xcode build and an app
-    /// chosen before (`macapps-empty-*`, `macapps-list-*`, shown briefly in floating panels and captured
-    /// with `screencapture -l`), Choose App…'s refusal alert (`macapps-refusal-*`) and the Share choices
+    /// chosen before (`macapps-empty-*`, `macapps-list-*`), with running installed apps under Installed,
+    /// collapsed and open (`macapps-installed-*`, `macapps-installed-open-*`), all shown briefly in
+    /// floating panels and captured with `screencapture -l`, the card's one-time note on an installed
+    /// app (`macapps-installed-note-*`), Choose App…'s refusal alert (`macapps-refusal-*`) and the Share choices
     /// under its open panel (`macapps-choice-*`). `OPENTRAFFIC_SNAPSHOTS_ONLY=macapps` ends the run there.
     private static func renderMacAppsSection(store: AppStore, folder: URL) async {
         let detected = store.detectedMacApps
@@ -146,13 +148,20 @@ enum DebugSnapshots {
             name: "Orbit Preview", bundle: project.appending(path: "dist/Orbit Preview.app"),
             bundleIdentifier: "com.example.orbit.preview", projectDirectory: project, isRunning: false
         )
+        let textEdit = MacApp(name: "TextEdit", bundle: URL(fileURLWithPath: "/System/Applications/TextEdit.app"), bundleIdentifier: "com.apple.TextEdit",
+                              projectDirectory: nil, isRunning: true, pid: 2, isInstalled: true)
+        let calculator = MacApp(name: "Calculator", bundle: URL(fileURLWithPath: "/System/Applications/Calculator.app"), bundleIdentifier: "com.apple.calculator",
+                                projectDirectory: nil, isRunning: true, pid: 3, isInstalled: true)
+        var showsInstalled = false
         let section = {
-            VStack(alignment: .leading, spacing: Spacing.xxs) { MacAppsSection(store: store) }
+            VStack(alignment: .leading, spacing: Spacing.xxs) { MacAppsSection(store: store, showsInstalled: showsInstalled) }
                 .padding(Spacing.s).frame(width: 360, alignment: .leading)
                 .background(Color(nsColor: .windowBackgroundColor))
         }
         // Offscreen renders leave SwiftUI's text out: the section shows for real, briefly, in a panel.
-        for (state, apps) in [("empty", [MacApp]()), ("list", [orbit, preview])] {
+        for (state, apps) in [("empty", [MacApp]()), ("list", [orbit, preview]), ("installed", [orbit, preview, calculator, textEdit]),
+                              ("installed-open", [orbit, preview, calculator, textEdit])] {
+            showsInstalled = state == "installed-open"
             for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
                 store.detectedMacApps = apps
                 store.rememberedMacAppIDs = [preview.id]
@@ -169,6 +178,16 @@ enum DebugSnapshots {
         }
         store.detectedMacApps = detected
         store.rememberedMacAppIDs = remembered
+        for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+            let note = InlineMessage(severity: .info, message: AppStore.installedMacAppNote(app: "TextEdit", data: .copy), title: "Viewers use a copy of TextEdit") {
+                Button("Got It") {}
+            }
+            .padding(Spacing.l).frame(width: 560, alignment: .leading).background(Color(nsColor: .windowBackgroundColor))
+            let shown = borderlessPanel(note, appearance: appearance)
+            try? await Task.sleep(for: .milliseconds(600))
+            capture(shown, name: "macapps-installed-note-\(name)", folder: folder)
+            shown.orderOut(nil)
+        }
         for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
             let alert = AppStore.macAppRefusalAlert(app: "Slack", reason: "Slack is an Electron app: share it from Electron Apps instead.")
             alert.window.appearance = NSAppearance(named: appearance)

@@ -45,6 +45,8 @@ struct SharedMacApp: Decodable {
     let control: MacAppControl?
     /// Rebuilding it from its sources (newer versions; nil when the share doesn't rebuild it).
     let build: MacAppBuild?
+    /// An installed app or another developer's: never rebuilt (absent from older OpenTraffic).
+    let installed: Bool?
 }
 
 /// Rebuilding a shared Mac app when its sources change.
@@ -89,6 +91,8 @@ struct MacAppEntry: Decodable {
     let sharedAs: String?
     /// "iPhone 17 Simulator" for an app in a booted simulator.
     let device: String?
+    /// An installed app or another developer's that is running (older OpenTraffic: absent).
+    let installed: Bool?
 }
 
 struct Person: Decodable {

@@ -138,7 +138,8 @@ struct MenuBarPopoverView: View {
     private var readyToShareSection: some View {
         let services = store.shareableLocalServices
         let apps = store.shareableElectronApps
-        let macApps = store.shareableMacApps
+        // Installed apps (TextEdit, running anyway) don't take the suggestion from a server you're working on.
+        let macApps = store.shareableMacApps.filter { !$0.isInstalled }
         HStack {
             sectionTitle("Localhost")
             Spacer()
@@ -305,16 +306,27 @@ private struct ShowMoreButton: View {
 
 /// Mac Apps in the menu bar, always there so a host knows where Mac apps are shared from: the apps
 /// being built (running debug builds, recent Xcode builds, and the apps the host chose or shared
-/// before, which can be removed from the list), then Choose App… for any other .app. With none found,
-/// a line on how apps get here.
+/// before, which can be removed from the list), then Installed (collapsed: the installed apps and
+/// other developers' apps that are running, or were shared before), then Choose App… for any other
+/// .app. With none of yours found, a line on how apps get here.
 struct MacAppsSection: View {
     @Bindable var store: AppStore
     /// The first app's Share is the prominent one (no Electron app is listed above).
     var suggestsFirst = true
     @State private var showingAll = false
+    @State private var showingInstalled: Bool
+
+    /// `showsInstalled` opens the Installed group from the start (snapshots).
+    init(store: AppStore, suggestsFirst: Bool = true, showsInstalled: Bool = false) {
+        self.store = store
+        self.suggestsFirst = suggestsFirst
+        _showingInstalled = State(initialValue: showsInstalled)
+    }
 
     var body: some View {
-        let apps = store.shareableMacApps
+        let listed = store.shareableMacApps
+        let apps = listed.filter { !$0.isInstalled }
+        let installed = listed.filter(\.isInstalled)
         let canShare = store.cloudflaredPath != nil
         let canShareWithOpenTunnel = store.openTunnelBlocker == nil
         PopoverSectionTitle(title: "Mac Apps")
@@ -330,7 +342,7 @@ struct MacAppsSection: View {
         if apps.isEmpty {
             Text(store.isScanningLocalServices && store.detectedMacApps.isEmpty
                  ? "Looking for Mac apps you're building…"
-                 : "No Mac apps found. Run your app from Xcode (a recent Debug build shows too), or choose one you built.")
+                 : "No Mac apps of yours found. Run your app from Xcode (a recent Debug build shows too), or choose any app.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -353,7 +365,10 @@ struct MacAppsSection: View {
             }
             ShowMoreButton(total: apps.count, collapsedCount: MenuBarPopoverView.collapsedCount, expanded: $showingAll)
         }
-        // Other groups (installed apps) go here, below the apps being built and above Choose App….
+        if !installed.isEmpty {
+            InstalledMacApps(store: store, apps: installed, expanded: $showingInstalled,
+                             canShare: canShare, canShareWithOpenTunnel: canShareWithOpenTunnel)
+        }
         Group {
             if apps.isEmpty {
                 // The way in when nothing is listed: a real button under the hint.
@@ -367,12 +382,57 @@ struct MacAppsSection: View {
             }
         }
         .disabled(!canShare && !canShareWithOpenTunnel)
-        .help("Share any Mac app you built: choose its .app")
+        .help("Share any Mac app: choose its .app")
     }
 
     private func choose() {
         // After the button's action returns: the open panel takes the menu bar window's place.
         Task { @MainActor in store.chooseMacAppToShare() }
+    }
+}
+
+/// Installed under Mac Apps: a collapsed group of the installed apps and other developers' apps that
+/// are running (or were shared before), so they never crowd out the apps being built.
+private struct InstalledMacApps: View {
+    @Bindable var store: AppStore
+    let apps: [MacApp]
+    @Binding var expanded: Bool
+    let canShare: Bool
+    let canShareWithOpenTunnel: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(.snappy) { expanded.toggle() }
+        } label: {
+            Label {
+                Text("Installed (\(apps.count))")
+            } icon: {
+                Image(systemName: "chevron.right")
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, Spacing.s)
+        .padding(.top, Spacing.xxs)
+        .help(expanded ? "Hide installed apps" : "Show the installed apps that are running: viewers use a copy of one, with a copy of its data")
+        .accessibilityLabel("Installed apps, \(apps.count)")
+        .accessibilityValue(expanded ? "expanded" : "collapsed")
+        if expanded {
+            ForEach(apps) { app in
+                MacAppRow(
+                    app: app,
+                    canShare: canShare,
+                    canShareWithOpenTunnel: canShareWithOpenTunnel,
+                    defaultKind: store.effectiveDefaultShareKind == .opentunnel ? .opentunnel : .quick,
+                    remove: store.rememberedMacAppIDs.contains(app.id) ? { withAnimation(.snappy) { store.forgetMacApp(app) } } : nil
+                ) { kind, data in
+                    withAnimation(.snappy) { store.share(app, kind: kind, data: data) }
+                }
+            }
+        }
     }
 }
 
@@ -661,7 +721,7 @@ private struct MacAppRow: View {
         let home = ElectronSandbox.realHomeDirectory
         var path = (app.projectDirectory ?? app.bundle).path
         if path.hasPrefix("/private/tmp/") { path.removeFirst("/private".count) }
-        let kind = app.simulator?.runtimeName ?? "Mac app"
+        let kind = app.simulator?.runtimeName ?? (app.isInstalled ? "Installed" : "Mac app")
         return kind + " · " + (path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path)
     }
 
@@ -670,7 +730,7 @@ private struct MacAppRow: View {
 
     private var shareHelp: String {
         guard let device = app.simulator else {
-            return "Share \(app.name) with live collaboration and copy the URL. A separate copy runs hidden on this Mac with a copy of its data."
+            return "Share \(app.name) with live collaboration and copy the URL. A separate copy runs hidden on this Mac with a copy of its data\(app.isInstalled ? "; your own \(app.name) and its data stay as they are" : "")."
         }
         guard isShareable else { return "Sharing apps from the Simulator isn't available yet." }
         return "Share \(app.name) from the \(device.label) with live collaboration and copy the URL. It runs in your simulator with its real data; Share with Empty Data uses a separate, empty \(device.name)."

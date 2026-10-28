@@ -20,6 +20,9 @@ public struct APIMacApp: Codable, Equatable, Sendable {
     public let sharedAs: String?
     /// For an app in a booted Simulator, the device ("iPhone 17 Simulator"); nil for a Mac app.
     public let device: String?
+    /// An installed app or another developer's (TextEdit, an App Store app) that is running, not one
+    /// you're building: shared as a copy like yours, never rebuilt.
+    public let installed: Bool
 
     public init(_ app: MacApp, sharedAs: String?) {
         kind = "macapp"
@@ -31,6 +34,7 @@ public struct APIMacApp: Codable, Equatable, Sendable {
         builtAt = app.builtAt
         self.sharedAs = sharedAs
         device = app.simulator?.label
+        installed = app.isInstalled
     }
 }
 
@@ -54,9 +58,11 @@ public struct APIShareMacApp: Codable, Equatable, Sendable {
     /// Rebuilding it when its sources change: whether a build runs or the latest one failed (and why).
     /// Nil when the share doesn't rebuild the app (no project found, a Simulator app, not running).
     public let build: APIMacAppBuild?
+    /// An installed app or another developer's (TextEdit, an App Store app): it is never rebuilt.
+    public let installed: Bool?
 
     public init(path: String, name: String, data: String, state: String? = nil, viewers: Int? = nil, warning: String? = nil, error: String? = nil,
-                control: APIMacAppControl? = nil, build: APIMacAppBuild? = nil) {
+                control: APIMacAppControl? = nil, build: APIMacAppBuild? = nil, installed: Bool? = nil) {
         self.path = path
         self.name = name
         self.data = data
@@ -66,6 +72,7 @@ public struct APIShareMacApp: Codable, Equatable, Sendable {
         self.error = error
         self.control = control
         self.build = build
+        self.installed = installed
     }
 
     /// The API's name for a session state, and the message that comes with it.

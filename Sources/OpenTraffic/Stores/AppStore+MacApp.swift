@@ -116,7 +116,7 @@ extension AppStore {
         panel.treatsFilePackagesAsDirectories = false
         panel.allowedContentTypes = [.applicationBundle]
         panel.prompt = Vocabulary.share
-        panel.message = "Choose a Mac app you built. Viewers use a separate copy of it, with a copy of its data."
+        panel.message = "Choose a Mac app: one you built or an installed one. Viewers use a separate copy of it, with a copy of its data."
         let folder = UserDefaults.standard.string(forKey: Self.chooseMacAppFolderKey).flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil }
         panel.directoryURL = URL(fileURLWithPath: folder ?? "/Applications", isDirectory: true)
         panel.accessoryView = choice
@@ -154,6 +154,30 @@ extension AppStore {
         alert.addButton(withTitle: "Choose Another App…")
         alert.addButton(withTitle: "Cancel")
         return alert
+    }
+
+    // MARK: Installed apps
+
+    static let installedMacAppNoteKey = "hasSeenInstalledMacAppNote"
+
+    /// The note the first share of an installed app (or another developer's) shows on its card, until
+    /// Got It: viewers use a copy of the app with a copy of its data, and the host's own stays as it is.
+    static func installedMacAppNote(app: String, data: MacAppSession.DataSource) -> String {
+        let copy = data == .empty ? "a copy of \(app) that starts with no data" : "a copy of \(app) with a copy of its data"
+        return "Viewers use \(copy), running hidden on this Mac: what they change stays in the copy, and your own \(app) and its data stay as they are. Some apps can't do everything as a copy: iCloud, keychain items and App Groups stay with your own app."
+    }
+
+    /// Got It on the installed-app note: it doesn't show again.
+    func dismissInstalledMacAppNote() {
+        UserDefaults.standard.set(true, forKey: Self.installedMacAppNoteKey)
+        hasSeenInstalledMacAppNote = true
+    }
+
+    /// Whether a share publishes an installed app or another developer's, not one being built.
+    func sharesInstalledMacApp(_ id: UUID) -> Bool {
+        if let session = macAppSessions[id] { return session.options.app.isInstalled }
+        guard let path = definitions.first(where: { $0.id == id })?.macApp else { return false }
+        return detectedMacApps.first { $0.id == path }?.isInstalled ?? false
     }
 
     /// Detected Mac apps that aren't shared right now.
@@ -369,7 +393,7 @@ extension AppStore {
             appendMacAppLog(data == .empty ? "Starting \(app.name) in an empty \(device.name) of OpenTraffic's own."
                                            : "Starting \(app.name) in the \(device.label) with its real data.", for: id)
         } else {
-            appendMacAppLog("Starting an isolated copy of \(app.name) with \(data == .empty ? "empty data" : "a copy of its data").", for: id)
+            appendMacAppLog("Starting an isolated copy of \(app.name) with \(data == .empty ? "empty data" : "a copy of its data")\(app.isInstalled ? "; your own \(app.name) and its data stay as they are" : "").", for: id)
         }
         do {
             let port = try await session.start()
@@ -459,7 +483,7 @@ extension AppStore {
     /// where they were. The project is the one discovery found the app's build in, else the share's
     /// agent folder.
     private func watchMacAppSources(_ session: MacAppSession, app: MacApp, agentDirectory: String?, for id: UUID) {
-        guard app.simulator == nil else { return }
+        guard app.simulator == nil, !app.isInstalled else { return } // an installed app isn't built here
         let folders = [app.projectDirectory, agentDirectory.map { URL(fileURLWithPath: $0, isDirectory: true) }].compactMap { $0 }
         guard let project = folders.first(where: { MacAppBuild.detect(project: $0, bundle: app.bundle) != nil }) else {
             appendMacAppLog("\(app.name) isn't rebuilt when its sources change: OpenTraffic found no Xcode project or Swift package it's built from.", for: id)
